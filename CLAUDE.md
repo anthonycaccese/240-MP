@@ -139,7 +139,6 @@ Loaded at startup by `AppCore` — the single source of truth for a module's ide
   "id": "com.240mp.[YOUR_MODULE_NAME]",
   "name": "[YOUR MODULE NAME]",
   "icon": "assets/images/logo.svg",
-  "version": "1.0",
   "entry_point_qml": "views/Root.qml",
   "settings": [...]
 }

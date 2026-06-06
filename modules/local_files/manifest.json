@@ -2,9 +2,7 @@
   "id": "com.240mp.local_files",
   "name": "Local Files",
   "icon": "assets/images/logo.svg",
-  "version": "1.0",
   "entry_point_qml": "views/Root.qml",
-
   "settings": [
     {
       "key": "enabled",
