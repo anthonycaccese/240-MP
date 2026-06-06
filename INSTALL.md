@@ -11,25 +11,26 @@ The following steps will set up an image for your Raspberry Pi with the latest v
 - Internet Access (either WiFi or network cable will work)
 
 ### Optional
-- A CRT TV and a composite cable - Composite out is my recommended way to use 240-MP but it will also work over HDMI as well so just select the config that works for your setup in step 2 below.  This is the composite cable i use if you do happen to have a CRT: https://www.adafruit.com/product/2881
-- USB remote control - Keyboard input works well but if you want that experience of sitting back and playing video on a VCR then a remote def helps with that.  I use this one: https://www.amazon.com/dp/B01FVUGPE8
+
+- A CRT TV and a composite cable - Composite out is my recommended way to use 240-MP but it will also work over HDMI as well so just select the config that works for your setup in step 2 below.  This is the composite cable I use if you happen to have a CRT: https://www.adafruit.com/product/2881
+- USB remote control - Keyboard input works well but if you want that experience of sitting back and playing video on a VCR then a remote will definitely help with that.  I use this one: https://www.amazon.com/dp/B01FVUGPE8
 
 ### Steps
 
 1) Write RaspberryPi OS Lite (64-bit) to an SD Card
 
-  I reccomend using [Raspberry Pi Imager](https://www.raspberrypi.com/software/), it handles everything from OS selection to preconfiguring networking and user set up in nice simple flow
+    I reccomend using [Raspberry Pi Imager](https://www.raspberrypi.com/software/), it handles everything from OS selection to preconfiguring networking and user set up in nice simple flow
 
-  Here is what you should select for OS if using Raspberry Pi Imager:
+    Here is what you should select for OS if using Raspberry Pi Imager:
 
-  | OS > Raspberry Pi OS (other) | Raspberry Pi OS Lite (64-bit) |
-  | --- | --- |
-  | <img src="https://github.com/user-attachments/assets/bb9f7a47-12b7-4580-abf4-ec8ad22153ba" /> | <img src="https://github.com/user-attachments/assets/30c39fce-99f8-48c9-9ad0-2b39b52690c1" /> |
+    | OS > Raspberry Pi OS (other) | Raspberry Pi OS Lite (64-bit) |
+    | --- | --- |
+    | <img src="https://github.com/user-attachments/assets/bb9f7a47-12b7-4580-abf4-ec8ad22153ba" /> | <img src="https://github.com/user-attachments/assets/30c39fce-99f8-48c9-9ad0-2b39b52690c1" /> |
 
 2) After the write is complete, reconnect the card to your PC and update your boot/config.txt to one of the following:
 
     <details>
-        <summary>For composite out on a CRT TV (NTSC)</summary>
+        <summary>For composite out on a CRT TV (NTSC)...</summary>
         
         # --- Global ---
 
@@ -85,7 +86,7 @@ The following steps will set up an image for your Raspberry Pi with the latest v
     </details>
 
     <details>
-        <summary>For HDMI out</summary>
+        <summary>For HDMI out...</summary>
 
         # --- Global ---
 
@@ -165,21 +166,21 @@ At this point you can type `240mp` to start up the app.  When you quit the app i
 
 ### Uninstall
 
-If you'd like to remove 240-MP and continue to use your SD card for other things you can run the following commands via terminal or over SSH:
+1) If you'd like to remove 240-MP and continue to use your SD card for other things you can run the following commands via terminal or over SSH:
 
-```bash
-sudo rm -rf /opt/240mp
-sudo rm /usr/local/bin/240mp
-```
+    ```bash
+    sudo rm -rf /opt/240mp
+    sudo rm /usr/local/bin/240mp
+    ```
 
-And if you installed the systemd autostart service then be sure to remove it by running the following commands as well:
+2) And if you installed the systemd autostart service then be sure to remove it by running the following commands:
 
-```bash
-sudo systemctl unmask getty@tty1.service autovt@.service
-sudo systemctl disable 240mp.service
-sudo rm /etc/systemd/system/240mp.service
-sudo systemctl daemon-reload
-```
+    ```bash
+    sudo systemctl unmask getty@tty1.service autovt@.service
+    sudo systemctl disable 240mp.service
+    sudo rm /etc/systemd/system/240mp.service
+    sudo systemctl daemon-reload
+    ```
 
 ## On macOS (ARM)
 
