@@ -144,8 +144,8 @@ This directory is created automatically on first run. It is separate from the ap
 Releases are built automatically when you push a version tag:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v2026.06.04
+git push origin v2026.06.04
 ```
 
 And you can use pre-release tags to test CI without making a public release:
