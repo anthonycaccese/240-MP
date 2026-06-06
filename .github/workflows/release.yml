@@ -194,10 +194,10 @@ jobs:
 
             | Platform | File |
             |---|---|
-            | macOS (Apple Silicon) | `240-MP-${{ github.ref_name }}-macOS-arm64.dmg` |
             | Raspberry Pi OS Trixie (arm64) | `240-MP-${{ github.ref_name }}-linux-arm64.tar.gz` |
+            | macOS (Apple Silicon) | `240-MP-${{ github.ref_name }}-macOS-arm64.dmg` |
 
             ### Install Instructions:
 
+            - Raspberry Pi OS Trixie (arm64): [Instructions](INSTALL.md#on-a-raspberry-pi)
             - macOS (Apple Silicon): Download the `.dmg`, open and move 240mp.app to your applications folder
-            - Raspberry Pi OS Trixie (arm64): [Full Instructions](../../blob/main/README.md#install)
