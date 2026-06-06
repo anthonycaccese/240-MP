@@ -6,6 +6,7 @@
 #include <QNetworkReply>
 #include <QSslError>
 #include <QUrlQuery>
+#include <QCoreApplication>
 #include <QSysInfo>
 #include <QUuid>
 #include <QSet>
@@ -109,7 +110,7 @@ QNetworkRequest PlexBackend::plexRequest(const QUrl &url, const QString &token) 
     req.setRawHeader("Accept", "application/json");
     req.setRawHeader("X-Plex-Client-Identifier", clientId().toLatin1());
     req.setRawHeader("X-Plex-Product", "240-MP");
-    req.setRawHeader("X-Plex-Version", "1.0");
+    req.setRawHeader("X-Plex-Version", QCoreApplication::applicationVersion().toLatin1());
     req.setRawHeader("X-Plex-Platform", kPlexPlatform.toLatin1());
     req.setRawHeader("X-Plex-Device", "240-MP");
     req.setRawHeader("X-Plex-Device-Name", QSysInfo::machineHostName().toLatin1());

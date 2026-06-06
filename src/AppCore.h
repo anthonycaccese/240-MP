@@ -4,6 +4,7 @@
 #include <QVariantList>
 #include <QJsonObject>
 #include <QMap>
+#include <QCoreApplication>
 
 struct ModuleEntry {
     QString id;
@@ -16,8 +17,11 @@ struct ModuleEntry {
 
 class AppCore : public QObject {
     Q_OBJECT
+    Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
 public:
     explicit AppCore(const QString &appRoot, const QString &dataRoot, QObject *parent = nullptr);
+
+    QString appVersion() const { return QCoreApplication::applicationVersion(); }
 
     Q_INVOKABLE void scan_for_modules();
     Q_INVOKABLE QVariant get_settings();
