@@ -8,7 +8,10 @@ FocusScope {
 
     property var navParams: ({})
 
-    property var _moduleInfo: appCore.get_module_info("com.240mp.plex")
+    // The module's manifest id — the single place it appears in this module's QML.
+    // Child views reference it via moduleRoot.moduleId.
+    property string moduleId: "com.240mp.plex"
+    property var _moduleInfo: appCore.get_module_info(moduleId)
     property string moduleName: _moduleInfo.name || ""
     property string moduleIcon: _moduleInfo.icon || ""
 
@@ -77,9 +80,7 @@ FocusScope {
         plexBackend.reset_device_check()
         var state = plexBackend.get_auth_state()
         if (state === "authed") {
-            var cfg = appCore.get_settings()
-            var plexCfg = (cfg.modules && cfg.modules["com.240mp.plex"]) || {}
-            var autoSignIn = plexCfg.auto_sign_in
+            var autoSignIn = appCore.get_setting(moduleId, "auto_sign_in")
             if (autoSignIn !== true && autoSignIn !== "ON") {
                 plexBackend.load_users_from_cache()
                 navigateTo("UserSelect.qml", { reauth: true })

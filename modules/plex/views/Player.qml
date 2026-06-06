@@ -246,9 +246,7 @@ FocusScope {
     Component.onCompleted: {
         initStreamIndices()
         if (streamUrl === "") return
-        var settings = appCore.get_settings()
-        var m = settings.modules && settings.modules["com.240mp.plex"]
-        resumeSetting = m ? (m.resume_playback || "ask") : "ask"
+        resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
 
         // Plex HLS transcode segments start at time 0 regardless of viewOffset.
         // Track the offset so every reported position is absolute in the video.

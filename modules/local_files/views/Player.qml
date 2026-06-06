@@ -127,10 +127,8 @@ FocusScope {
 
     Component.onCompleted: {
         if (filePath === "") return
-        var settings = appCore.get_settings()
-        var m = settings.modules && settings.modules["com.240mp.local_files"]
-        loopOn        = m ? !!m.loop_playback    : false
-        resumeSetting = m ? (m.resume_playback || "ask") : "ask"
+        loopOn        = !!appCore.get_setting(moduleRoot.moduleId, "loop_playback")
+        resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
 
         if (resumeSetting === "no") {
             mpvController.loadAndPlay(filePath, 0.0, 0, -1, [], loopOn, -1)

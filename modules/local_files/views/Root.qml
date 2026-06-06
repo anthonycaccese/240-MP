@@ -8,7 +8,10 @@ FocusScope {
 
     property var navParams: ({})
 
-    property var _moduleInfo: appCore.get_module_info("com.240mp.local_files")
+    // The module's manifest id — the single place it appears in this module's QML.
+    // Child views reference it via moduleRoot.moduleId.
+    property string moduleId: "com.240mp.local_files"
+    property var _moduleInfo: appCore.get_module_info(moduleId)
     property string moduleName: _moduleInfo.name || ""
     property string moduleIcon: _moduleInfo.icon || ""
 
