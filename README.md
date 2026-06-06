@@ -44,8 +44,8 @@ It's built to work in conjuction with MPV which will be installed (or updated) a
 
 ## Install 
 
-- [On a Raspberry Pi](INSTALL.md)
-- [On macOS (ARM)](INSTALL.md)
+- [On a Raspberry Pi](INSTALL.md#on-a-raspberry-pi)
+- [On macOS (ARM)](INSTALL.md#on-macos-arm)
 
 ## FAQs
 
