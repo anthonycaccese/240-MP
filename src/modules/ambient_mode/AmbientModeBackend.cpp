@@ -1,5 +1,8 @@
 #include "AmbientModeBackend.h"
 #include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStandardPaths>
 #include <QDebug>
 
@@ -13,6 +16,15 @@ static const QStringList kAudioExts = {
 AmbientModeBackend::AmbientModeBackend(const QString &dataRoot, QObject *parent)
     : QObject(parent), m_dataRoot(dataRoot), m_mediaRoot(dataRoot + "/ambient")
 {
+    // Resolve the configured media directory (falls back to the dataRoot/ambient default).
+    QFile f(m_dataRoot + "/config.json");
+    if (f.open(QIODevice::ReadOnly)) {
+        QJsonObject cfg = QJsonDocument::fromJson(f.readAll()).object();
+        QString dir = cfg["modules"].toObject()["com.240mp.ambient_mode"].toObject()
+                          ["media_directory"].toString();
+        if (!dir.isEmpty())
+            setMediaRoot(dir);
+    }
 }
 
 AmbientModeBackend::~AmbientModeBackend()

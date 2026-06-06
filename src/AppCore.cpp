@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QDebug>
 #include <QRegularExpression>
+#include <QQmlContext>
 
 AppCore::AppCore(const QString &appRoot, const QString &dataRoot, QObject *parent)
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot)
@@ -199,8 +200,60 @@ void AppCore::invoke_module_action(const QString &moduleId, const QString &slotN
                  qPrintable(slotName), qPrintable(moduleId));
 }
 
-void AppCore::registerBackend(const QString &moduleId, QObject *backend) {
+void AppCore::registerModule(const QString &moduleId, const QString &contextProperty,
+                             QObject *backend, QQmlContext *ctx) {
     m_backends[moduleId] = backend;
+    if (ctx)
+        ctx->setContextProperty(contextProperty, backend);
+    if (!backend) return;
+
+    const QMetaObject *bmo = backend->metaObject();
+    const QMetaObject *amo = this->metaObject();
+
+    // dynamicOptionsReady(key, options) -> onBackendDynamicOptions (re-emit with moduleId)
+    int sig = bmo->indexOfSignal(
+        QMetaObject::normalizedSignature("dynamicOptionsReady(QString,QVariant)"));
+    if (sig >= 0) {
+        int slot = amo->indexOfSlot(
+            QMetaObject::normalizedSignature("onBackendDynamicOptions(QString,QVariant)"));
+        QMetaObject::connect(backend, sig, this, slot);
+    }
+
+    // authStateChanged() -> onBackendAuthStateChanged (re-emit with moduleId)
+    sig = bmo->indexOfSignal(QMetaObject::normalizedSignature("authStateChanged()"));
+    if (sig >= 0) {
+        int slot = amo->indexOfSlot(
+            QMetaObject::normalizedSignature("onBackendAuthStateChanged()"));
+        QMetaObject::connect(backend, sig, this, slot);
+    }
+
+    // moduleSettingChanged(moduleId, key, value) -> backend.onSettingChanged(...)
+    int slot = bmo->indexOfSlot(
+        QMetaObject::normalizedSignature("onSettingChanged(QString,QString,QVariant)"));
+    if (slot >= 0) {
+        int s = amo->indexOfSignal(
+            QMetaObject::normalizedSignature("moduleSettingChanged(QString,QString,QVariant)"));
+        QMetaObject::connect(this, s, backend, slot);
+    }
+}
+
+QString AppCore::moduleIdForBackend(QObject *backend) const {
+    for (auto it = m_backends.constBegin(); it != m_backends.constEnd(); ++it) {
+        if (it.value() == backend) return it.key();
+    }
+    return QString{};
+}
+
+void AppCore::onBackendDynamicOptions(const QString &key, const QVariant &options) {
+    QString moduleId = moduleIdForBackend(sender());
+    if (!moduleId.isEmpty())
+        emit dynamicOptionsReady(moduleId, key, options);
+}
+
+void AppCore::onBackendAuthStateChanged() {
+    QString moduleId = moduleIdForBackend(sender());
+    if (!moduleId.isEmpty())
+        emit moduleAuthStateChanged(moduleId);
 }
 
 QString AppCore::get_module_auth_state(const QString &moduleId) {

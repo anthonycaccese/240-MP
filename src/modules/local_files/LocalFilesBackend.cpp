@@ -12,6 +12,15 @@ static const QStringList kMediaExts = {
 LocalFilesBackend::LocalFilesBackend(const QString &appRoot, const QString &dataRoot, QObject *parent)
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot), m_mediaRoot(dataRoot + "/media")
 {
+    // Resolve the configured media directory (falls back to the dataRoot/media default).
+    QFile f(m_dataRoot + "/config.json");
+    if (f.open(QIODevice::ReadOnly)) {
+        QJsonObject cfg = QJsonDocument::fromJson(f.readAll()).object();
+        QString dir = cfg["modules"].toObject()["com.240mp.local_files"].toObject()
+                          ["media_directory"].toString();
+        if (!dir.isEmpty())
+            setMediaRoot(dir);
+    }
 }
 
 QString LocalFilesBackend::historyFilePath() const {

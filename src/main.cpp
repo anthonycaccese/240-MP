@@ -79,53 +79,16 @@ int main(int argc, char *argv[]) {
     AmbientModeBackend  ambientMode(dataRoot);
     MpvController       mpvController(appRoot);
 
-    {
-        QVariant configured = appCore.get_setting("com.240mp.local_files", "media_directory");
-        QString mediaDir = configured.toString();
-        if (mediaDir.isEmpty())
-            mediaDir = dataRoot + "/media";
-        localFiles.setMediaRoot(mediaDir);
-    }
+    // Each module backend is wired in one call: stored for action routing, exposed to QML
+    // under its context-property name, and its optional signals/slots connected by
+    // introspection. The module ID lives in exactly one place per module.
+    QQmlContext *ctx = engine.rootContext();
+    appCore.registerModule("com.240mp.local_files",  "localFilesBackend",  &localFiles,  ctx);
+    appCore.registerModule("com.240mp.plex",         "plexBackend",        &plexBackend, ctx);
+    appCore.registerModule("com.240mp.ambient_mode", "ambientModeBackend", &ambientMode, ctx);
 
-    QObject::connect(&appCore, &AppCore::moduleSettingChanged,
-                     &localFiles, &LocalFilesBackend::onSettingChanged);
-
-    QObject::connect(&localFiles, &LocalFilesBackend::dynamicOptionsReady,
-                     &appCore,
-                     [&appCore](const QString &key, const QVariant &options) {
-                         emit appCore.dynamicOptionsReady("com.240mp.local_files", key, options);
-                     });
-
-    {
-        QVariant configured = appCore.get_setting("com.240mp.ambient_mode", "media_directory");
-        QString ambientDir = configured.toString();
-        if (ambientDir.isEmpty())
-            ambientDir = dataRoot + "/ambient";
-        ambientMode.setMediaRoot(ambientDir);
-    }
-
-    QObject::connect(&appCore, &AppCore::moduleSettingChanged,
-                     &ambientMode, &AmbientModeBackend::onSettingChanged);
-
-    appCore.registerBackend("com.240mp.local_files", &localFiles);
-    appCore.registerBackend("com.240mp.plex", &plexBackend);
-
-    QObject::connect(&plexBackend, &PlexBackend::dynamicOptionsReady,
-                     &appCore,
-                     [&appCore](const QString &key, const QVariant &options) {
-                         emit appCore.dynamicOptionsReady("com.240mp.plex", key, options);
-                     });
-    QObject::connect(&plexBackend, &PlexBackend::authStateChanged,
-                     &appCore,
-                     [&appCore]() {
-                         emit appCore.moduleAuthStateChanged("com.240mp.plex");
-                     });
-
-    engine.rootContext()->setContextProperty("appCore",             &appCore);
-    engine.rootContext()->setContextProperty("localFilesBackend",  &localFiles);
-    engine.rootContext()->setContextProperty("plexBackend",        &plexBackend);
-    engine.rootContext()->setContextProperty("ambientModeBackend", &ambientMode);
-    engine.rootContext()->setContextProperty("mpvController",      &mpvController);
+    ctx->setContextProperty("appCore",       &appCore);
+    ctx->setContextProperty("mpvController", &mpvController);
 #ifdef Q_OS_MAC
     engine.rootContext()->setContextProperty("macScreenX",      0);
     engine.rootContext()->setContextProperty("macScreenY",      0);

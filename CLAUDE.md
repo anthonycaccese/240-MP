@@ -73,22 +73,33 @@ Add `src/modules/[YOUR_MODULE_NAME]/[YOUR_MODULE_NAME].h/.cpp` — a `QObject` s
 
 ### 3. Wire into main.cpp
 
-```cpp
-YourBackend yourBackend(appRoot);
-appCore.registerBackend("com.240mp.[YOUR_MODULE_NAME]", &yourBackend);
-engine.rootContext()->setContextProperty("yourBackend", &yourBackend);
+Construct the backend, then register it with one `registerModule` call:
 
-// If the backend emits dynamicOptionsReady, forward it to AppCore:
-QObject::connect(&yourBackend, &YourBackend::dynamicOptionsReady, &appCore, [&appCore](const QString &key, const QVariant &opts) {
-    emit appCore.dynamicOptionsReady("com.240mp.[YOUR_MODULE_NAME]", key, opts);
-});
+```cpp
+YourBackend yourBackend(appRoot, dataRoot);   // construct (with whatever args your ctor needs)
+
+appCore.registerModule("com.240mp.[YOUR_MODULE_NAME]", "yourBackend", &yourBackend, ctx);
 ```
+
+`registerModule(moduleId, contextProperty, backend, ctx)` does everything: stores the
+backend for `invoke_module_action` routing, exposes it to QML under `contextProperty`, and
+connects the backend's optional signals/slots **by introspection** — each is wired only if
+the backend actually declares it, so there are no per-capability lambdas:
+
+| Backend member (if declared) | Auto-connected to |
+|---|---|
+| signal `dynamicOptionsReady(QString, QVariant)` | re-emitted as `appCore.dynamicOptionsReady(moduleId, key, options)` |
+| signal `authStateChanged()` | re-emitted as `appCore.moduleAuthStateChanged(moduleId)` |
+| slot `onSettingChanged(QString, QString, QVariant)` | `appCore.moduleSettingChanged(moduleId, key, value)` |
+
+The module ID lives in exactly one place per module (this call). A module with **no**
+backend skips steps 2–3 entirely — AppCore discovers it from its manifest at startup.
 
 ---
 
 ## AppCore — App Shell
 
-**Global context properties** (available in all QML): `appCore`, `localFilesBackend`, `plexBackend`, `mpvController`.
+**Global context properties** (available in all QML): `appCore`, `mpvController`, plus one per module backend (`localFilesBackend`, `plexBackend`, `ambientModeBackend`, …). The backend names are assigned by the `registerModule` call in `main.cpp`.
 
 Context property name: **`appCore`**.
 
@@ -103,7 +114,9 @@ Context property name: **`appCore`**.
 | `get_module_settings_schema(moduleId)` | Returns the module's settings array |
 | `invoke_module_action(moduleId, slotName)` | Routes to the registered backend via `QMetaObject::invokeMethod` |
 
-**Signals:** `modulesLoaded`, `appSettingChanged`, `dynamicOptionsReady(moduleId, key, options)`.
+**Signals:** `modulesLoaded`, `appSettingChanged`, `moduleSettingChanged(moduleId, key, value)`, `dynamicOptionsReady(moduleId, key, options)`, `moduleAuthStateChanged(moduleId)`.
+
+**Module registration:** backends are wired in via `registerModule(moduleId, contextProperty, backend, ctx)` (called from `main.cpp`). It stores the backend for `invoke_module_action` routing and connects the backend's optional `dynamicOptionsReady` / `authStateChanged` / `onSettingChanged` members by introspection. See **Adding a New Module → 3. Wire into main.cpp**.
 
 Config is stored at `{APP_ROOT}/config.json`:
 ```json
@@ -119,14 +132,18 @@ Config is stored at `{APP_ROOT}/config.json`:
 
 ## C++ Backend
 
-Backends are `QObject` subclasses registered as QML context properties before the engine loads.
+Backends are `QObject` subclasses registered via `appCore.registerModule(...)` before the engine loads.
 
 **Patterns to follow** (see `PlexBackend` as a reference implementation):
 - All HTTP via `QNetworkAccessManager` — async, main thread, no worker threads needed
 - Results returned to QML via signals
 - Auth/state persisted to JSON files in `APP_ROOT`
 - `Q_INVOKABLE` for slots called from QML; `signals:` for callbacks to QML
-- For dynamic settings dropdowns, emit `dynamicOptionsReady(key, [{id, label}])` — AppCore forwards it with the moduleId prepended
+- For dynamic settings dropdowns, emit `dynamicOptionsReady(key, [{id, label}])` — `registerModule` auto-connects it and AppCore re-emits with the moduleId prepended
+- For auth-gated modules, emit `authStateChanged()` on sign-in/out — auto-connected and re-emitted as `moduleAuthStateChanged(moduleId)`
+- To react to your own settings changing, add a slot `onSettingChanged(moduleId, key, value)` — auto-connected to `moduleSettingChanged`
+- Signal/slot names above are matched by exact signature; declare them as listed and `registerModule` wires them with no changes to `main.cpp`
+- A backend resolves its own configured paths in its constructor — e.g. `LocalFilesBackend`/`AmbientModeBackend` read `media_directory` from `config.json` (defaulting to `dataRoot/media` / `dataRoot/ambient`). `main.cpp` does not touch module paths.
 
 ---
 
