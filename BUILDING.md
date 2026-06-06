@@ -6,18 +6,18 @@ If you are interested in building your own version of 240-MP and adding things t
 
 ### Prerequisites (one-time)
 
-**Build tools:**
+**Set up Build tools:**
 
 ```bash
 brew install cmake
 ```
 
-**Qt 6.*:**
+**Install Qt 6.*:**
 
-Download from [qt.io/download](https://qt.io/download) or `brew install qt@6`.
-Install to `~/Qt/`
+- Download from [qt.io/download](https://qt.io/download) or `brew install qt@6`.
+- Install to `~/Qt/`
 
-**mpv (runtime — required for playback):**
+**Install mpv (required for playback):**
 
 ```bash
 brew install mpv
@@ -75,13 +75,13 @@ Run on the Pi with RPi OS Trixie (Debian 13):
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-    build-essential cmake \
-    qt6-base-dev qt6-declarative-dev \
-    qml6-module-qtquick qml6-module-qtquick-controls \
-    qml6-module-qtquick-window \
-    libqt6svg6 qt6-svg-dev qt6-svg-plugins qt6-wayland \
-    libdrm-dev libxkbcommon-dev libssl-dev \
-    mpv
+  build-essential cmake \
+  qt6-base-dev qt6-declarative-dev \
+  qml6-module-qtquick qml6-module-qtquick-controls \
+  qml6-module-qtquick-window \
+  libqt6svg6 qt6-svg-dev qt6-svg-plugins qt6-wayland \
+  libdrm-dev libxkbcommon-dev libssl-dev \
+  mpv
 ```
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
