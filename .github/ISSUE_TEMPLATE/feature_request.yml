@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest a concrete, scoped idea or improvement
+title: "[Idea]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended "what if…" brainstorming, [Discussions](https://github.com/anthonycaccese/240-MP/discussions) may be a better fit. Use this form for a concrete, scoped idea.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Local Files module
+        - Plex module
+        - Ambient Mode module
+        - A new module
+        - App shell / general
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like to see?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this useful?
+      description: What's the use case or problem it solves?
+    validations:
+      required: true
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Alignment with the project's approach
+      description: 240-MP is a browsing shell that hands off to purpose-built tools, navigable with a simple remote. See [CONTRIBUTING.md](https://github.com/anthonycaccese/240-MP/blob/main/CONTRIBUTING.md).
+      options:
+        - label: This fits the "browse & hand-off" approach and works with remote-only navigation (up/down/left/right, enter, esc/back).
+          required: true

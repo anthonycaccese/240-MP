@@ -1,0 +1,96 @@
+name: Bug report
+description: Report something broken in 240-MP
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Most issues here are environment-specific, so the more detail on your hardware and setup, the faster it can be sorted out.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you file
+      options:
+        - label: I checked the [Wiki](https://github.com/anthonycaccese/240-MP/wiki) and existing [issues](https://github.com/anthonycaccese/240-MP/issues) and didn't find this.
+          required: true
+  - type: dropdown
+    id: module
+    attributes:
+      label: Area / module
+      description: Which part of 240-MP does this affect?
+      options:
+        - Local Files module
+        - Plex module
+        - Ambient Mode module
+        - App shell (browsing, settings, navigation)
+        - Build (compiling from source)
+        - Install (install.sh / DMG / setup)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Raspberry Pi 4
+        - Raspberry Pi 3B+
+        - Raspberry Pi 3B
+        - Other Raspberry Pi model
+        - macOS (Apple Silicon)
+    validations:
+      required: true
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display & output
+      description: Overscan and config.txt differences are common culprits, so this helps a lot.
+      options:
+        - CRT via composite (NTSC)
+        - CRT via composite (PAL)
+        - HDMI (TV / monitor)
+        - Mac display
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - Release install.sh (Raspberry Pi)
+        - Built from source
+        - macOS DMG
+    validations:
+      required: true
+  - type: input
+    id: mpv_version
+    attributes:
+      label: mpv version
+      description: First line of `mpv --version`. Playback issues often trace back to this.
+      placeholder: "mpv 0.xx.0"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, step by step?
+      placeholder: |
+        1. Open the Plex module
+        2. Select a movie
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual
+      description: What did you expect to happen, and what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / terminal output
+      description: Any output from running the app. This is rendered as code, so no backticks needed.
+      render: shell

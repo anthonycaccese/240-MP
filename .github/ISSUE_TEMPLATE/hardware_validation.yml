@@ -1,0 +1,62 @@
+name: Hardware validation report
+description: Report whether 240-MP works (or doesn't) on your specific hardware and display setup
+title: "[Hardware]: "
+labels: ["hardware-validation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Validation reports across different Pi models and CRT/HDMI outputs are one of the most useful contributions to this project. Thank you for sharing yours!
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Raspberry Pi 4
+        - Raspberry Pi 3B+
+        - Raspberry Pi 3B
+        - Other Raspberry Pi model
+        - macOS (Apple Silicon)
+    validations:
+      required: true
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display & output
+      options:
+        - CRT via composite (NTSC)
+        - CRT via composite (PAL)
+        - HDMI (TV / monitor)
+        - Mac display
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: OS version
+      description: e.g. Raspberry Pi OS Lite (Trixie / Debian 13), or your macOS version
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Overall result
+      options:
+        - Works great
+        - Works with issues
+        - Doesn't work
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What worked / what didn't
+      description: Playback, navigation, overscan & layout, audio, autostart, etc. Note anything you had to tweak (e.g. config.txt changes).
+    validations:
+      required: true
+  - type: textarea
+    id: photos
+    attributes:
+      label: Photos of the setup (optional)
+      description: Drag & drop photos of your setup or screen here — always fun to see 240-MP running in the wild.
