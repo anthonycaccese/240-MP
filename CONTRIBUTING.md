@@ -52,27 +52,6 @@ A pure-QML module needs **no C++ changes** — the shell discovers it from its m
 - **Reuse shared `Components`** (e.g. `AppBar`) instead of re-implementing them.
 - **Keep it self-contained** — module source stays under `modules/[name]` and `src/modules/[name]`.
 
-### Best-practices checklist
-
-Before opening a PR, check your change against these:
-
-- [ ] **Remote-only navigation** works end to end — up/down/left/right, enter, and esc/backspace. No mouse or complex input required.
-- [ ] **Sized with `root.sh` / `root.sw`**, not hardcoded pixels, and laid out with CRT overscan in mind.
-- [ ] **Avoid hardcoded values** where a parameter or existing variable would do — parameterize as much as possible.
-- [ ] **No tracking or analytics.** The only network calls are direct to a third-party API the module integrates with.
-- [ ] **Only writes to the local data directory** (`config.json` and module state files) — nothing outside it.
-- [ ] **Browse & hand-off** — heavy lifting (like playback) is handed to a purpose-built tool, not bundled in.
-
-### Testing your change
-
-There is no automated test suite — testing is manual:
-
-- **Build and run** on at least one target (macOS ARM or Raspberry Pi). See [BUILDING.md](BUILDING.md#run).
-- **Navigate with a remote/keyboard only** and confirm every screen in your change is reachable and exitable.
-- **Check the layout** reads correctly on a CRT (mind overscan) and, ideally, over HDMI/LCD too.
-- **Confirm settings persist** across an app restart, and that existing settings still load.
-- If you can only test on one platform, please indicate that in your PR.
-
 ### Use a Consistent Coding Style
 
 - Please follow the same style as the source you are editing.
@@ -81,11 +60,32 @@ There is no automated test suite — testing is manual:
 - **C++**: backends are `QObject` subclasses — use `Q_INVOKABLE` for slots QML calls and `signals:` for callbacks to QML, and persist state as JSON in the data directory (see [C++ Backend Patterns](ARCHITECTURE.md#c-backend-patterns)).
 - **QML**: views are `FocusScope`s that declare `navParams` and communicate via the `navigateTo` / `goBack` signals — never call router functions directly (see [QML View Patterns](ARCHITECTURE.md#qml-view-patterns)).
 
+### Testing your change
+
+Sorry I've not made time yet to work on automated tests so for now testing is manual:
+
+- **Build and run** on at least one target (macOS ARM or Raspberry Pi). See [BUILDING.md](BUILDING.md#run).
+- **Navigate with a remote/keyboard only** and confirm every screen in your change is reachable and exitable.
+- **Check the layout** reads correctly on a CRT (mind overscan) and, ideally, over HDMI/LCD too.
+- **Confirm settings persist** across an app restart, and that existing settings still load.
+- If you can only test on one platform, please indicate that in your PR.
+
 ### Note on AI Use
 
-- I use Claude Code when adding to 240-MP so using AI tools for development is very much allowed. With that in mind, contributors are expected to own and understand the code they submit and any communication in a PR (including code, code comments, and GitHub comments) must come from a human contributor, not an AI agent acting autonomously.
+- I used (and will continue to use) AI tools when building 240-MP so leveraging AI tools for development is very much allowed. With that in mind, contributors are expected to own and understand the code they submit and any communication in a PR (including code, code comments, and GitHub comments) must come from a human contributor, not an AI agent acting autonomously.
 - Pull requests should include a detailed description that outlines the scope of AI involvement (e.g. which parts were AI-generated and what human testing or review was performed prior to submission). PRs that omit this disclosure may be closed without review.
+
+### Best-practices checklist
+
+Before opening a PR, please check your change against these:
+
+- [ ] **Remote-only navigation** works end to end — up/down/left/right, enter, and esc/backspace. No mouse or complex input required.
+- [ ] **Sized and positioned elements with `root.sh` / `root.sw`**, no hardcoded pixel sizes, and laid out with CRT overscan in mind.
+- [ ] **Avoided hardcoded values** where a parameter or existing variable would do — parameterize as much as possible.
+- [ ] **No tracking or analytics.** The only network calls are direct to a third-party API the module integrates with.
+- [ ] **Only writes to the local data directory** (`config.json` and module state files) — nothing outside it.
+- [ ] **Browse & hand-off** — heavy lifting (like playback) is handed to a purpose-built tool, not bundled in.
 
 ## License
 
-By contributing, you agree your contributions are licensed under GPL (see [LICENSE](LICENSE)).
+By contributing, you agree your contributions are licensed under GPL (please see [LICENSE](LICENSE)).
