@@ -50,7 +50,6 @@ body:
         - CRT via composite (NTSC)
         - CRT via composite (PAL)
         - HDMI (TV / monitor)
-        - Mac display
         - Other
     validations:
       required: true
@@ -60,8 +59,8 @@ body:
       label: Install method
       options:
         - Release install.sh (Raspberry Pi)
-        - Built from source
         - macOS DMG
+        - Built from source
     validations:
       required: true
   - type: input

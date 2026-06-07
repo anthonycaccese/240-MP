@@ -15,7 +15,7 @@ The most useful community contributions are often not code, items like the follo
 
 1. **Set up an environment** — follow [BUILDING.md](BUILDING.md) to build and run on macOS (ARM) or Raspberry Pi OS.
 2. **Understand the codebase** — read [ARCHITECTURE.md](ARCHITECTURE.md). It's the technical reference for how the shell, modules, and views fit together.
-3. **Discuss first if it's big** — for anything beyond a small fix, a quick post in [Discussions > Q&A](https://github.com/anthonycaccese/240-MP/discussions/categories/q-a) helps make sure it fits the project's direction before you invest time.
+3. **Discuss first if it's big** — for anything beyond a small fix, a quick post in [Discussions > Q&A](https://github.com/anthonycaccese/240-MP/discussions/categories/q-a) can help make sure it fits the project's direction before you invest time.
 4. **Branch and open a PR** — fork, work on a branch, and open a pull request against `main` with a clear description (see the [AI use](#note-on-ai-use) note below for what to disclose).
 
 ## Submitting code
@@ -58,7 +58,7 @@ Before opening a PR, check your change against these:
 
 - [ ] **Remote-only navigation** works end to end — up/down/left/right, enter, and esc/backspace. No mouse or complex input required.
 - [ ] **Sized with `root.sh` / `root.sw`**, not hardcoded pixels, and laid out with CRT overscan in mind.
-- [ ] **No hardcoded values** where a parameter or existing variable would do — parameterize as much as possible.
+- [ ] **Avoid hardcoded values** where a parameter or existing variable would do — parameterize as much as possible.
 - [ ] **No tracking or analytics.** The only network calls are direct to a third-party API the module integrates with.
 - [ ] **Only writes to the local data directory** (`config.json` and module state files) — nothing outside it.
 - [ ] **Browse & hand-off** — heavy lifting (like playback) is handed to a purpose-built tool, not bundled in.
@@ -71,12 +71,7 @@ There is no automated test suite — testing is manual:
 - **Navigate with a remote/keyboard only** and confirm every screen in your change is reachable and exitable.
 - **Check the layout** reads correctly on a CRT (mind overscan) and, ideally, over HDMI/LCD too.
 - **Confirm settings persist** across an app restart, and that existing settings still load.
-- If you can only test on one platform, say so in the PR — hardware validation on the others is a welcome [non-code contribution](#non-code-contributions) from someone else.
-
-### Note on AI Use
-
-- I used Claude Code as part of my work building 240-MP so the use of AI tools for development is very much allowed. With that in mind, contributors are expected to own and understand the code they submit and any communication in a PR (including code, code comments, and GitHub comments) must come from a human contributor, not an AI agent acting autonomously.
-- Pull requests should include a detailed description that outlines the scope of AI involvement (e.g. which parts were AI-generated and what human testing or review was performed prior to submission). PRs that omit this disclosure may be closed without review.
+- If you can only test on one platform, please indicate that in your PR.
 
 ### Use a Consistent Coding Style
 
@@ -85,6 +80,11 @@ There is no automated test suite — testing is manual:
 - Parameterize as much as possible, try to avoid hard coded values whenever you can.
 - **C++**: backends are `QObject` subclasses — use `Q_INVOKABLE` for slots QML calls and `signals:` for callbacks to QML, and persist state as JSON in the data directory (see [C++ Backend Patterns](ARCHITECTURE.md#c-backend-patterns)).
 - **QML**: views are `FocusScope`s that declare `navParams` and communicate via the `navigateTo` / `goBack` signals — never call router functions directly (see [QML View Patterns](ARCHITECTURE.md#qml-view-patterns)).
+
+### Note on AI Use
+
+- I use Claude Code when adding to 240-MP so using AI tools for development is very much allowed. With that in mind, contributors are expected to own and understand the code they submit and any communication in a PR (including code, code comments, and GitHub comments) must come from a human contributor, not an AI agent acting autonomously.
+- Pull requests should include a detailed description that outlines the scope of AI involvement (e.g. which parts were AI-generated and what human testing or review was performed prior to submission). PRs that omit this disclosure may be closed without review.
 
 ## License
 

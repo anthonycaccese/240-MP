@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For open-ended "what if…" brainstorming, [Discussions](https://github.com/anthonycaccese/240-MP/discussions) may be a better fit. Use this form for a concrete, scoped idea.
+        For open-ended "what if…" brainstorming, [Discussions](https://github.com/anthonycaccese/240-MP/discussions/categories/ideas) may be a better fit. Please only use this form for a concrete, scoped idea.
   - type: dropdown
     id: area
     attributes:

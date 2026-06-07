@@ -27,7 +27,6 @@ body:
         - CRT via composite (NTSC)
         - CRT via composite (PAL)
         - HDMI (TV / monitor)
-        - Mac display
         - Other
     validations:
       required: true

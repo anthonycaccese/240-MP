@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/anthonycaccese/240-MP/discussions/categories/q-a
     about: For setup help and open-ended questions, please use Discussions > Q&A instead of opening an issue.
   - name: Share an idea or discuss
-    url: https://github.com/anthonycaccese/240-MP/discussions
-    about: For brainstorming and open-ended ideas, start a Discussion.
+    url: https://github.com/anthonycaccese/240-MP/discussions/categories/ideas
+    about: For brainstorming and open-ended ideas, please start a Discussion in Ideas.

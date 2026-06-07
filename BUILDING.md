@@ -137,6 +137,55 @@ On Raspberry Pi OS all user configuration is stored at:
 
 This directory is created automatically on first run. It is separate from the app itself, so deleting or rebuilding the app will not wipe your settings.
 
+## Debugging & logs
+
+240-MP logs to **stdout/stderr** via Qt's `qDebug` / `qWarning` (used throughout `AppCore`, `MpvController`, and the module backends). The trick is knowing where that output goes depending on how you launched the app.
+
+### Option 1: Running from source
+
+Just run the binary in a terminal and the logs will print right there:
+
+```bash
+# macOS
+APP_ROOT=$(pwd) ./build/240mp.app/Contents/MacOS/240mp
+
+# Raspberry Pi
+APP_ROOT=$(pwd) ./build/240mp                         # with a desktop
+APP_ROOT=$(pwd) QT_QPA_PLATFORM=eglfs ./build/240mp   # headless / Lite
+```
+
+### Option 2: Raspberry Pi installed via `install.sh`
+
+How you read logs depends on whether you installed the autostart service:
+
+- **Run it by hand** — type `240mp` over SSH and logs print to that terminal. Use this while debugging. (Note: the launcher does **not** power off on exit, unlike the service.)
+- **Via the systemd service** — the service sends output to the journal, so:
+    ```bash
+    journalctl -u 240mp -b        # logs from this boot
+    journalctl -u 240mp -f        # follow live
+    ```
+    Heads-up: the autostart service runs `ExecStopPost=systemctl poweroff`, so **quitting the app powers the Pi off** — the console disappears with it. To debug, stop the service and run the binary directly instead:
+    ```bash
+    sudo systemctl stop 240mp
+    240mp
+    ```
+
+### mpv playback logs
+
+During playback the app hands off to mpv as a subprocess (see [ARCHITECTURE.md → Playback Hand-off](ARCHITECTURE.md#playback-hand-off-mpvcontroller)). `MpvController` writes mpv's own output to a log file in the temp dir alongside its IPC socket (`/tmp/240mp-mpv.sock`) — useful when a video won't play or transcoding misbehaves.
+
+### Qt / QML debugging knobs
+
+These environment variables help when the UI itself is misbehaving:
+
+```bash
+QT_LOGGING_RULES="qt.qml.*=true"   # verbose QML engine logging
+QML_IMPORT_TRACE=1                 # trace QML import resolution (missing modules/components)
+QT_QPA_EGLFS_DEBUG=1               # EGLFS/DRM detail on Raspberry Pi headless
+```
+
+Set them inline, e.g. `QML_IMPORT_TRACE=1 APP_ROOT=$(pwd) ./build/240mp`.
+
 ## GitHub Actions
 
 ### How to trigger a build

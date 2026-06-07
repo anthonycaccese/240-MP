@@ -5,9 +5,9 @@
 ## AI involvement
 
 <!--
-Required. Per CONTRIBUTING.md, describe the scope of any AI use: which parts (if
+Required. Per CONTRIBUTING.md, please describe the scope of any AI use: which parts (if
 any) were AI-generated, and what human review/testing you did before submitting.
-Write "No AI used" if that's the case. PRs that omit this may be closed without review.
+Please write "No AI used" if that's the case. PRs that omit this may be closed without review.
 -->
 
 ## Testing
@@ -20,7 +20,6 @@ Write "No AI used" if that's the case. PRs that omit this may be closed without 
 ## Checklist
 
 - [ ] Works with remote-only navigation (up/down/left/right, enter, esc/backspace)
-- [ ] Sized with `root.sh` / `root.sw` (no hardcoded pixels) and mindful of CRT overscan
+- [ ] Sizing and Positioning with `root.sh` / `root.sw` (no hardcoded pixels) and mindful of CRT overscan
 - [ ] No tracking/analytics; only writes to the local data directory
 - [ ] Follows the patterns in [ARCHITECTURE.md](https://github.com/anthonycaccese/240-MP/blob/main/ARCHITECTURE.md) and the principles in [CONTRIBUTING.md](https://github.com/anthonycaccese/240-MP/blob/main/CONTRIBUTING.md)
-- [ ] I disclosed AI involvement above
