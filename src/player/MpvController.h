@@ -9,8 +9,6 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
-#include <dlfcn.h>
-
 #include <SDL3/SDL.h>
 
 struct DrmSavedState {
