@@ -7,6 +7,9 @@
 #include <QStandardPaths>
 #include <QDateTime>
 #include <QDebug>
+#include <QKeyEvent>
+#include <QApplication>
+#include <QWindow>
 
 #ifdef Q_OS_LINUX
 #include <fcntl.h>
@@ -16,6 +19,7 @@
 #include <sys/sysmacros.h>
 #include <linux/vt.h>
 #include <string>
+
 // DRM master ioctls (also provided by xf86drm.h, but define as fallback).
 #ifndef DRM_IOCTL_SET_MASTER
 #define DRM_IOCTL_SET_MASTER   _IO('d', 0x1e)
@@ -47,6 +51,7 @@ MpvController::MpvController(const QString &appRoot, QObject *parent)
     , m_socketPath(QDir::tempPath() + "/240mp-mpv.sock")
     , m_inputConfPath(QDir::tempPath() + "/240mp-input.conf")
     , m_logFilePath(QDir::tempPath() + "/240mp-mpv.log")
+    , m_gameController(GameController(this))
 {
     QFile f(m_inputConfPath);
     if (f.open(QFile::WriteOnly | QFile::Text)) {
@@ -71,6 +76,7 @@ MpvController::MpvController(const QString &appRoot, QObject *parent)
     m_connectTimer->setInterval(100);
     connect(m_connectTimer, &QTimer::timeout, this, &MpvController::tryConnectIpc);
 
+
     // Watchdog: fires every 10 s; logs a warning if no IPC time-pos event has
     // arrived for 30 s while connected — strong indicator of a playback freeze.
     m_watchdogTimer = new QTimer(this);
@@ -82,7 +88,16 @@ MpvController::MpvController(const QString &appRoot, QObject *parent)
             qWarning("[MpvController] WATCHDOG: no IPC time-pos event for %lld s — possible freeze",
                      silenceMs / 1000);
         }
+
+        m_gameController.check();
     });
+
+    m_gameControllerTimer = new QTimer(this);
+    m_gameControllerTimer->setInterval(1);
+    connect(m_gameControllerTimer, &QTimer::timeout, this, [this] {
+        m_gameController.check();
+    });
+    m_gameControllerTimer->start();
 }
 
 MpvController::~MpvController() {
@@ -555,4 +570,76 @@ void MpvController::restoreDrmCrtcState(int fd) {
 
     m_savedDrm.valid = false;
 }
+
+MpvController::GameController::GameController(MpvController * controller): m_controller(controller) {
+    SDL_Init(SDL_INIT_GAMEPAD);
+}
+
+void MpvController::GameController::check() {
+    /* check for added/removed controllers */
+    if(SDL_PollEvent(&m_event)) {
+        switch(m_event.type) {
+            case SDL_EVENT_GAMEPAD_ADDED:
+                m_gamepads.push_back(SDL_OpenGamepad(m_event.gdevice.which));
+                break;
+            case SDL_EVENT_GAMEPAD_REMOVED: {
+                /* we use the old iterator pattern instead of the newer "auto x : y" pattern because we want the position of the array. */
+                for(auto iter = m_gamepads.begin(); iter != m_gamepads.end(); iter++) {
+                    if(!iter.base()) {
+                        continue;
+                    }
+                    SDL_Gamepad * gamepad = *iter.base();
+                    if(gamepad) {
+                        if(SDL_GetGamepadID(gamepad) == m_event.gdevice.which) {
+                            m_gamepads.erase(iter, iter + 1);
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    /* check for inputs From controllers */
+    for(auto gamepad : m_gamepads) {
+        int down = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+        int up = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP);
+        int left = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+        int right = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+        if(down || up || left || right) {
+            if(m_dpad_held == 0 || (m_dpad_held >= 500 && (m_dpad_held % 100 == 0))) {
+                Qt::Key key;
+                if(down) key = Qt::Key_Down;
+                if(up) key = Qt::Key_Up;
+                if(left) key = Qt::Key_Left;
+                if(right) key = Qt::Key_Right;
+                QKeyEvent event(QEvent::KeyPress, key, Qt::NoModifier);
+                QCoreApplication::sendEvent(QGuiApplication::focusWindow(), &event);
+            }
+            m_dpad_held++;
+        } else {
+            m_dpad_held = 0;
+        }
+        if(SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK)) {
+            if(m_back_down == 0) {
+                QKeyEvent event(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+                QCoreApplication::sendEvent(QGuiApplication::focusWindow(), &event);
+                m_back_down = 1;
+            }
+        } else {
+            m_back_down = 0;
+        }
+        if(SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START)) {
+            if(m_start_down == 0) {
+                QKeyEvent event(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+                QCoreApplication::sendEvent(QGuiApplication::focusWindow(), &event);
+                m_start_down = 1;
+            }
+        } else {
+            m_start_down = 0;
+        }
+        /* And then Key_Space seems to be ignored? idk */
+    }
+}
+
 #endif

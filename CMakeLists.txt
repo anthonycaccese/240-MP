@@ -5,9 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+# generate file that allows clangd to give intelligent suggestions
+set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
+
 include(GNUInstallDirs)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg Widgets)
 find_package(OpenSSL REQUIRED)
 
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
@@ -38,8 +41,10 @@ target_link_libraries(240mp PRIVATE
     Qt6::Qml
     Qt6::Network
     Qt6::Svg
+    Qt6::Widgets
     OpenSSL::Crypto
     $<$<NOT:$<BOOL:${APPLE}>>:${Libdrm_LIBRARIES}>
+    SDL3
 )
 
 if(APPLE)

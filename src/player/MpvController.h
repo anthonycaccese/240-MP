@@ -9,6 +9,10 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include <dlfcn.h>
+
+#include <SDL3/SDL.h>
+
 struct DrmSavedState {
     uint32_t crtcId      = 0;
     uint32_t connectorId = 0;
@@ -25,6 +29,20 @@ class MpvController : public QObject {
     Q_PROPERTY(int position    READ position    NOTIFY positionChanged)
     Q_PROPERTY(int duration    READ duration    NOTIFY durationChanged)
     Q_PROPERTY(int playlistPos READ playlistPos NOTIFY playlistPosChanged)
+
+    // Class for allowing Game Controllers to be used as UI.
+    class GameController {
+        SDL_Event m_event;
+        std::vector<SDL_Gamepad *> m_gamepads;
+        int m_dpad_held = 0;
+        int m_back_down = 0;
+        int m_start_down = 0;
+        MpvController * m_controller;
+    public:
+        GameController(MpvController * m_controller);
+        void check();
+    };
+    GameController m_gameController;
 
 public:
     explicit MpvController(const QString &appRoot, QObject *parent = nullptr);
@@ -79,6 +97,7 @@ private:
     QLocalSocket *m_ipc            = nullptr;
     QTimer       *m_connectTimer   = nullptr;
     QTimer       *m_watchdogTimer  = nullptr;
+    QTimer       *m_gameControllerTimer  = nullptr;
     qint64        m_lastIpcEventMs = 0;
     QString       m_appRoot;
     QString       m_socketPath;
