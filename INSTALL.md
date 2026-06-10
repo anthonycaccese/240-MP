@@ -164,6 +164,21 @@ The following steps will set up an image for your Raspberry Pi with the latest v
 
 At this point you can type `240mp` to start up the app.  When you quit the app it will automatically shutdown your Pi and if you chose to install the autostart service then the next time you boot your Pi it will boot into 240-MP.
 
+### Update
+
+To update to the latest release on Raspberry Pi please follow these steps (your settings will be retained):
+
+1) SSH into your Raspberry Pi
+2) Re-run the install script
+    ```bash
+    bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/install.sh)
+    ```
+3) When it asks to `Install systemd autostart service? [y/N]`
+    - if you already have autostart set up you can press either Y or N, it will keep your current autostart
+    - if you don't have autostart installed and want to keep it that way just answer N
+    - and if you want to turn on autostart just answer Y
+4) Once that completes just run 'sudo reboot' and when your pi restarts you'll be on the latest version
+
 ### Uninstall
 
 1) If you'd like to remove 240-MP and continue to use your SD card for other things you can run the following commands via terminal or over SSH:
@@ -194,9 +209,15 @@ If you don't have a Raspberry Pi and would like to try 240-MP, I also provide a 
 ### Steps
 
 1. Download the DMG archive from the latest release
-2. Mount it and move the 240mp.app into your Applicaitons folder
+2. Mount it and move the 240mp.app into your Applications folder
 3. Make sure you have mpv installed (240-MP requires MPV for playback): `brew install mpv`
 4. Double click 240-MP and it should open full screen
+
+### Update
+
+To update to the latest release on MacOS please follow these steps (your settings will be retained):
+1. Download the DMG archive from the latest release
+2. Mount it and move the 240mp.app into your Applications folder to overwrite your existing version. *Your existing configuration settings will be retained and it's safe to overwrite*
 
 ### Uninstall
 
