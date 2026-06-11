@@ -50,11 +50,11 @@ Window {
             "accent": "#EE442F"
         },
         "Amber": {
-            "primary": "#FFE31C",
+            "primary": "#FFB000",
             "secondary": "#B37B00",
             "tertiary": "#B37B00",
-            "surface": "#271617",
-            "accent": "#FFE31C"
+            "surface": "#000000",
+            "accent": "#FFEE11"
         },
         "Kinescope": {
             "primary": "#FFFFFF",
