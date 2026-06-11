@@ -4,7 +4,7 @@
 
 240-MP is a retro VCR style frontend to play content on Raspberry Pi (preferably hooked up to a CRT TV). 
 
-Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 2 currently included playback modules; one for [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files) and one for [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex).
+Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 3 currently included playback modules; one for [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), one for [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex) and a module similar to art/wallpaper modes on modern tvs called ([Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode))
 
 It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps outlined below.
 
@@ -45,6 +45,12 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Full library browsing by letter
 - Show/Season browsing
 - Video quality selection: Direct Playback (Default) or Transcode options
+
+### Ambient:Mode Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode))
+- Supported video file types: `"mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob"`
+- Playlist support for audio tracks using `m3u` and `m3u8` files
+- Mix video with a different audio track
+- Loops forever until you stop it
 
 ## Install 
 
