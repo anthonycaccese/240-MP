@@ -324,7 +324,7 @@ FocusScope {
                 }
 
                 Text {
-                    text: "[ESC]:BACK [▲▼]:NAVIGATE [ENTER]:SELECT"
+                    text: inputManager.hints.back + ":BACK " + inputManager.hints.navigate + ":NAVIGATE " + inputManager.hints.select + ":SELECT"
                     color: root.tertiaryColor
                     font.family: root.globalFont
                     font.pixelSize: root.sh * 0.0333333

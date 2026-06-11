@@ -9,6 +9,7 @@ include(GNUInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
 find_package(OpenSSL REQUIRED)
+find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
 # around mpv playback so Qt EGLFS can resume cleanly after mpv exits.
@@ -28,6 +29,7 @@ add_executable(240mp
     src/modules/plex/PlexBackend.cpp
     src/modules/ambient_mode/AmbientModeBackend.cpp
     src/player/MpvController.cpp
+    src/input/InputManager.cpp
     $<$<BOOL:${APPLE}>:src/macos_utils.mm>
 )
 
@@ -39,6 +41,7 @@ target_link_libraries(240mp PRIVATE
     Qt6::Network
     Qt6::Svg
     OpenSSL::Crypto
+    SDL2::SDL2
     $<$<NOT:$<BOOL:${APPLE}>>:${Libdrm_LIBRARIES}>
 )
 

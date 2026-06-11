@@ -7,6 +7,7 @@
 #include <QCursor>
 #include <QDebug>
 #include <QWindow>
+#include <QQuickWindow>
 #include <locale.h>
 
 #include "AppCore.h"
@@ -14,6 +15,7 @@
 #include "modules/plex/PlexBackend.h"
 #include "modules/ambient_mode/AmbientModeBackend.h"
 #include "player/MpvController.h"
+#include "input/InputManager.h"
 #ifdef Q_OS_MAC
 #include "macos_utils.h"
 #endif
@@ -78,6 +80,7 @@ int main(int argc, char *argv[]) {
     PlexBackend         plexBackend(appRoot, dataRoot);
     AmbientModeBackend  ambientMode(dataRoot);
     MpvController       mpvController(appRoot);
+    InputManager        inputManager(dataRoot);
 
     // Each module backend is wired in one call: stored for action routing, exposed to QML
     // under its context-property name, and its optional signals/slots connected by
@@ -89,6 +92,7 @@ int main(int argc, char *argv[]) {
 
     ctx->setContextProperty("appCore",       &appCore);
     ctx->setContextProperty("mpvController", &mpvController);
+    ctx->setContextProperty("inputManager",  &inputManager);
 #ifdef Q_OS_MAC
     engine.rootContext()->setContextProperty("macScreenX",      0);
     engine.rootContext()->setContextProperty("macScreenY",      0);
@@ -103,6 +107,10 @@ int main(int argc, char *argv[]) {
         qCritical("[main] QML engine failed to load Main.qml");
         return 1;
     }
+
+    // Gamepad key events are posted straight to the root window so they reach
+    // the QML focus item even when another window (mpv) holds OS focus.
+    inputManager.setTargetWindow(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
 
 #ifdef Q_OS_MAC
     if (QWindow *win = qobject_cast<QWindow *>(engine.rootObjects().first())) {

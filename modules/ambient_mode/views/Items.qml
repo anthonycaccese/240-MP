@@ -259,7 +259,7 @@ FocusScope {
 
     Text {
         id: footer
-        text: "[ESC]:BACK [▲▼]:NAVIGATE [◄►]:CHANGE [ENTER]:SELECT"
+        text: inputManager.hints.back + ":BACK " + inputManager.hints.navigate + ":NAVIGATE " + inputManager.hints.change + ":CHANGE " + inputManager.hints.select + ":SELECT"
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

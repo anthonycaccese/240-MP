@@ -27,8 +27,8 @@ jobs:
           arch: clang_64
           cache: true
 
-      - name: Install mpv
-        run: brew install mpv
+      - name: Install mpv and SDL2
+        run: brew install mpv sdl2
 
       - name: Configure
         run: |
@@ -133,7 +133,8 @@ jobs:
             qml6-module-qtquick-controls \
             qml6-module-qtquick-window \
             libdrm-dev \
-            libssl-dev
+            libssl-dev \
+            libsdl2-dev
 
       - name: Configure
         run: |

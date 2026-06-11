@@ -476,8 +476,8 @@ FocusScope {
     Text {
         id: footer
         text: showLetterNav
-              ? "[ESC]:BACK [\u25B2\u25BC]:NAVIGATE [\u25BA]:BROWSE [ENTER]:SELECT"
-              : "[ESC]:BACK [\u25B2\u25BC]:NAVIGATE [ENTER]:SELECT"
+              ? inputManager.hints.back + ":BACK " + inputManager.hints.navigate + ":NAVIGATE " + inputManager.hints.browse + ":BROWSE " + inputManager.hints.select + ":SELECT"
+              : inputManager.hints.back + ":BACK " + inputManager.hints.navigate + ":NAVIGATE " + inputManager.hints.select + ":SELECT"
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

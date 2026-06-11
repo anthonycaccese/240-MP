@@ -14,6 +14,7 @@ The following steps will set up an image for your Raspberry Pi with the latest v
 
 - A CRT TV and a composite cable - Composite out is my recommended way to use 240-MP but it will also work over HDMI as well so just select the config that works for your setup in step 2 below.  This is the composite cable I use if you happen to have a CRT: https://www.adafruit.com/product/2881
 - USB remote control - Keyboard input works well but if you want that experience of sitting back and playing video on a VCR then a remote will definitely help with that.  I use this one: https://www.amazon.com/dp/B01FVUGPE8
+- USB game controller - Most controllers (Xbox, PlayStation, 8BitDo, NES-style, etc.) work out of the box: D-pad/left stick to navigate, A to select, B to go back, Start for play/pause.  Controllers can be plugged in at any time, and the button mapping can be customized — see [BUILDING.md → Gamepad input](BUILDING.md#gamepad-input-inputcfg).  If a controller isn't detected, make sure your user is in the `input` group: `sudo usermod -aG input $USER` then reboot.
 
 ### Steps
 
@@ -210,6 +211,8 @@ If you don't have a Raspberry Pi and would like to try 240-MP, I also provide a 
 2. Mount it and move the 240mp.app into your Applications folder
 3. Make sure you have mpv installed (240-MP requires MPV for playback): `brew install mpv`
 4. Double click 240-MP and it should open full screen
+
+USB game controllers work out of the box (SDL2 is bundled inside the app) — D-pad/left stick to navigate, A to select, B to go back, Start for play/pause.  The mapping can be customized via `input.cfg` — see [BUILDING.md → Gamepad input](BUILDING.md#gamepad-input-inputcfg).
 
 ### Update
 

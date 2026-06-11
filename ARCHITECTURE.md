@@ -190,6 +190,28 @@ On RPi Lite there because there is no display server; Qt draws via EGLFS straigh
 
 The longer-term vision is to hand off to *other* purpose-built tools (e.g. RetroArch), not just mpv. `MpvController` is the template for that: launch the external tool as a `QProcess`, drive it over whatever control channel it offers, surface progress/exit back to QML via signals, and (on RPi Lite) bracket the launch with the same DRM/VT save-and-restore so the framebuffer is handed over cleanly and returned on exit.
 
+## Input (InputManager)
+
+All input arrives in QML as **ordinary key events** — views bind `Keys.onPressed` / `Keys.onUpPressed` / etc. and never know which physical device produced the event. Keyboards and keyboard-emulating USB remotes deliver real key events natively; **USB game controllers** are translated by `InputManager` (`src/input/InputManager.h/.cpp`, exposed to QML as the context property **`inputManager`**).
+
+**Never add gamepad-specific handling to a view** — if a view handles the right keys, it handles gamepads.
+
+### How it works
+
+1. **SDL2 GameController** — `SDL_Init(SDL_INIT_GAMECONTROLLER)` only (no video subsystem, so it works headless under EGLFS). A 16 ms `QTimer` on the main thread polls SDL events: hotplug (`CONTROLLERDEVICEADDED/REMOVED`), buttons, and axes. SDL's built-in controller database normalizes most pads to a standard layout, so defaults work out of the box. The `SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS` hint keeps controller input flowing while mpv's window holds OS focus during playback.
+2. **Buttons → actions → key events** — each SDL input maps to one of seven named actions, and each action synthesizes one Qt key:
+
+   | Action | Qt key | Default binding |
+   |---|---|---|
+   | `up` / `down` / `left` / `right` | arrows | D-pad, left stick, LB/RB (left/right) |
+   | `select` | Return | A |
+   | `back` | Escape | B, View/Select button |
+   | `play_pause` | Space | Start |
+
+3. **Delivery** — synthesized `QKeyEvent`s are posted to the **root QQuickWindow** (not `QGuiApplication::focusWindow()`), so they reach the QML `activeFocusItem` even when the Qt window has no OS focus — which is exactly the state during fullscreen mpv playback on macOS. During playback the events flow through the Player views' existing key forwarding (`mpvController.sendKey(...)`), so gamepads drive mpv identically to the keyboard. Held directions auto-repeat (400 ms delay, 100 ms interval) so lists feel like keyboard repeat.
+4. **User overrides** — `$DATA_ROOT/input.cfg` (`<input> <action>` per line, `#` comments, merged over defaults, live-reloaded via `QFileSystemWatcher`). An optional `$DATA_ROOT/gamecontrollerdb.txt` adds SDL mappings for exotic pads. Grammar and examples: [BUILDING.md → Gamepad input](BUILDING.md#gamepad-input-inputcfg).
+5. **Adaptive footers** — `inputManager` exposes `lastInputDevice` (`"keyboard"` | `"gamepad"`, tracked via an app-wide event filter that ignores the synthesized events by their magic `nativeScanCode`) and a `hints` map (`back`, `select`, `navigate`, `change`, `browse`, `play_pause`). Footer hint labels bind to it — e.g. `inputManager.hints.back + ":BACK"` renders `[ESC]:BACK` while the keyboard is active and `[B]:BACK` after a controller press, reflecting the live mapping. New views with footers should use `inputManager.hints.*`, never hardcoded `[ESC]`/`[ENTER]` strings.
+
 ## C++ Backend Patterns
 
 Backends are `QObject` subclasses registered via `registerModule(...)` before the engine loads.
