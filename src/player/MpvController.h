@@ -42,7 +42,8 @@ public:
                                   float transcodeOffsetSec = 0.0f,
                                   const QString &plexToken = {},
                                   bool muteAudio = false,
-                                  const QString &oscMode = {});
+                                  const QString &oscMode = {},
+                                  bool shuffle = false);
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seekTo(int positionMs);
     Q_INVOKABLE void sendKey(const QString &key);

@@ -23,6 +23,12 @@
       "default": "OFF"
     },
     {
+      "key": "shuffle_playback",
+      "label": "Shuffle Playback",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
       "key": "resume_playback",
       "label": "Resume Playback",
       "type": "list_single",

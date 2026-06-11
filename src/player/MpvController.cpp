@@ -97,7 +97,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  const QStringList &subFiles, bool loop,
                                  int playlistStart, float transcodeOffsetSec,
                                  const QString &plexToken, bool muteAudio,
-                                 const QString &oscMode) {
+                                 const QString &oscMode, bool shuffle) {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -177,6 +177,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
 
     if (loop)
         args << QStringLiteral("--loop-playlist=inf");
+    if (shuffle)
+        args << QStringLiteral("--shuffle");
     if (muteAudio)
         args << QStringLiteral("--no-audio");
     if (!plexToken.isEmpty()) {

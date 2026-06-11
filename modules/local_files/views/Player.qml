@@ -15,6 +15,7 @@ FocusScope {
     property int    savedPlaylistPos:    -1
     property int    choiceIndex:         0
     property bool   loopOn:              false
+    property bool   shuffleOn:           false
     property string resumeSetting:       "ask"
 
     // Track last non-null values during playback for robust save on exit
@@ -128,7 +129,15 @@ FocusScope {
     Component.onCompleted: {
         if (filePath === "") return
         loopOn        = !!appCore.get_setting(moduleRoot.moduleId, "loop_playback")
+        shuffleOn     = !!appCore.get_setting(moduleRoot.moduleId, "shuffle_playback")
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+
+        // Shuffle wins: a shuffled playlist starts fresh & random; resume position
+        // (a sequential item index) is meaningless once order is randomized.
+        if (shuffleOn && isPlaylist(filePath)) {
+            mpvController.loadAndPlay(filePath, 0.0, 0, -1, [], loopOn, -1, 0.0, "", false, "", true)
+            return
+        }
 
         if (resumeSetting === "no") {
             mpvController.loadAndPlay(filePath, 0.0, 0, -1, [], loopOn, -1)
