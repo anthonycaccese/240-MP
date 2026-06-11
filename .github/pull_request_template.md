@@ -19,7 +19,7 @@ Please write "No AI used" if that's the case. PRs that omit this may be closed w
 
 ## Checklist
 
-- [ ] Works with remote-only navigation (up/down/left/right, enter, esc/backspace)
-- [ ] Sizing and Positioning with `root.sh` / `root.sw` (no hardcoded pixels) and mindful of CRT overscan
-- [ ] No tracking/analytics; only writes to the local data directory
+- [ ] Changes work with remote-only navigation (up/down/left/right, enter, esc/backspace)
+- [ ] Handled sizing and positioning using the `root.sh` & `root.sw` properties (did not hardcode pixels) and kept CRT overscan in mind
+- [ ] Did not add tracking or analytics; only wrote settings to the local data directory if the change required storage
 - [ ] Follows the patterns in [ARCHITECTURE.md](https://github.com/anthonycaccese/240-MP/blob/main/ARCHITECTURE.md) and the principles in [CONTRIBUTING.md](https://github.com/anthonycaccese/240-MP/blob/main/CONTRIBUTING.md)
