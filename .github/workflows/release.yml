@@ -201,3 +201,8 @@ jobs:
 
             - Raspberry Pi OS Trixie (arm64): [Instructions](INSTALL.md#on-a-raspberry-pi)
             - macOS (Apple Silicon): Download the `.dmg`, open and move 240mp.app to your applications folder
+
+            ### Update Instructions:
+
+            - Raspberry Pi OS Trixie (arm64): [Instructions](INSTALL.md#update)
+            - macOS (Apple Silicon): Download the `.dmg`, open and move 240mp.app to your applications folder

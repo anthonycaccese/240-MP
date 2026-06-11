@@ -175,7 +175,7 @@ To update to the latest release on Raspberry Pi please follow these steps (your 
     - if you already have autostart set up you can press either Y or N, it will keep your current autostart
     - if you don't have autostart installed and want to keep it that way just answer N
     - and if you want to turn on autostart just answer Y
-4) Once that completes just run 'sudo reboot' and when your pi restarts you'll be on the latest version
+4) Once that completes just run `sudo reboot` and when your pi restarts you'll be on the latest version
 
 ### Uninstall
 
