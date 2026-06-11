@@ -37,6 +37,10 @@ signals:
     void gamepadConnectedChanged();
     void lastInputDeviceChanged();
     void hintsChanged();
+    // Emitted instead of posting a key event when the Qt window is inactive
+    // (fullscreen mpv holds OS focus on macOS, which clears QML active focus).
+    // main.cpp connects this to MpvController::sendKey.
+    void mpvKeyRequested(const QString &key);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -60,10 +64,13 @@ private:
     void handleAxis(Uint8 axis, Sint16 value);
     void pressAction(Action a);
     void releaseAction(Action a);
+    void deliverPress(Action a, bool autoRepeat);
     void postKey(int qtKey, QEvent::Type type, bool autoRepeat);
+    bool windowActive() const;
     void setLastInputDevice(const QString &device);
     void updateHints();
     static int qtKeyForAction(Action a);
+    static QString mpvKeyForAction(Action a);
     static Action actionFromString(const QString &name, bool *ok);
     static bool isDirectional(Action a);
 

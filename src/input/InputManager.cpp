@@ -298,7 +298,7 @@ void InputManager::pressAction(Action a) {
     if (a == Action::None)
         return;
     setLastInputDevice(QStringLiteral("gamepad"));
-    postKey(qtKeyForAction(a), QEvent::KeyPress, false);
+    deliverPress(a, false);
 
     if (isDirectional(a)) {
         // Most recent direction wins the repeat slot.
@@ -316,7 +316,23 @@ void InputManager::releaseAction(Action a) {
         m_repeatDelayTimer.stop();
         m_repeatTimer.stop();
     }
-    postKey(qtKeyForAction(a), QEvent::KeyRelease, false);
+    // mpv's "keypress" command is one-shot — releases only matter for QML.
+    if (windowActive())
+        postKey(qtKeyForAction(a), QEvent::KeyRelease, false);
+}
+
+// While the Qt window is active, actions become posted key events into QML.
+// When it isn't — fullscreen mpv owns OS focus on macOS, and a deactivated
+// QQuickWindow has no activeFocusItem for key events to land on — actions go
+// straight to mpv over IPC instead, mirroring what the Player views' key
+// forwarding does on platforms where the window stays active (RPi/EGLFS).
+// When mpv isn't running either, sendKey is a no-op, so background presses
+// while the user is in another app do nothing — same as keyboard.
+void InputManager::deliverPress(Action a, bool autoRepeat) {
+    if (windowActive())
+        postKey(qtKeyForAction(a), QEvent::KeyPress, autoRepeat);
+    else
+        emit mpvKeyRequested(mpvKeyForAction(a));
 }
 
 void InputManager::onRepeatDelayElapsed() {
@@ -329,7 +345,11 @@ void InputManager::onRepeatDelayElapsed() {
 void InputManager::onRepeatTick() {
     if (m_heldDirection == Action::None)
         return;
-    postKey(qtKeyForAction(m_heldDirection), QEvent::KeyPress, true);
+    deliverPress(m_heldDirection, true);
+}
+
+bool InputManager::windowActive() const {
+    return m_window && m_window->isActive();
 }
 
 // Post to the root QQuickWindow, not QGuiApplication::focusWindow(): Qt Quick
@@ -357,6 +377,21 @@ int InputManager::qtKeyForAction(Action a) {
     case Action::None:      break;
     }
     return 0;
+}
+
+// Same key names the Player views pass to mpvController.sendKey().
+QString InputManager::mpvKeyForAction(Action a) {
+    switch (a) {
+    case Action::Up:        return QStringLiteral("UP");
+    case Action::Down:      return QStringLiteral("DOWN");
+    case Action::Left:      return QStringLiteral("LEFT");
+    case Action::Right:     return QStringLiteral("RIGHT");
+    case Action::Select:    return QStringLiteral("ENTER");
+    case Action::Back:      return QStringLiteral("ESC");
+    case Action::PlayPause: return QStringLiteral("SPACE");
+    case Action::None:      break;
+    }
+    return QString();
 }
 
 bool InputManager::isDirectional(Action a) {

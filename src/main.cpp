@@ -82,6 +82,11 @@ int main(int argc, char *argv[]) {
     MpvController       mpvController(appRoot);
     InputManager        inputManager(dataRoot);
 
+    // When the Qt window is inactive (fullscreen mpv has OS focus on macOS),
+    // gamepad actions bypass QML and drive mpv directly over IPC.
+    QObject::connect(&inputManager, &InputManager::mpvKeyRequested,
+                     &mpvController, &MpvController::sendKey);
+
     // Each module backend is wired in one call: stored for action routing, exposed to QML
     // under its context-property name, and its optional signals/slots connected by
     // introspection. The module ID lives in exactly one place per module.
