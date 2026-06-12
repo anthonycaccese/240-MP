@@ -50,7 +50,6 @@ FocusScope {
             font.pixelSize: root.sh * 0.05 //24
         }
         Text {
-            visible: pinCode !== ""
             text: "Please add items in the local files media directory"
             color: root.tertiaryColor
             font.family: root.globalFont
