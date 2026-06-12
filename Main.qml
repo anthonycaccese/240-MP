@@ -109,10 +109,21 @@ Window {
         }
     }
     
-    FontLoader { 
-        id: font; source: "assets/fonts/VCR_OSD_MONO_1.001.ttf" 
+    FontLoader {
+        id: font; source: "assets/fonts/VCR_OSD_MONO_1.001.ttf"
     }
     property string globalFont: font.name;
+
+    // --- INPUT / APP INFO MIRRORS ---
+    // Views must bind these via `root.*`, never the appCore/inputManager
+    // context properties directly: when the module Loader swaps views, the
+    // dying view's context properties resolve to null and any binding on them
+    // throws a TypeError during teardown. id-resolved `root.*` stays valid
+    // (root lives as long as the app), so these mirrors are teardown-safe.
+    // The null guards absorb the same nulling here at app shutdown, when the
+    // engine invalidates the root context itself.
+    readonly property var hints: inputManager ? inputManager.hints : ({})
+    readonly property string appVersion: appCore ? appCore.appVersion : ""
 
     // --- APP-LEVEL NAV STACK ---
     property var appNavStack: []

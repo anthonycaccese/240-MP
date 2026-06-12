@@ -95,7 +95,7 @@ FocusScope {
     AppBar {
         iconSource: "../../assets/images/settings.svg"
         title: "Settings"
-        subtitle: appCore.appVersion
+        subtitle: root.appVersion
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.125 //60
@@ -259,7 +259,7 @@ FocusScope {
     // --- FOOTER ---
     Text {
         id: footer
-        text: inputManager.hints.back + ":BACK " + inputManager.hints.navigate + ":NAVIGATE " + inputManager.hints.change + ":CHANGE " + inputManager.hints.select + ":SELECT"
+        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.change + ":CHANGE " + root.hints.select + ":SELECT"
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom
@@ -341,7 +341,7 @@ FocusScope {
                 }
 
                 Text {
-                    text: inputManager.hints.back + ":BACK " + inputManager.hints.navigate + ":NAVIGATE " + inputManager.hints.select + ":SELECT"
+                    text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SELECT"
                     color: root.tertiaryColor
                     font.family: root.globalFont
                     font.pixelSize: root.sh * 0.0333333 //16

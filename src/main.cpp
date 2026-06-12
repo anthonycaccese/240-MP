@@ -99,8 +99,10 @@ int main(int argc, char *argv[]) {
     ctx->setContextProperty("mpvController", &mpvController);
     ctx->setContextProperty("inputManager",  &inputManager);
 #ifdef Q_OS_MAC
-    engine.rootContext()->setContextProperty("macScreenX",      0);
-    engine.rootContext()->setContextProperty("macScreenY",      0);
+    // QVariant(0), not literal 0 — a bare 0 is a null pointer constant and
+    // resolves to the QObject* overload, handing QML null instead of an int.
+    engine.rootContext()->setContextProperty("macScreenX",      QVariant(0));
+    engine.rootContext()->setContextProperty("macScreenY",      QVariant(0));
     engine.rootContext()->setContextProperty("macScreenWidth",  macW);
     engine.rootContext()->setContextProperty("macScreenHeight", macH);
 #endif
