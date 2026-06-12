@@ -60,8 +60,9 @@ private:
     void rebuildMapping();
     void loadDefaultMapping();
     void loadUserMapping();
-    void handleButton(Uint8 button, bool pressed);
-    void handleAxis(Uint8 axis, Sint16 value);
+    void noteActiveController(SDL_JoystickID which);
+    void handleButton(SDL_JoystickID which, Uint8 button, bool pressed);
+    void handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value);
     void pressAction(Action a);
     void releaseAction(Action a);
     void deliverPress(Action a, bool autoRepeat);
@@ -69,9 +70,11 @@ private:
     bool windowActive() const;
     void setLastInputDevice(const QString &device);
     void updateHints();
+    QString labelForButton(int button) const;
     static int qtKeyForAction(Action a);
     static QString mpvKeyForAction(Action a);
     static Action actionFromString(const QString &name, bool *ok);
+    static int buttonFromToken(const QString &token);
     static bool isDirectional(Action a);
 
     QQuickWindow *m_window = nullptr;
@@ -88,6 +91,8 @@ private:
     QHash<int, Action> m_buttonMap;                  // SDL_GameControllerButton → Action
     QHash<int, QPair<Action, Action>> m_axisMap;     // SDL_GameControllerAxis → (negative, positive)
     QHash<int, int> m_axisState;                     // per-axis engaged direction: -1 / 0 / +1
+    QHash<int, QString> m_labelOverrides;            // SDL button → user display label (input.cfg)
+    SDL_JoystickID m_lastActiveController = -1;      // labels follow the pad last touched
     Action m_heldDirection = Action::None;
 
     QString m_lastInputDevice = "keyboard";

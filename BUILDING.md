@@ -166,14 +166,21 @@ Controllers can be hotplugged at any time. During playback the same buttons driv
 
 Inputs are SDL controller names — short (`a`, `b`, `x`, `y`, `back`, `start`, `leftshoulder`, `rightshoulder`, `dpup`, `dpdown`, `dpleft`, `dpright`, …) or the long `SDL_CONTROLLER_BUTTON_*` forms. Analog axes take a `+`/`-` direction suffix (`lefty-`, `triggerright+`). Actions: `up`, `down`, `left`, `right`, `select`, `back`, `play_pause`, and `none` to unbind a default.
 
+**Button names are positional**, following the Xbox reference layout: `a` always means the *south* face button, `b` east, `x` west, `y` north — no matter what's printed on your pad. You can also write the positions directly: `south`, `east`, `west`, `north`. So `south select` makes the bottom face button select on an Xbox pad, an 8BitDo, and a PlayStation pad alike.
+
+**Footer labels** adapt automatically: the on-screen hints show what's printed on the controller you touched last (Nintendo-type pads show B at south, PlayStation pads show X/O/SQ/TR). If your controller reports the wrong type — common for pads with Nintendo-style labels running in X-input mode — pin the label yourself with a `label` line.
+
 ```
 # input.cfg — example overrides
+south                    select     # positions: south/east/west/north
 SDL_CONTROLLER_BUTTON_A  select     # long names work
-b                        back       # so do SDL short names
+b                        back       # so do SDL short names ("b" = east)
 x                        play_pause
 rightshoulder            none       # unbind a default
 lefty-                   up         # axes take a +/- suffix
 triggerright+            play_pause
+label south B                       # force the footer label for a button
+label east  A
 ```
 
 Bad lines are skipped with a warning in the log (line number included) — the rest of the file still applies.

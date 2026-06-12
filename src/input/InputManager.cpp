@@ -67,6 +67,9 @@ void InputManager::initSdl() {
     // has OS focus, and don't let SDL steal SIGINT/SIGTERM from Qt.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+    // Force positional button semantics on Nintendo-type pads (default is
+    // label-based there): "a" always means the SOUTH position, on every pad.
+    SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
 
     // Game-controller subsystem only: no video, so this works headless (EGLFS).
     if (SDL_Init(SDL_INIT_GAMECONTROLLER) != 0) {
@@ -94,11 +97,17 @@ void InputManager::pollSdl() {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         switch (e.type) {
-        case SDL_CONTROLLERDEVICEADDED:   openController(e.cdevice.which);          break;
-        case SDL_CONTROLLERDEVICEREMOVED: closeController(e.cdevice.which);         break;
-        case SDL_CONTROLLERBUTTONDOWN:    handleButton(e.cbutton.button, true);     break;
-        case SDL_CONTROLLERBUTTONUP:      handleButton(e.cbutton.button, false);    break;
-        case SDL_CONTROLLERAXISMOTION:    handleAxis(e.caxis.axis, e.caxis.value);  break;
+        case SDL_CONTROLLERDEVICEADDED:   openController(e.cdevice.which);  break;
+        case SDL_CONTROLLERDEVICEREMOVED: closeController(e.cdevice.which); break;
+        case SDL_CONTROLLERBUTTONDOWN:
+            handleButton(e.cbutton.which, e.cbutton.button, true);
+            break;
+        case SDL_CONTROLLERBUTTONUP:
+            handleButton(e.cbutton.which, e.cbutton.button, false);
+            break;
+        case SDL_CONTROLLERAXISMOTION:
+            handleAxis(e.caxis.which, e.caxis.axis, e.caxis.value);
+            break;
         default: break;
         }
     }
@@ -127,6 +136,10 @@ void InputManager::closeController(SDL_JoystickID instanceId) {
     if (m_heldDirection != Action::None)
         releaseAction(m_heldDirection);
     m_axisState.clear();
+    if (m_lastActiveController == instanceId) {
+        m_lastActiveController = -1;
+        updateHints();
+    }
     emit gamepadConnectedChanged();
 }
 
@@ -141,6 +154,7 @@ void InputManager::rebuildMapping() {
 void InputManager::loadDefaultMapping() {
     m_buttonMap.clear();
     m_axisMap.clear();
+    m_labelOverrides.clear();
     m_buttonMap[SDL_CONTROLLER_BUTTON_DPAD_UP]       = Action::Up;
     m_buttonMap[SDL_CONTROLLER_BUTTON_DPAD_DOWN]     = Action::Down;
     m_buttonMap[SDL_CONTROLLER_BUTTON_DPAD_LEFT]     = Action::Left;
@@ -169,10 +183,27 @@ InputManager::Action InputManager::actionFromString(const QString &name, bool *o
     return Action::None;
 }
 
-// $DATA_ROOT/input.cfg — one "<input> <action>" per line, # comments, case-
-// insensitive. Inputs are SDL names ("a", "dpup", "lefty-"…) with the long
-// SDL_CONTROLLER_BUTTON_*/AXIS_* prefixes optional; axes take a +/- suffix.
-// Lines merge over the defaults; bad lines are skipped with a warning.
+// Button names are POSITIONAL (Xbox reference layout): "a" is always the
+// south face button regardless of what's printed on the pad. The positional
+// aliases south/east/west/north and the long SDL_CONTROLLER_BUTTON_* forms
+// (including SDL3-style SOUTH/EAST/…) resolve to the same buttons.
+// Returns the SDL button, or -1 if the token isn't a button.
+int InputManager::buttonFromToken(const QString &token) {
+    QString name = token.toLower();
+    name.remove(QStringLiteral("sdl_controller_button_"));
+    if (name == "south")      name = QStringLiteral("a");
+    else if (name == "east")  name = QStringLiteral("b");
+    else if (name == "west")  name = QStringLiteral("x");
+    else if (name == "north") name = QStringLiteral("y");
+    const SDL_GameControllerButton button =
+        SDL_GameControllerGetButtonFromString(name.toUtf8().constData());
+    return button == SDL_CONTROLLER_BUTTON_INVALID ? -1 : int(button);
+}
+
+// $DATA_ROOT/input.cfg — case-insensitive, # comments, merged over defaults,
+// bad lines skipped with a warning. Two line forms:
+//   <input> <action>   bind a button/axis ("a", "south", "dpup", "lefty-"…)
+//   label <button> <text>   override the footer label for a button
 void InputManager::loadUserMapping() {
     QFile f(m_dataRoot + "/input.cfg");
     if (!f.exists())
@@ -190,11 +221,29 @@ void InputManager::loadUserMapping() {
         int hash = line.indexOf('#');
         if (hash >= 0)
             line.truncate(hash);
-        line = line.simplified().toLower();
+        line = line.simplified();   // not lowercased: label text keeps its case
         if (line.isEmpty())
             continue;
 
         const QStringList parts = line.split(' ');
+
+        if (parts[0].compare(QStringLiteral("label"), Qt::CaseInsensitive) == 0) {
+            if (parts.size() != 3) {
+                qWarning("[input] input.cfg line %d ignored (expected \"label <button> <text>\"): %s",
+                         lineNo, qPrintable(line));
+                continue;
+            }
+            const int button = buttonFromToken(parts[1]);
+            if (button < 0) {
+                qWarning("[input] input.cfg line %d ignored (unknown button \"%s\")",
+                         lineNo, qPrintable(parts[1]));
+                continue;
+            }
+            m_labelOverrides[button] = parts[2];
+            ++applied;
+            continue;
+        }
+
         if (parts.size() != 2) {
             qWarning("[input] input.cfg line %d ignored (expected \"<input> <action>\"): %s",
                      lineNo, qPrintable(line));
@@ -202,15 +251,14 @@ void InputManager::loadUserMapping() {
         }
 
         bool actionOk = false;
-        const Action action = actionFromString(parts[1], &actionOk);
+        const Action action = actionFromString(parts[1].toLower(), &actionOk);
         if (!actionOk) {
             qWarning("[input] input.cfg line %d ignored (unknown action \"%s\")",
                      lineNo, qPrintable(parts[1]));
             continue;
         }
 
-        QString input = parts[0];
-        input.remove(QStringLiteral("sdl_controller_button_"));
+        QString input = parts[0].toLower();
         input.remove(QStringLiteral("sdl_controller_axis_"));
 
         // Axis bindings carry a direction suffix (lefty-, triggerright+).
@@ -222,9 +270,9 @@ void InputManager::loadUserMapping() {
         if (input == "triggerleft")  input = "lefttrigger";
         if (input == "triggerright") input = "righttrigger";
 
-        const QByteArray inputUtf8 = input.toUtf8();
         if (axisSign != 0) {
-            SDL_GameControllerAxis axis = SDL_GameControllerGetAxisFromString(inputUtf8.constData());
+            SDL_GameControllerAxis axis =
+                SDL_GameControllerGetAxisFromString(input.toUtf8().constData());
             if (axis == SDL_CONTROLLER_AXIS_INVALID) {
                 qWarning("[input] input.cfg line %d ignored (unknown axis \"%s\")",
                          lineNo, qPrintable(parts[0]));
@@ -234,8 +282,8 @@ void InputManager::loadUserMapping() {
             (axisSign < 0 ? pair.first : pair.second) = action;
             m_axisMap[axis] = pair;
         } else {
-            SDL_GameControllerButton button = SDL_GameControllerGetButtonFromString(inputUtf8.constData());
-            if (button == SDL_CONTROLLER_BUTTON_INVALID) {
+            const int button = buttonFromToken(input);
+            if (button < 0) {
                 qWarning("[input] input.cfg line %d ignored (unknown input \"%s\")",
                          lineNo, qPrintable(parts[0]));
                 continue;
@@ -259,17 +307,27 @@ void InputManager::onDataDirChanged(const QString &) {
 
 // ── Input → action → synthesized key event ───────────────────────────────────
 
-void InputManager::handleButton(Uint8 button, bool pressed) {
+// Footer labels follow the controller last touched, so swapping between e.g.
+// an Xbox pad and an 8BitDo keeps the face-button labels truthful.
+void InputManager::noteActiveController(SDL_JoystickID which) {
+    if (which == m_lastActiveController)
+        return;
+    m_lastActiveController = which;
+    updateHints();
+}
+
+void InputManager::handleButton(SDL_JoystickID which, Uint8 button, bool pressed) {
     const Action a = m_buttonMap.value(button, Action::None);
     if (a == Action::None)
         return;
+    noteActiveController(which);
     if (pressed)
         pressAction(a);
     else
         releaseAction(a);
 }
 
-void InputManager::handleAxis(Uint8 axis, Sint16 value) {
+void InputManager::handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value) {
     const auto it = m_axisMap.constFind(axis);
     if (it == m_axisMap.constEnd())
         return;
@@ -288,6 +346,9 @@ void InputManager::handleAxis(Uint8 axis, Sint16 value) {
         return;
     m_axisState[axis] = now;
 
+    // Only a real engage/release counts as "using" this controller — idle
+    // stick jitter must not steal label ownership from the pad in use.
+    noteActiveController(which);
     if (old != 0)
         releaseAction(old < 0 ? it->first : it->second);
     if (now != 0)
@@ -418,6 +479,58 @@ void InputManager::setLastInputDevice(const QString &device) {
     updateHints();
 }
 
+// Display text for a button: user override from input.cfg wins; otherwise the
+// face buttons (positional a/b/x/y) are translated to what's printed on the
+// last-touched controller via its SDL type (Nintendo swaps A/B and X/Y,
+// PlayStation uses shapes); everything else uses SDL's name uppercased.
+QString InputManager::labelForButton(int button) const {
+    const QString override_ = m_labelOverrides.value(button);
+    if (!override_.isEmpty())
+        return override_;
+
+    SDL_GameController *gc = m_controllers.value(m_lastActiveController, nullptr);
+    if (!gc && !m_controllers.isEmpty())
+        gc = m_controllers.constBegin().value();
+    const SDL_GameControllerType type =
+        gc ? SDL_GameControllerGetType(gc) : SDL_CONTROLLER_TYPE_UNKNOWN;
+
+    bool nintendo = type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO;
+    bool playstation = type == SDL_CONTROLLER_TYPE_PS3
+                    || type == SDL_CONTROLLER_TYPE_PS4
+                    || type == SDL_CONTROLLER_TYPE_PS5;
+#if SDL_VERSION_ATLEAST(2, 24, 0)
+    nintendo = nintendo
+            || type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT
+            || type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT
+            || type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR;
+#endif
+
+    switch (button) {
+    case SDL_CONTROLLER_BUTTON_A:   // south
+        if (nintendo)    return QStringLiteral("B");
+        if (playstation) return QStringLiteral("X");
+        return QStringLiteral("A");
+    case SDL_CONTROLLER_BUTTON_B:   // east
+        if (nintendo)    return QStringLiteral("A");
+        if (playstation) return QStringLiteral("O");
+        return QStringLiteral("B");
+    case SDL_CONTROLLER_BUTTON_X:   // west
+        if (nintendo)    return QStringLiteral("Y");
+        if (playstation) return QStringLiteral("SQ");
+        return QStringLiteral("X");
+    case SDL_CONTROLLER_BUTTON_Y:   // north
+        if (nintendo)    return QStringLiteral("X");
+        if (playstation) return QStringLiteral("TR");
+        return QStringLiteral("Y");
+    default:
+        break;
+    }
+
+    const char *name = SDL_GameControllerGetStringForButton(
+        static_cast<SDL_GameControllerButton>(button));
+    return name ? QString::fromLatin1(name).toUpper() : QString();
+}
+
 // hints drives the footer labels in every view. Keyboard values are the exact
 // strings the footers used before this existed; gamepad values come from a
 // reverse lookup of the active mapping (enum order puts face buttons first).
@@ -435,10 +548,9 @@ void InputManager::updateHints() {
         const auto buttonLabel = [this](Action a) -> QString {
             for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; ++b) {
                 if (m_buttonMap.value(b, Action::None) == a) {
-                    const char *name = SDL_GameControllerGetStringForButton(
-                        static_cast<SDL_GameControllerButton>(b));
-                    if (name)
-                        return "[" + QString::fromLatin1(name).toUpper() + "]";
+                    const QString label = labelForButton(b);
+                    if (!label.isEmpty())
+                        return "[" + label + "]";
                 }
             }
             return QString();  // unbound → keep keyboard label
