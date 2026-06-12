@@ -150,42 +150,47 @@ This directory is created automatically on first run. It is separate from the ap
 
 ## Gamepad input (input.cfg)
 
-USB game controllers work out of the box: SDL's built-in controller database normalizes most pads (Xbox, PlayStation, 8BitDo, NES-style clones, …) to a standard layout, and 240-MP maps that layout to its navigation actions:
+USB game controllers should work out of the box as SDL's built-in controller database normalizes most pads (Xbox, PlayStation, 8BitDo, NES-style clones etc...) to a standard layout. 240-MP maps that stanard layout to its navigation actions:
 
 | Controller input | Action |
 |---|---|
 | D-pad / left stick | navigate (up / down / left / right) |
 | A | select |
-| B, View/Select button | back |
+| B/Select | back |
 | Start | play / pause |
 | LB / RB shoulder buttons | left / right (seek during playback) |
 
-Controllers can be hotplugged at any time. During playback the same buttons drive mpv (seek, pause, quit) exactly like their keyboard equivalents.
+Controllers can be hotplugged at any time and during playback the same buttons drive mpv (seek, pause, quit) exactly like their keyboard equivalents.
 
-**Overriding the mapping** — create `input.cfg` in the configuration directory (paths above). One binding per line, `<input> <action>`; `#` starts a comment; case-insensitive; your lines merge over the defaults. The file is live-reloaded while the app runs, so you can tune bindings without restarting.
+**Overriding the mapping**
 
-Inputs are SDL controller names — short (`a`, `b`, `x`, `y`, `back`, `start`, `leftshoulder`, `rightshoulder`, `dpup`, `dpdown`, `dpleft`, `dpright`, …) or the long `SDL_CONTROLLER_BUTTON_*` forms. Analog axes take a `+`/`-` direction suffix (`lefty-`, `triggerright+`). Actions: `up`, `down`, `left`, `right`, `select`, `back`, `play_pause`, and `none` to unbind a default.
+- Create an `input.cfg` file in the configuration directory. 
+- Add one binding per line, `<input> <action>`; 
+- Use `#` to start a comment, data is case-insensitive and you only need to include the things you want to change (anything not defined will fall back to defaults) 
+- The file is also live-reloaded while the app runs, so you can tune bindings without restarting.
 
-**Button names are positional**, following the Xbox reference layout: `a` always means the *south* face button, `b` east, `x` west, `y` north — no matter what's printed on your pad. You can also write the positions directly: `south`, `east`, `west`, `north`. So `south select` makes the bottom face button select on an Xbox pad, an 8BitDo, and a PlayStation pad alike.
+Inputs use SDL controller names — short (`a`, `b`, `x`, `y`, `back`, `start`, `leftshoulder`, `rightshoulder`, `dpup`, `dpdown`, `dpleft`, `dpright`, ...) or the long `SDL_CONTROLLER_BUTTON_*` forms. Analog axes take a `+`/`-` direction suffix (`lefty-`, `triggerright+`). Actions: `up`, `down`, `left`, `right`, `select`, `back`, `play_pause`, and `none` to unbind a default.
 
-**Footer labels** adapt automatically: the on-screen hints show what's printed on the controller you touched last (Nintendo-type pads show B at south, PlayStation pads show X/O/SQ/TR). If your controller reports the wrong type — common for pads with Nintendo-style labels running in X-input mode — pin the label yourself with a `label` line.
+**Button names are positional**, following an Xbox reference layout: `a` means the *south* face button, `b` east, `x` west, `y` north, no matter what's "printed" on the buttons on your pad. Because of that you can also write the positions directly: `south`, `east`, `west`, `north`. So `south select` makes the bottom face button select on an Xbox pad, an 8BitDo, and a PlayStation pad alike.
+
+**Footer labels** will attempt to adapt automatically and the on-screen hints show what's printed on the controller you touched last (Nintendo-type pads show B at south, PlayStation pads show X/O/SQ/TR). If your controller reports the wrong type (which is common for pads with Nintendo-style labels running in X-input mode) you can define the label you see with a `label` line in the input.cfg
 
 ```
 # input.cfg — example overrides
-south                    select     # positions: south/east/west/north
-SDL_CONTROLLER_BUTTON_A  select     # long names work
-b                        back       # so do SDL short names ("b" = east)
+south                    select       # positions: south/east/west/north
+SDL_CONTROLLER_BUTTON_A  select       # long names work
+b                        back         # so do SDL short names ("b" = east)
 x                        play_pause
-rightshoulder            none       # unbind a default
-lefty-                   up         # axes take a +/- suffix
+rightshoulder            none         # unbind a default
+lefty-                   up           # axes take a +/- suffix
 triggerright+            play_pause
-label south B                       # force the footer label for a button
-label east  A
+label south B                         # force the footer label to display "B" for the south button
+label east  A                         # force the footer label to display "B" for the east button
 ```
 
-Bad lines are skipped with a warning in the log (line number included) — the rest of the file still applies.
+Any bad lines are skipped with a warning in the log (line number included)
 
-**Exotic controllers** — if SDL doesn't recognize your pad at all, drop a community [gamecontrollerdb.txt](https://github.com/mdqinc/SDL_GameControllerDB) into the configuration directory; it is loaded at startup before controllers are opened.
+**Exotic controllers** — if SDL doesn't recognize your pad at all, drop a community [gamecontrollerdb.txt](https://github.com/mdqinc/SDL_GameControllerDB) into the configuration directory; it will be loaded at startup before controllers are opened.
 
 ## Debugging & logs
 
