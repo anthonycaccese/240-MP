@@ -52,6 +52,10 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Mix video with a different audio track
 - Loops forever until you stop it
 
+### Global
+- [Color Schemes](https://github.com/anthonycaccese/240-MP/wiki/Customizations)
+- [Keyboard & Controller](https://github.com/anthonycaccese/240-MP/wiki/Input) input support
+
 ## Install 
 
 - [On a Raspberry Pi](INSTALL.md#on-a-raspberry-pi)
