@@ -29,13 +29,7 @@ FocusScope {
     property bool overlayVisible:     false
     property int  choiceIndex:        0
     property string resumeSetting:    "ask"
-    property bool pendingZeroStart:   false
     property bool pendingRetryTranscode: false
-
-    // For transcoded streams, Plex HLS segments have timestamps starting at 0
-    // relative to the transcode offset. We add this to every position we report
-    // so Plex receives the true absolute position in the video.
-    property int transcodeStartOffset: 0
 
     property int lastKnownPositionMs: 0
     property int lastKnownDurationMs: 0
@@ -98,14 +92,10 @@ FocusScope {
         return id
     }
 
-    function absPos(streamPosMs) {
-        return transcodeStartOffset + streamPosMs
-    }
-
     function stopPlayback() {
         if (!stoppedReported) {
             stoppedReported = true
-            var pos = lastKnownPositionMs || absPos(mpvController.position)
+            var pos = lastKnownPositionMs || mpvController.position
             var dur = lastKnownDurationMs || mpvController.duration
             plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
         }
@@ -147,9 +137,10 @@ FocusScope {
 
     function doStartPlayback(offsetMs) {
         if (isTranscoding) {
-            // Transcode URL already encodes the offset from Item.qml; mpv starts at stream position 0.
-            // Pass transcodeStartOffset so the OSC Lua script can display accurate wall-clock time.
-            mpvController.loadAndPlay(streamUrl, 0.0, 0, -1, [], false, -1, transcodeStartOffset / 1000.0, plexToken)
+            // Transcode covers the full timeline (requested at offset 0), so seek mpv
+            // to the resume point. This keeps everything before offsetMs seekable, so
+            // the user can rewind past the resume point.
+            mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0, 0, -1, [], false, -1, 0.0, plexToken)
         } else {
             var sub = buildSubArgs()
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
@@ -158,16 +149,8 @@ FocusScope {
     }
 
     function startFromBeginning() {
-        if (isTranscoding) {
-            // Transcode URL is baked with viewOffset — request a new session at offset 0.
-            // Reset the offset so future position reports are relative to the new start.
-            transcodeStartOffset = 0
-            pendingZeroStart = true
-            plexBackend.request_transcode(ratingKey, partKey, sessionId,
-                                          selectedAudioId, selectedSubtitleId, 0)
-        } else {
-            doStartPlayback(0)
-        }
+        // Transcode already starts at 0, so both paths simply play from the start.
+        doStartPlayback(0)
     }
 
     function formatTime(ms) {
@@ -187,15 +170,12 @@ FocusScope {
             if (pendingRetryTranscode) {
                 pendingRetryTranscode = false
                 isTranscoding = true
-                transcodeStartOffset = viewOffset
+                // Fallback transcode was requested at offset 0 (full timeline), so seek
+                // mpv to the resume point — keeps everything before it seekable.
                 var sub = buildSubArgs()
-                mpvController.loadAndPlay(url, 0.0, audioIdx + 1, sub.track, sub.urls, false, -1, transcodeStartOffset / 1000.0, plexToken)
+                mpvController.loadAndPlay(url, viewOffset / 1000.0, audioIdx + 1, sub.track, sub.urls, false, -1, 0.0, plexToken)
                 return
             }
-            if (!pendingZeroStart) return
-            pendingZeroStart = false
-            var sub = buildSubArgs()
-            mpvController.loadAndPlay(url, 0.0, audioIdx + 1, sub.track, sub.urls, false, -1, 0.0, plexToken)
         }
     }
 
@@ -203,7 +183,7 @@ FocusScope {
         target: mpvController
 
         function onPositionChanged(ms) {
-            if (ms > 0) playerRoot.lastKnownPositionMs = playerRoot.absPos(ms)
+            if (ms > 0) playerRoot.lastKnownPositionMs = ms
         }
         function onDurationChanged(ms) {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
@@ -211,7 +191,7 @@ FocusScope {
 
         function onPlaybackFinished(finalPositionMs, finalDurationMs) {
             if (!playerRoot.stoppedReported) {
-                var pos = playerRoot.lastKnownPositionMs || playerRoot.absPos(finalPositionMs)
+                var pos = playerRoot.lastKnownPositionMs || finalPositionMs
                 var dur = playerRoot.lastKnownDurationMs || finalDurationMs
                 plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
             }
@@ -225,7 +205,7 @@ FocusScope {
                 pendingRetryTranscode = true
                 plexBackend.request_transcode(ratingKey, partKey, sessionId,
                                               selectedAudioId, selectedSubtitleId,
-                                              viewOffset)
+                                              0)
             } else {
                 goBack()
             }
@@ -239,7 +219,7 @@ FocusScope {
         onTriggered: {
             if (mpvController.position > 0)
                 plexBackend.update_timeline(ratingKey, partKey, "playing",
-                                            absPos(mpvController.position), mpvController.duration)
+                                            mpvController.position, mpvController.duration)
         }
     }
 
@@ -247,10 +227,6 @@ FocusScope {
         initStreamIndices()
         if (streamUrl === "") return
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
-
-        // Plex HLS transcode segments start at time 0 regardless of viewOffset.
-        // Track the offset so every reported position is absolute in the video.
-        transcodeStartOffset = isTranscoding ? viewOffset : 0
 
         if (resumeSetting === "ask" && viewOffset > 0) {
             overlayVisible = true

@@ -140,7 +140,10 @@ FocusScope {
                     ? detail.audioStreams[audioIdx].id : ""
                 var subId = detail.subtitleStreams && detail.subtitleStreams[subtitleIdx]
                     ? detail.subtitleStreams[subtitleIdx].id : "0"
-                plexBackend.request_transcode(detail.ratingKey, detail.partKey, sessionId, audioId, subId, detail.viewOffset || 0)
+                // Always transcode from the start so the full timeline is seekable.
+                // The Player resumes by seeking mpv to viewOffset (see doStartPlayback),
+                // which lets the user rewind past the resume point.
+                plexBackend.request_transcode(detail.ratingKey, detail.partKey, sessionId, audioId, subId, 0)
             } else {
                 plexBackend.build_stream_url(detail.ratingKey, detail.partKey, sessionId)
             }
