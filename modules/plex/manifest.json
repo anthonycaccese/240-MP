@@ -61,6 +61,13 @@
       "requires_auth": true
     },
     {
+      "key": "autoplay_next_episode",
+      "label": "Autoplay Next Episode",
+      "type": "toggle",
+      "default": "OFF",
+      "requires_auth": true
+    },
+    {
       "key": "logout",
       "label": "Sign out",
       "type": "action",

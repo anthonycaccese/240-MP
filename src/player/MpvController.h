@@ -52,8 +52,11 @@ signals:
     void positionChanged(int ms);
     void durationChanged(int ms);
     void playlistPosChanged(int pos);
-    // Emitted when mpv exits normally (user quit or end of file).
+    // Emitted when mpv exits because the user quit/stopped playback before the end.
     void playbackFinished(int finalPositionMs, int finalDurationMs);
+    // Emitted when mpv exits because the file played to its natural end (mpv's
+    // end-file event reported reason "eof"). Used to trigger autoplay-next.
+    void playbackFinishedNaturally(int finalPositionMs, int finalDurationMs);
     // Emitted when mpv exits with an error (code 2 — file could not be played).
     // Player.qml uses this to retry with transcoding.
     void playbackFailed();
@@ -65,7 +68,7 @@ private slots:
 
 private:
     void sendCommand(const QJsonArray &args);
-    void doHeadlessRestore(int pos, int dur);
+    void doHeadlessRestore(int pos, int dur, bool naturalEof);
     bool detectHeadlessMode() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
@@ -85,6 +88,7 @@ private:
     QString       m_socketPath;
     QString       m_inputConfPath;
     QString       m_logFilePath;
+    QString       m_lastEndFileReason;  // mpv end-file "reason" for the current session
     int           m_position     = 0;
     int           m_duration     = 0;
     int           m_playlistPos  = -1;

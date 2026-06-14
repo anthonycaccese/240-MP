@@ -113,6 +113,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     m_position    = 0;
     m_duration    = 0;
     m_playlistPos = -1;
+    m_lastEndFileReason.clear();
 
 #ifdef Q_OS_MACOS
     // .app bundles launched via double-click get a minimal PATH that excludes
@@ -325,7 +326,16 @@ void MpvController::onIpcReadyRead() {
     while (m_ipc->canReadLine()) {
         const QByteArray line = m_ipc->readLine().trimmed();
         const QJsonObject obj = QJsonDocument::fromJson(line).object();
-        if (obj.isEmpty() || obj["event"].toString() != "property-change")
+        if (obj.isEmpty()) continue;
+        const QString event = obj["event"].toString();
+        if (event == "end-file") {
+            // mpv reports why playback ended: "eof" (played to the end),
+            // "quit"/"stop" (user exited), "error", etc. Remember the last one
+            // so onProcessFinished can distinguish a natural finish from a quit.
+            m_lastEndFileReason = obj["reason"].toString();
+            continue;
+        }
+        if (event != "property-change")
             continue;
 
         m_lastIpcEventMs = QDateTime::currentMSecsSinceEpoch();
@@ -365,6 +375,11 @@ void MpvController::onProcessFinished() {
     m_position = 0;
     m_duration = 0;
 
+    // mpv reports reason "eof" only when the file played to its natural end.
+    // Any other reason (quit/stop/error) or a missing end-file event (crash/kill)
+    // is treated as a non-natural exit — the safe default that never auto-advances.
+    const bool naturalEof = (m_lastEndFileReason == "eof");
+
     if (m_headlessMode) {
         // Defer DRM restore and VT switch by 200 ms. mpv's last KMS atomic
         // commit may still be pending in the vc4 driver at the moment the
@@ -373,18 +388,20 @@ void MpvController::onProcessFinished() {
         // the kernel falls back to showing the text console on Qt's VT.
         // 200 ms is more than three VSync periods at 60 Hz — enough to clear
         // any in-flight commit without a perceptible delay for the user.
-        QTimer::singleShot(200, this, [this, pos, dur]() {
-            doHeadlessRestore(pos, dur);
+        QTimer::singleShot(200, this, [this, pos, dur, naturalEof]() {
+            doHeadlessRestore(pos, dur, naturalEof);
         });
     } else {
         if (exitCode == 2)
             emit playbackFailed();
+        else if (naturalEof)
+            emit playbackFinishedNaturally(pos, dur);
         else
             emit playbackFinished(pos, dur);
     }
 }
 
-void MpvController::doHeadlessRestore(int pos, int dur) {
+void MpvController::doHeadlessRestore(int pos, int dur, bool naturalEof) {
 #ifdef Q_OS_LINUX
     if (m_qtDrmFd >= 0) {
         if (::ioctl(m_qtDrmFd, DRM_IOCTL_SET_MASTER, 0) < 0) {
@@ -407,7 +424,10 @@ void MpvController::doHeadlessRestore(int pos, int dur) {
         switchToVt(prevVt);
     }
     m_headlessMode = false;
-    emit playbackFinished(pos, dur);
+    if (naturalEof)
+        emit playbackFinishedNaturally(pos, dur);
+    else
+        emit playbackFinished(pos, dur);
 }
 
 void MpvController::sendCommand(const QJsonArray &args) {

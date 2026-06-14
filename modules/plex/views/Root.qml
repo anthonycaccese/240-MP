@@ -32,6 +32,15 @@ FocusScope {
         internalLoader.setSource(resolved, { "navParams": params || {} })
     }
 
+    // Repoint the BACK target after autoplay advances in place. The top of the
+    // stack is the detail view the player was launched from; swap its item so
+    // exiting the player returns to the now-playing episode's detail screen.
+    function updateBackItem(item) {
+        if (navStack.length === 0) return
+        var top = navStack[navStack.length - 1]
+        top.params = Object.assign({}, top.params, { item: item })
+    }
+
     function navigateBack() {
         if (navStack.length === 0) {
             moduleRoot.goBack()
@@ -60,6 +69,7 @@ FocusScope {
             function onNavigateTo(path, params, listState) { moduleRoot.navigateTo(path, params, listState) }
             function onReplaceWith(path, params) { moduleRoot.replaceWith(path, params) }
             function onGoBack() { moduleRoot.navigateBack() }
+            function onUpdateBackItem(item) { moduleRoot.updateBackItem(item) }
         }
     }
 
