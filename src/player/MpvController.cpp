@@ -284,6 +284,14 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--input-conf=%1").arg(m_inputConfPath)
              << "--video-sync=audio"
              << "--fullscreen" << "--no-native-fs";
+#ifdef Q_OS_MACOS
+        // mpv runs as a separate process and can't see the app-bundle font via
+        // FontLoader. This will load the bundled VCR OSD Mono directly into the OSD libass
+        // instance (used by the OSC scripts) so users don't need a system install.
+        // macOS libass uses the coretext provider, so the Linux FONTCONFIG_FILE
+        // approach doesn't apply here; --osd-fonts-dir is provider-independent.
+        args << QString("--osd-fonts-dir=%1").arg(m_appRoot + "/assets/fonts");
+#endif
         qDebug("[MpvController] desktop launch: mpv %s", qPrintable(args.join(" ")));
         m_process->start(bin, args);
         m_connectTimer->start();
