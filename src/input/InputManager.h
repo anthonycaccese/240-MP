@@ -10,6 +10,7 @@
 #include <SDL.h>
 
 class QQuickWindow;
+class QKeyEvent;
 
 // Centralized gamepad input. SDL controller buttons/axes are mapped to a small
 // set of named actions (up/down/left/right/select/back/play_pause), and each
@@ -73,6 +74,9 @@ private:
     QString labelForButton(int button) const;
     static int qtKeyForAction(Action a);
     static QString mpvKeyForAction(Action a);
+    // Maps a HID media-key event to the canonical mpv key name media-keys.lua
+    // binds, or an empty string for non-media keys.
+    static QString mpvKeyForMediaEvent(const QKeyEvent *ke);
     static Action actionFromString(const QString &name, bool *ok);
     static int buttonFromToken(const QString &token);
     static bool isDirectional(Action a);

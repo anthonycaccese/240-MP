@@ -158,6 +158,12 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (hasOscScript)
         args << QString("--script=%1").arg(oscScript);
 
+    // Media-key handling + themed volume bar — loaded for every mode so HID
+    // media keys work anytime mpv is playing, not just inside a given module.
+    const QString mediaKeysScript = m_appRoot + "/scripts/media-keys.lua";
+    if (QFile::exists(mediaKeysScript))
+        args << QString("--script=%1").arg(mediaKeysScript);
+
     if (playlistStart >= 0)
         args << QString("--playlist-start=%1").arg(playlistStart);
     if (startSeconds > 0.5f)
@@ -172,8 +178,14 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QStringLiteral("--sid=no");
     // else: external sub(s) loaded, subTrack==0 → mpv auto-selects first loaded sub
 
+    // mpv honors only one --script-opts flag, so combine every option into one.
+    QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
-        args << QString("--script-opts=transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
+        scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
+    if (!m_primaryColor.isEmpty())
+        scriptOpts << QString("primary-color=%1").arg(QString(m_primaryColor).remove('#'));
+    if (!scriptOpts.isEmpty())
+        args << QString("--script-opts=%1").arg(scriptOpts.join(','));
 
     if (loop)
         args << QStringLiteral("--loop-playlist=inf");
@@ -312,6 +324,13 @@ void MpvController::seekTo(int positionMs) {
 
 void MpvController::sendKey(const QString &key) {
     sendCommand({"keypress", key});
+}
+
+void MpvController::setPrimaryColor(const QString &color) {
+    if (m_primaryColor == color)
+        return;
+    m_primaryColor = color;
+    emit primaryColorChanged();
 }
 
 void MpvController::tryConnectIpc() {

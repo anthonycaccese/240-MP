@@ -472,6 +472,26 @@ bool InputManager::isDirectional(Action a) {
     return a == Action::Up || a == Action::Down || a == Action::Left || a == Action::Right;
 }
 
+// HID media keys are a separate concern from navigation actions — they always
+// target mpv, never QML — so they bypass the Action enum and map straight to the
+// canonical mpv key names media-keys.lua binds.
+QString InputManager::mpvKeyForMediaEvent(const QKeyEvent *ke) {
+    switch (ke->key()) {
+    case Qt::Key_VolumeUp:              return QStringLiteral("VOLUME_UP");
+    case Qt::Key_VolumeDown:            return QStringLiteral("VOLUME_DOWN");
+    case Qt::Key_VolumeMute:            return QStringLiteral("MUTE");
+    case Qt::Key_MediaTogglePlayPause:
+    case Qt::Key_MediaPlay:
+    case Qt::Key_MediaPause:            return QStringLiteral("PLAYPAUSE");
+    case Qt::Key_MediaStop:             return QStringLiteral("STOP");
+    case Qt::Key_MediaNext:             return QStringLiteral("NEXT");
+    case Qt::Key_MediaPrevious:         return QStringLiteral("PREV");
+    case Qt::Key_AudioForward:          return QStringLiteral("FORWARD");
+    case Qt::Key_AudioRewind:           return QStringLiteral("REWIND");
+    default:                            return QString();
+    }
+}
+
 // ── Active-device tracking & footer hints ─────────────────────────────────────
 
 bool InputManager::eventFilter(QObject *obj, QEvent *event) {
@@ -499,6 +519,22 @@ bool InputManager::eventFilter(QObject *obj, QEvent *event) {
                 deliverPress(Action::Back, false);
             else
                 releaseAction(Action::Back);
+        }
+        return true;
+    }
+
+    // HID media keys drive mpv directly over IPC (sendKey no-ops when mpv isn't
+    // running, so they're harmless while browsing). Volume keys repeat while
+    // held; the rest fire once per press so a held key is a single seek/chapter
+    // jump. On macOS during fullscreen playback mpv holds the keyboard and these
+    // never reach us — mpv binds the same names natively.
+    const QString mediaKey = mpvKeyForMediaEvent(ke);
+    if (!mediaKey.isEmpty()) {
+        if (type == QEvent::KeyPress) {
+            const bool isVolume = (ke->key() == Qt::Key_VolumeUp ||
+                                   ke->key() == Qt::Key_VolumeDown);
+            if (isVolume || !ke->isAutoRepeat())
+                emit mpvKeyRequested(mediaKey);
         }
         return true;
     }
