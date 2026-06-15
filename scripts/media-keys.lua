@@ -15,7 +15,6 @@ local VOLUME_STEP    = 5     -- percentage points per Volume +/- press
 local SEEK_FORWARD   = 30    -- Fast Forward jump, seconds
 local SEEK_BACK      = 10    -- Rewind jump, seconds
 local BAR_TIMEOUT    = 1.5   -- seconds the volume bar stays on screen
-local BAR_TICKS      = 20    -- one tick per VOLUME_STEP across the 0–100 range
 
 -- ASS colours are &HBBGGRR& (byte-reversed from #RRGGBB). Default to white when
 -- the host app does not pass a primary colour.
@@ -67,9 +66,13 @@ local function show_volume_bar()
     local ww, wh = mp.get_osd_size()
     if ww == 0 or wh == 0 then return end
 
-    local volume = mp.get_property_number("volume", 0) or 0
-    local filled = math.floor(volume / VOLUME_STEP + 0.5)
-    if filled < 0 then filled = 0 elseif filled > BAR_TICKS then filled = BAR_TICKS end
+    -- One tick per VOLUME_STEP across the full 0..volume-max range, so a config
+    -- that raises volume-max above 100 yields more (and thus thinner) ticks.
+    local volume   = mp.get_property_number("volume", 0) or 0
+    local vol_max  = mp.get_property_number("volume-max", 100) or 100
+    local ticks    = math.max(1, math.floor(vol_max / VOLUME_STEP + 0.5))
+    local filled   = math.floor(volume / VOLUME_STEP + 0.5)
+    if filled < 0 then filled = 0 elseif filled > ticks then filled = ticks end
 
     -- Geometry mirrors the seek bar in mpv-osc.lua so the volume bar lands in the
     -- same place at the same size: label on the time-text row, bar on the seek row.
@@ -84,7 +87,7 @@ local function show_volume_bar()
 
     -- A filled tick is a full-height vertical bar; an empty tick is a short dash.
     -- Both occupy the same slot so the row width stays constant as volume changes.
-    local slot_w = bar_w / BAR_TICKS
+    local slot_w = bar_w / ticks
     local gap    = math.max(1, math.floor(slot_w * 0.35))
     local tick_w = math.max(1, math.floor(slot_w - gap))
     local tick_h = bar_h
@@ -96,7 +99,7 @@ local function show_volume_bar()
     draw_text(ass, lm, row1_y, 1, "VOLUME", label_fs, C_PRIMARY)
 
     local x = lm
-    for i = 1, BAR_TICKS do
+    for i = 1, ticks do
         if i <= filled then
             draw_rect(ass, math.floor(x), bar_y, tick_w, tick_h, C_PRIMARY, A_OPAQUE)
         else
@@ -121,6 +124,13 @@ local function change_volume(delta)
     show_volume_bar()
 end
 
+-- Run a seek/chapter command, then open the nav menu (mpv-osc.lua) so the new
+-- position is shown.
+local function seek_with_menu(command)
+    mp.command(command)
+    mp.commandv("script-message", "240mp-osd-menu-show")
+end
+
 mp.add_forced_key_binding("VOLUME_UP",   "mk-vol-up",   function() change_volume(VOLUME_STEP)  end, {repeatable = true})
 mp.add_forced_key_binding("VOLUME_DOWN", "mk-vol-down", function() change_volume(-VOLUME_STEP) end, {repeatable = true})
 mp.add_forced_key_binding("MUTE",        "mk-mute",     function() mp.command("no-osd cycle mute"); show_volume_bar() end)
@@ -128,8 +138,8 @@ mp.add_forced_key_binding("MUTE",        "mk-mute",     function() mp.command("n
 mp.add_forced_key_binding("PLAYPAUSE", "mk-playpause", function() mp.command("cycle pause") end)
 mp.add_forced_key_binding("STOP",      "mk-stop",      function() mp.command("quit") end)
 
-mp.add_forced_key_binding("FORWARD", "mk-forward", function() mp.command("no-osd seek " .. SEEK_FORWARD) end)
-mp.add_forced_key_binding("REWIND",  "mk-rewind",  function() mp.command("no-osd seek -" .. SEEK_BACK) end)
+mp.add_forced_key_binding("FORWARD", "mk-forward", function() seek_with_menu("no-osd seek " .. SEEK_FORWARD) end)
+mp.add_forced_key_binding("REWIND",  "mk-rewind",  function() seek_with_menu("no-osd seek -" .. SEEK_BACK) end)
 
-mp.add_forced_key_binding("NEXT", "mk-next", function() mp.command("no-osd add chapter 1") end)
-mp.add_forced_key_binding("PREV", "mk-prev", function() mp.command("no-osd add chapter -1") end)
+mp.add_forced_key_binding("NEXT", "mk-next", function() seek_with_menu("no-osd add chapter 1") end)
+mp.add_forced_key_binding("PREV", "mk-prev", function() seek_with_menu("no-osd add chapter -1") end)

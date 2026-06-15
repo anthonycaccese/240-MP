@@ -319,6 +319,18 @@ mp.register_script_message("240mp-osd-menu-hide", function()
     if menu_visible then toggle_menu() end
 end)
 
+-- media-keys.lua broadcasts this on seek / chapter changes so the nav menu
+-- pops up to show the new position. Open it if closed; otherwise just redraw
+-- and restart the auto-hide timer.
+mp.register_script_message("240mp-osd-menu-show", function()
+    if menu_visible then
+        reset_idle_timer()
+        draw_menu()
+    else
+        toggle_menu()
+    end
+end)
+
 -- Forced bindings so UP/DOWN take priority over mpv's default seek bindings
 -- on desktop (macOS/Linux with native keyboard input).
 mp.add_forced_key_binding("UP",   "open_menu_up",   toggle_menu)
