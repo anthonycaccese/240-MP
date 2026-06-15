@@ -74,8 +74,6 @@ local function show_volume_bar()
     local filled   = math.floor(volume / VOLUME_STEP + 0.5)
     if filled < 0 then filled = 0 elseif filled > ticks then filled = ticks end
 
-    -- Geometry mirrors the seek bar in mpv-osc.lua so the volume bar lands in the
-    -- same place at the same size: label on the time-text row, bar on the seek row.
     local fs       = math.floor(wh * 0.0333333)
     local lm       = math.floor(ww * 0.12)
     local rm       = math.floor(ww * 0.88)
@@ -95,8 +93,10 @@ local function show_volume_bar()
 
     local ass = assdraw.ass_new()
     -- Bottom-left anchor (\an1) so the 3x label grows upward off the bar row and
-    -- never overlaps the ticks below it.
-    draw_text(ass, lm, row1_y, 1, "VOLUME", label_fs, C_PRIMARY)
+    -- never overlaps the ticks below it. Label reflects mute state so a mute
+    -- toggle (which leaves the volume ticks unchanged) is still legible.
+    local label = mp.get_property_bool("mute", false) and "MUTE" or "VOLUME"
+    draw_text(ass, lm, row1_y, 1, label, label_fs, C_PRIMARY)
 
     local x = lm
     for i = 1, ticks do
