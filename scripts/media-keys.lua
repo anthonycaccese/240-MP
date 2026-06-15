@@ -71,13 +71,11 @@ local function show_volume_bar()
     local volume   = mp.get_property_number("volume", 0) or 0
     local vol_max  = mp.get_property_number("volume-max", 100) or 100
     local ticks    = math.max(1, math.floor(vol_max / VOLUME_STEP + 0.5))
-    local filled   = math.floor(volume / VOLUME_STEP + 0.5)
-    if filled < 0 then filled = 0 elseif filled > ticks then filled = ticks end
+    local filled   = math.max(0, math.min(math.floor(volume / VOLUME_STEP + 0.5), ticks))
 
     local fs       = math.floor(wh * 0.0333333)
     local lm       = math.floor(ww * 0.12)
-    local rm       = math.floor(ww * 0.88)
-    local bar_w    = rm - lm
+    local bar_w    = math.floor(ww * 0.88) - lm
     local bar_h    = math.floor(fs * 2)
     local row1_y   = math.floor(wh * 0.7979166)   -- label row
     local bar_y    = math.floor(wh * 0.8333333)   -- bar row (nav menu's button row)
@@ -88,8 +86,7 @@ local function show_volume_bar()
     local slot_w = bar_w / ticks
     local gap    = math.max(1, math.floor(slot_w * 0.35))
     local tick_w = math.max(1, math.floor(slot_w - gap))
-    local tick_h = bar_h
-    local dash_h = math.max(2, math.floor(tick_h * 0.15))
+    local dash_h = math.max(2, math.floor(bar_h * 0.15))
 
     local ass = assdraw.ass_new()
     -- Bottom-left anchor (\an1) so the 3x label grows upward off the bar row and
@@ -101,10 +98,10 @@ local function show_volume_bar()
     local x = lm
     for i = 1, ticks do
         if i <= filled then
-            draw_rect(ass, math.floor(x), bar_y, tick_w, tick_h, C_PRIMARY, A_OPAQUE)
+            draw_rect(ass, math.floor(x), bar_y, tick_w, bar_h, C_PRIMARY, A_OPAQUE)
         else
             -- Dash centred vertically within the tick's slot.
-            draw_rect(ass, math.floor(x), bar_y + math.floor((tick_h - dash_h) / 2),
+            draw_rect(ass, math.floor(x), bar_y + math.floor((bar_h - dash_h) / 2),
                       tick_w, dash_h, C_PRIMARY, A_DIM)
         end
         x = x + slot_w

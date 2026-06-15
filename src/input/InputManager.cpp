@@ -531,8 +531,9 @@ bool InputManager::eventFilter(QObject *obj, QEvent *event) {
     const QString mediaKey = mpvKeyForMediaEvent(ke);
     if (!mediaKey.isEmpty()) {
         if (type == QEvent::KeyPress) {
-            const bool isVolume = (ke->key() == Qt::Key_VolumeUp ||
-                                   ke->key() == Qt::Key_VolumeDown);
+            // Volume keys repeat while held; everything else fires once per press.
+            // mediaKey is the single source of truth for which key this is.
+            const bool isVolume = mediaKey.startsWith(QLatin1String("VOLUME"));
             if (isVolume || !ke->isAutoRepeat())
                 emit mpvKeyRequested(mediaKey);
         }
