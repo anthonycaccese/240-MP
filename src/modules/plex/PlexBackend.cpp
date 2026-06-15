@@ -636,6 +636,7 @@ QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
         {"durationDisplay",        msToDisplay(m["duration"].toInt())},
         {"grandparentTitle",       m["grandparentTitle"].toString()},
         {"parentTitle",            m["parentTitle"].toString()},
+        {"parentRatingKey",        m["parentRatingKey"].toString()},
         {"index",                  m["index"].toInt()},
         {"parentIndex",            m["parentIndex"].toInt()},
         {"leafCount",              m["leafCount"].toInt()},
@@ -1554,10 +1555,103 @@ void PlexBackend::check_section_capabilities(const QString &sectionId) {
 // Item detail & playback
 // ---------------------------------------------------------------------------
 
+QString PlexBackend::mediaFilePath(const QJsonObject &meta) {
+    QJsonArray mediaArr = meta["Media"].toArray();
+    if (mediaArr.isEmpty()) return {};
+    QJsonArray partArr = mediaArr.first().toObject()["Part"].toArray();
+    if (partArr.isEmpty()) return {};
+    return partArr.first().toObject()["file"].toString();
+}
+
+QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
+    const QString uri = serverUrl();
+    // Guard against metadata with no media/part (e.g. an item the server can't
+    // play). Return an empty map so callers fall back to their no-detail path
+    // instead of emitting a detail with empty stream/part keys.
+    QJsonArray mediaArr = meta["Media"].toArray();
+    if (mediaArr.isEmpty()) return {};
+    QJsonObject media = mediaArr.first().toObject();
+    QJsonArray partArr = media["Part"].toArray();
+    if (partArr.isEmpty()) return {};
+    QJsonObject part  = partArr.first().toObject();
+    QJsonArray streams = part["Stream"].toArray();
+
+    static const QSet<QString> IMAGE_SUB_CODECS = {
+        "pgssub","dvdsub","dvbsub","hdmv_pgs_subtitle","dvd_subtitle"
+    };
+
+    QVariantList audioStreams;
+    QVariantList subtitleStreams;
+    // The "OFF" pseudo-stream uses an empty language so subtitles-off carry-over
+    // is matched by the Player via its explicit "__off__" sentinel, not by language.
+    subtitleStreams.append(QVariantMap{{"id","0"},{"displayTitle","OFF"},
+                                       {"language",""},
+                                       {"selected",false},{"imageSubtitle",false}});
+    QString selectedAudio, selectedSubtitle = "0";
+    QString videoCodec;
+
+    for (const auto &sv : streams) {
+        QJsonObject s = sv.toObject();
+        int st  = s["streamType"].toInt();
+        QString sid   = QString::number(s["id"].toInt());
+        QString title = s["displayTitle"].toString(s["language"].toString("UNKNOWN")).toUpper();
+        // Prefer the ISO language code (stable across episodes); fall back to the
+        // human-readable language name. Used for audio/subtitle carry-over matching.
+        QString lang  = s["languageCode"].toString(s["language"].toString()).toLower();
+        QString codec = s["codec"].toString().toLower();
+        if (st == 1) {
+            videoCodec = codec;
+        } else if (st == 2) {
+            audioStreams.append(QVariantMap{{"id",sid},{"displayTitle",title},{"language",lang}});
+            if (s["selected"].toBool() && selectedAudio.isEmpty())
+                selectedAudio = sid;
+        } else if (st == 3) {
+            bool isImage = IMAGE_SUB_CODECS.contains(codec);
+            QString subKey = s["key"].toString();
+            QString subUrl = subKey.isEmpty() ? "" : uri + subKey;
+            subtitleStreams.append(QVariantMap{{"id",sid},{"displayTitle",title},{"language",lang},{"imageSubtitle",isImage},{"subUrl",subUrl}});
+            if (s["selected"].toBool() && selectedSubtitle == "0")
+                selectedSubtitle = sid;
+        }
+    }
+    if (selectedAudio.isEmpty() && !audioStreams.isEmpty())
+        selectedAudio = audioStreams[0].toMap()["id"].toString();
+
+    bool forceTranscode = (videoQuality() != "auto");
+    qDebug() << "[Plex] Item detail loaded — codec:" << videoCodec
+             << "| quality:" << videoQuality()
+             << "| playback:" << (forceTranscode ? "transcode" : "direct play");
+    int duration = meta["duration"].toInt();
+
+    return QVariantMap{
+        {"ratingKey",        meta["ratingKey"].toString()},
+        {"title",            meta["title"].toString().toUpper()},
+        {"editionTitle",     meta["editionTitle"].toString()},
+        {"year",             meta["year"].toVariant()},
+        {"duration",         duration},
+        {"viewOffset",       meta["viewOffset"].toInt()},
+        {"summary",          meta["summary"].toString()},
+        {"partKey",          part["key"].toString()},
+        {"partId",           QString::number(part["id"].toInt())},
+        {"audioStreams",     audioStreams},
+        {"subtitleStreams",  subtitleStreams},
+        {"selectedAudioId",  selectedAudio},
+        {"selectedSubtitleId", selectedSubtitle},
+        {"durationDisplay",  msToDisplay(duration)},
+        {"forceTranscode",   forceTranscode},
+        {"type",             meta["type"].toString()},
+        {"index",            meta["index"].toInt()},
+        {"parentIndex",      meta["parentIndex"].toInt()},
+        {"parentRatingKey",  meta["parentRatingKey"].toString()},
+        {"grandparentTitle", meta["grandparentTitle"].toString()},
+        {"parentTitle",      meta["parentTitle"].toString()},
+    };
+}
+
 void PlexBackend::load_item_detail(const QString &ratingKey) {
     QString uri = serverUrl(), token = serverToken();
     auto *reply = plexGet(QUrl(uri + "/library/metadata/" + ratingKey), token);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, ratingKey, uri, token]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, ratingKey]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
@@ -1568,74 +1662,7 @@ void PlexBackend::load_item_detail(const QString &ratingKey) {
         QJsonArray metaArr = QJsonDocument::fromJson(reply->readAll())
                              .object()["MediaContainer"].toObject()["Metadata"].toArray();
         if (metaArr.isEmpty()) { emit errorOccurred("LOAD DETAIL FAILED: empty metadata"); return; }
-        QJsonObject meta  = metaArr[0].toObject();
-        QJsonObject media = meta["Media"].toArray().first().toObject();
-        QJsonObject part  = media["Part"].toArray().first().toObject();
-        QJsonArray streams = part["Stream"].toArray();
-
-        static const QSet<QString> IMAGE_SUB_CODECS = {
-            "pgssub","dvdsub","dvbsub","hdmv_pgs_subtitle","dvd_subtitle"
-        };
-
-        QVariantList audioStreams;
-        QVariantList subtitleStreams;
-        subtitleStreams.append(QVariantMap{{"id","0"},{"displayTitle","OFF"},
-                                           {"selected",false},{"imageSubtitle",false}});
-        QString selectedAudio, selectedSubtitle = "0";
-        QString videoCodec;
-
-        for (const auto &sv : streams) {
-            QJsonObject s = sv.toObject();
-            int st  = s["streamType"].toInt();
-            QString sid   = QString::number(s["id"].toInt());
-            QString title = s["displayTitle"].toString(s["language"].toString("UNKNOWN")).toUpper();
-            QString codec = s["codec"].toString().toLower();
-            if (st == 1) {
-                videoCodec = codec;
-            } else if (st == 2) {
-                audioStreams.append(QVariantMap{{"id",sid},{"displayTitle",title}});
-                if (s["selected"].toBool() && selectedAudio.isEmpty())
-                    selectedAudio = sid;
-            } else if (st == 3) {
-                bool isImage = IMAGE_SUB_CODECS.contains(codec);
-                QString subKey = s["key"].toString();
-                QString subUrl = subKey.isEmpty() ? "" : uri + subKey;
-                subtitleStreams.append(QVariantMap{{"id",sid},{"displayTitle",title},{"imageSubtitle",isImage},{"subUrl",subUrl}});
-                if (s["selected"].toBool() && selectedSubtitle == "0")
-                    selectedSubtitle = sid;
-            }
-        }
-        if (selectedAudio.isEmpty() && !audioStreams.isEmpty())
-            selectedAudio = audioStreams[0].toMap()["id"].toString();
-
-        bool forceTranscode = (videoQuality() != "auto");
-        qDebug() << "[Plex] Item detail loaded — codec:" << videoCodec
-                 << "| quality:" << videoQuality()
-                 << "| playback:" << (forceTranscode ? "transcode" : "direct play");
-        int duration = meta["duration"].toInt();
-
-        emit itemLoaded(QVariantMap{
-            {"ratingKey",        ratingKey},
-            {"title",            meta["title"].toString().toUpper()},
-            {"editionTitle",     meta["editionTitle"].toString()},
-            {"year",             meta["year"].toVariant()},
-            {"duration",         duration},
-            {"viewOffset",       meta["viewOffset"].toInt()},
-            {"summary",          meta["summary"].toString()},
-            {"partKey",          part["key"].toString()},
-            {"partId",           QString::number(part["id"].toInt())},
-            {"audioStreams",     audioStreams},
-            {"subtitleStreams",  subtitleStreams},
-            {"selectedAudioId",  selectedAudio},
-            {"selectedSubtitleId", selectedSubtitle},
-            {"durationDisplay",  msToDisplay(duration)},
-            {"forceTranscode",   forceTranscode},
-            {"type",             meta["type"].toString()},
-            {"index",            meta["index"].toInt()},
-            {"parentIndex",      meta["parentIndex"].toInt()},
-            {"grandparentTitle", meta["grandparentTitle"].toString()},
-            {"parentTitle",      meta["parentTitle"].toString()},
-        });
+        emit itemLoaded(buildItemDetail(metaArr[0].toObject()));
     });
 }
 
@@ -1679,6 +1706,85 @@ void PlexBackend::load_on_deck_for(const QString &ratingKey) {
             }
         }
         emit inProgressEpisodeLoaded(QVariantMap{});
+    });
+}
+
+void PlexBackend::load_next_episode(const QString &currentRatingKey) {
+    QString uri = serverUrl(), token = serverToken();
+    // Step 1: fetch the current episode's metadata to learn its season
+    // (parentRatingKey) and episode number (index).
+    auto *reply = plexGet(QUrl(uri + "/library/metadata/" + currentRatingKey), token);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, currentRatingKey, uri, token]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this, currentRatingKey]{ load_next_episode(currentRatingKey); }); return;
+            }
+            emit nextEpisodeReady(QVariantMap{}); return;
+        }
+        QJsonArray metaArr = QJsonDocument::fromJson(reply->readAll())
+                             .object()["MediaContainer"].toObject()["Metadata"].toArray();
+        if (metaArr.isEmpty()) { emit nextEpisodeReady(QVariantMap{}); return; }
+        QJsonObject meta = metaArr[0].toObject();
+
+        const QString seasonKey   = meta["parentRatingKey"].toString();
+        const int     currentIndex = meta["index"].toInt();
+        // Server-side file of the episode that just finished. Stacked shows back
+        // several episode entries with ONE physical file (e.g. an "E01-E02" file);
+        // advancing into such a sibling would just replay the same file, so we
+        // skip every sibling sharing this path and land on the next distinct file.
+        const QString currentFile = mediaFilePath(meta);
+        if (meta["type"].toString() != "episode" || seasonKey.isEmpty()) {
+            emit nextEpisodeReady(QVariantMap{}); return;
+        }
+
+        // Step 2: fetch the season's episodes and pick the one whose index is the
+        // smallest value strictly greater than the current episode (robust to gaps
+        // and arbitrary ordering), skipping siblings backed by the same file.
+        auto *childReply = plexGet(QUrl(uri + "/library/metadata/" + seasonKey + "/children"), token);
+        connect(childReply, &QNetworkReply::finished, this,
+                [this, childReply, currentRatingKey, currentIndex, currentFile, uri, token]() {
+            childReply->deleteLater();
+            if (childReply->error() != QNetworkReply::NoError) {
+                if (childReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                    handle498([this, currentRatingKey]{ load_next_episode(currentRatingKey); }); return;
+                }
+                emit nextEpisodeReady(QVariantMap{}); return;
+            }
+            QJsonArray eps = QJsonDocument::fromJson(childReply->readAll())
+                             .object()["MediaContainer"].toObject()["Metadata"].toArray();
+            QString nextKey;
+            int nextIndex = 0;
+            for (const auto &ev : eps) {
+                QJsonObject e = ev.toObject();
+                int idx = e["index"].toInt();
+                const QString file = mediaFilePath(e);
+                // Skip siblings that share the just-played file (stacked entries).
+                const bool sameFile = (!currentFile.isEmpty() && file == currentFile);
+                if (idx > currentIndex && !sameFile && (nextKey.isEmpty() || idx < nextIndex)) {
+                    nextIndex = idx;
+                    nextKey   = e["ratingKey"].toString();
+                }
+            }
+            if (nextKey.isEmpty()) { emit nextEpisodeReady(QVariantMap{}); return; }
+
+            // Step 3: fetch the next episode's full metadata and build playable detail.
+            auto *detailReply = plexGet(QUrl(uri + "/library/metadata/" + nextKey), token);
+            connect(detailReply, &QNetworkReply::finished, this,
+                    [this, detailReply, currentRatingKey]() {
+                detailReply->deleteLater();
+                if (detailReply->error() != QNetworkReply::NoError) {
+                    if (detailReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                        handle498([this, currentRatingKey]{ load_next_episode(currentRatingKey); }); return;
+                    }
+                    emit nextEpisodeReady(QVariantMap{}); return;
+                }
+                QJsonArray arr = QJsonDocument::fromJson(detailReply->readAll())
+                                 .object()["MediaContainer"].toObject()["Metadata"].toArray();
+                if (arr.isEmpty()) { emit nextEpisodeReady(QVariantMap{}); return; }
+                emit nextEpisodeReady(buildItemDetail(arr[0].toObject()));
+            });
+        });
     });
 }
 

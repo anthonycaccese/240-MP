@@ -46,6 +46,10 @@ public:
     Q_INVOKABLE void check_section_capabilities(const QString &sectionId);
     Q_INVOKABLE void load_children(const QString &ratingKey);
     Q_INVOKABLE void load_on_deck_for(const QString &ratingKey);
+    // Resolves the next episode in the same season as currentRatingKey and emits
+    // nextEpisodeReady with a full playable detail (same shape as load_item_detail),
+    // or an empty map when there is no next episode / on any failure.
+    Q_INVOKABLE void load_next_episode(const QString &currentRatingKey);
 
     // Playback
     Q_INVOKABLE void load_item_detail(const QString &ratingKey);
@@ -90,6 +94,7 @@ signals:
     void streamUrlReady(const QString &url, const QString &plexToken);
     void childrenLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);
+    void nextEpisodeReady(const QVariant &detail);
 
     void dynamicOptionsReady(const QString &key, const QVariant &options);
 
@@ -124,6 +129,14 @@ private:
 
     // Item formatting helpers
     QVariantMap formatItem(const QJsonObject &m) const;
+    // Builds the full playable detail map (streams, selections, transcode flag)
+    // from a single /library/metadata Metadata object. Shared by load_item_detail
+    // and load_next_episode.
+    QVariantMap buildItemDetail(const QJsonObject &meta) const;
+    // Returns the server-side file path of a metadata object's first media part,
+    // or an empty string when unavailable. Used to detect stacked multi-episode
+    // files (several episode entries backed by one physical file).
+    static QString mediaFilePath(const QJsonObject &meta);
     static QString msToDisplay(int ms);
 
     // Expands any season-type items in rawItems into their child episodes, then calls callback.

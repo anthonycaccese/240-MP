@@ -7,11 +7,15 @@ FocusScope {
 
     signal navigateTo(string path, var params)
     signal goBack()
+    // Emitted when autoplay advances in place, so Root can repoint the BACK
+    // target to the now-playing episode's detail instead of the original one.
+    signal updateBackItem(var item)
 
     property string streamUrl:    navParams.streamUrl    || ""
     property string plexToken:    navParams.plexToken    || ""
     property string ratingKey:    navParams.ratingKey    || ""
     property string partKey:      navParams.partKey      || ""
+    property string partId:       navParams.partId       || ""
     property string sessionId:    navParams.sessionId    || ""
     property int    viewOffset:   navParams.viewOffset   || 0
     property string itemTitle:    navParams.title        || ""
@@ -21,7 +25,6 @@ FocusScope {
     property int    subtitleIdx: 0
     property bool   isTranscoding:    navParams.isTranscoding    || false
     property var    imageSubtitleIds: navParams.imageSubtitleIds || []
-    property string activeSessionId: sessionId
     property string selectedAudioId:    navParams.selectedAudioId    || ""
     property string selectedSubtitleId: navParams.selectedSubtitleId || "0"
 
@@ -31,6 +34,13 @@ FocusScope {
     property string resumeSetting:    "ask"
     property bool pendingZeroStart:   false
     property bool pendingRetryTranscode: false
+
+    // Autoplay-next-episode. When enabled, a natural end-of-file advances to the
+    // next episode in the same season, carrying over the audio/subtitle language.
+    property bool   autoplayNext:       false
+    property bool   pendingNextEpisode: false
+    property string carryAudioLang:     ""        // language code of the chosen audio track
+    property string carrySubLang:       "__off__" // language code, or "__off__" when subtitles are off
 
     // For transcoded streams, Plex HLS segments have timestamps starting at 0
     // relative to the transcode offset. We add this to every position we report
@@ -102,13 +112,18 @@ FocusScope {
         return transcodeStartOffset + streamPosMs
     }
 
+    // Report the final "stopped" timeline for the current episode exactly once.
+    // The fallback position/duration are used only when no live value is known.
+    function reportStopped(finalPositionMs, finalDurationMs) {
+        if (stoppedReported) return
+        stoppedReported = true
+        var pos = lastKnownPositionMs || absPos(finalPositionMs)
+        var dur = lastKnownDurationMs || finalDurationMs
+        plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
+    }
+
     function stopPlayback() {
-        if (!stoppedReported) {
-            stoppedReported = true
-            var pos = lastKnownPositionMs || absPos(mpvController.position)
-            var dur = lastKnownDurationMs || mpvController.duration
-            plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
-        }
+        reportStopped(mpvController.position, mpvController.duration)
         mpvController.stop()
     }
 
@@ -120,6 +135,32 @@ FocusScope {
         }
         for (var j = 0; j < subtitleStreams.length; j++) {
             if (subtitleStreams[j].id === selSub) { subtitleIdx = j; break }
+        }
+        captureCarryLanguages()
+    }
+
+    // Record the language of the current audio/subtitle selection so the next
+    // episode (which has different per-file stream IDs) can be matched by language.
+    function captureCarryLanguages() {
+        var a = audioStreams[audioIdx]
+        carryAudioLang = (a && a.language) ? a.language : ""
+        // subtitleIdx 0 is the synthetic "OFF" entry — preserve "off" deliberately.
+        var s = subtitleStreams[subtitleIdx]
+        carrySubLang = (subtitleIdx === 0 || !s) ? "__off__" : (s.language || "")
+    }
+
+    // Select audioIdx/subtitleIdx on the current stream lists to match the carried
+    // languages. Falls back to the first audio track / subtitles-off when no match.
+    function applyCarryLanguages() {
+        audioIdx = 0
+        for (var i = 0; i < audioStreams.length; i++) {
+            if (carryAudioLang && audioStreams[i].language === carryAudioLang) { audioIdx = i; break }
+        }
+        subtitleIdx = 0
+        if (carrySubLang !== "__off__" && carrySubLang !== "") {
+            for (var j = 1; j < subtitleStreams.length; j++) {
+                if (subtitleStreams[j].language === carrySubLang) { subtitleIdx = j; break }
+            }
         }
     }
 
@@ -184,6 +225,14 @@ FocusScope {
         target: plexBackend
         function onErrorOccurred(msg) { console.log("[Player] Backend error: " + msg) }
         function onStreamUrlReady(url, plexToken) {
+            if (pendingNextEpisode) {
+                // Stream URL for the auto-advanced next episode just arrived.
+                pendingNextEpisode = false
+                playerRoot.streamUrl = url
+                playerRoot.plexToken = plexToken
+                doStartPlayback(0)
+                return
+            }
             if (pendingRetryTranscode) {
                 pendingRetryTranscode = false
                 isTranscoding = true
@@ -196,6 +245,84 @@ FocusScope {
             pendingZeroStart = false
             var sub = buildSubArgs()
             mpvController.loadAndPlay(url, 0.0, audioIdx + 1, sub.track, sub.urls, false, -1, 0.0, plexToken)
+        }
+
+        function onNextEpisodeReady(detail) {
+            if (!pendingNextEpisode) return
+            // Empty detail → no next episode in the season (or a lookup failure).
+            // Fall back to the standard behavior: return to the detail view.
+            if (!detail || !detail.ratingKey) {
+                pendingNextEpisode = false
+                goBack()
+                return
+            }
+            playerRoot.advanceToEpisode(detail)
+        }
+    }
+
+    // Swap the player's context to the next episode in place (no navigation) and
+    // begin playing it from the beginning, carrying over the track languages.
+    function advanceToEpisode(detail) {
+        ratingKey   = detail.ratingKey
+        partKey     = detail.partKey      || ""
+        partId      = detail.partId       || ""
+        itemTitle   = detail.title        || ""
+        audioStreams    = detail.audioStreams    || []
+        subtitleStreams = detail.subtitleStreams || []
+        isTranscoding   = detail.forceTranscode  || false
+
+        // Recompute the image-subtitle IDs for THIS episode (stream IDs are
+        // per-file), mirroring Item.qml's build before the initial hand-off.
+        var imageSubs = []
+        for (var k = 0; k < subtitleStreams.length; k++) {
+            if (subtitleStreams[k] && subtitleStreams[k].imageSubtitle)
+                imageSubs.push(subtitleStreams[k].id)
+        }
+        imageSubtitleIds = imageSubs
+
+        // Fresh-start state for the new episode.
+        viewOffset           = 0
+        transcodeStartOffset = 0
+        stoppedReported      = false
+        lastKnownPositionMs  = 0
+        lastKnownDurationMs  = 0
+        sessionId            = newSessionId()
+
+        // Repoint the BACK target so exiting returns to THIS episode's detail
+        // screen, not the one we auto-advanced from. Item.qml reloads from
+        // item.ratingKey, so a minimal item carrying the new keys suffices.
+        updateBackItem({
+            ratingKey: detail.ratingKey,
+            type: detail.type || "episode",
+            title: detail.title || "",
+            grandparentTitle: detail.grandparentTitle || "",
+            parentIndex: detail.parentIndex,
+            index: detail.index
+        })
+
+        // Match the carried languages onto this episode's stream lists, then
+        // remember the resulting selection for the episode after this one.
+        applyCarryLanguages()
+        var audioId = (audioStreams[audioIdx] && audioStreams[audioIdx].id) ? audioStreams[audioIdx].id : ""
+        var subId   = (subtitleStreams[subtitleIdx] && subtitleStreams[subtitleIdx].id) ? subtitleStreams[subtitleIdx].id : "0"
+        selectedAudioId    = audioId
+        selectedSubtitleId = subId
+        captureCarryLanguages()
+
+        // Persist the chosen tracks to Plex so a transcode burns the right streams
+        // (mirrors Item.qml's behavior before playback).
+        if (partId) {
+            if (audioId) plexBackend.set_audio_stream(audioId, partId)
+            plexBackend.set_subtitle_stream(subId, partId)
+        }
+
+        // Both paths resolve through onStreamUrlReady, which checks this flag.
+        // build_stream_url emits synchronously, so the flag must be set first.
+        pendingNextEpisode = true
+        if (isTranscoding) {
+            plexBackend.request_transcode(ratingKey, partKey, sessionId, audioId, subId, 0)
+        } else {
+            plexBackend.build_stream_url(ratingKey, partKey, sessionId)
         }
     }
 
@@ -210,12 +337,18 @@ FocusScope {
         }
 
         function onPlaybackFinished(finalPositionMs, finalDurationMs) {
-            if (!playerRoot.stoppedReported) {
-                var pos = playerRoot.lastKnownPositionMs || playerRoot.absPos(finalPositionMs)
-                var dur = playerRoot.lastKnownDurationMs || finalDurationMs
-                plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
-            }
+            // mpv exited because the user quit/stopped — return to the detail view.
+            reportStopped(finalPositionMs, finalDurationMs)
             goBack()
+        }
+
+        function onPlaybackFinishedNaturally(finalPositionMs, finalDurationMs) {
+            // mpv reached the end of the file. Mark it stopped (watched) in Plex,
+            // then auto-advance to the next episode if the feature is enabled.
+            reportStopped(finalPositionMs, finalDurationMs)
+            if (!autoplayNext) { goBack(); return }
+            pendingNextEpisode = true
+            plexBackend.load_next_episode(ratingKey)
         }
 
         function onPlaybackFailed() {
@@ -247,6 +380,10 @@ FocusScope {
         initStreamIndices()
         if (streamUrl === "") return
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        // Match ModuleSettings.qml's reading of a toggle: stored as a real bool
+        // once the user touches it, but accept the legacy "ON" string too.
+        var autoplayRaw = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode")
+        autoplayNext  = (autoplayRaw === true || autoplayRaw === "ON")
 
         // Plex HLS transcode segments start at time 0 regardless of viewOffset.
         // Track the offset so every reported position is absolute in the video.
