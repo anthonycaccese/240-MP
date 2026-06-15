@@ -25,7 +25,6 @@ FocusScope {
     property int    subtitleIdx: 0
     property bool   isTranscoding:    navParams.isTranscoding    || false
     property var    imageSubtitleIds: navParams.imageSubtitleIds || []
-    property string activeSessionId: sessionId
     property string selectedAudioId:    navParams.selectedAudioId    || ""
     property string selectedSubtitleId: navParams.selectedSubtitleId || "0"
 
@@ -113,23 +112,19 @@ FocusScope {
         return transcodeStartOffset + streamPosMs
     }
 
-    function stopPlayback() {
-        if (!stoppedReported) {
-            stoppedReported = true
-            var pos = lastKnownPositionMs || absPos(mpvController.position)
-            var dur = lastKnownDurationMs || mpvController.duration
-            plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
-        }
-        mpvController.stop()
-    }
-
-    // Report the final "stopped" timeline for the current episode (idempotent —
-    // skipped if stopPlayback already reported it).
+    // Report the final "stopped" timeline for the current episode exactly once.
+    // The fallback position/duration are used only when no live value is known.
     function reportStopped(finalPositionMs, finalDurationMs) {
         if (stoppedReported) return
+        stoppedReported = true
         var pos = lastKnownPositionMs || absPos(finalPositionMs)
         var dur = lastKnownDurationMs || finalDurationMs
         plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
+    }
+
+    function stopPlayback() {
+        reportStopped(mpvController.position, mpvController.duration)
+        mpvController.stop()
     }
 
     function initStreamIndices() {
@@ -283,7 +278,6 @@ FocusScope {
         lastKnownPositionMs  = 0
         lastKnownDurationMs  = 0
         sessionId            = newSessionId()
-        activeSessionId      = sessionId
 
         // Repoint the BACK target so exiting returns to THIS episode's detail
         // screen, not the one we auto-advanced from. Item.qml reloads from

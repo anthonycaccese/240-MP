@@ -328,15 +328,16 @@ void MpvController::onIpcReadyRead() {
         const QJsonObject obj = QJsonDocument::fromJson(line).object();
         if (obj.isEmpty()) continue;
         const QString event = obj["event"].toString();
-        if (event == "end-file") {
+        // property-change is the hot path (fires many times per second), so test
+        // it first; only other events pay for the end-file check below.
+        if (event != "property-change") {
             // mpv reports why playback ended: "eof" (played to the end),
             // "quit"/"stop" (user exited), "error", etc. Remember the last one
             // so onProcessFinished can distinguish a natural finish from a quit.
-            m_lastEndFileReason = obj["reason"].toString();
+            if (event == "end-file")
+                m_lastEndFileReason = obj["reason"].toString();
             continue;
         }
-        if (event != "property-change")
-            continue;
 
         m_lastIpcEventMs = QDateTime::currentMSecsSinceEpoch();
 
@@ -368,6 +369,13 @@ void MpvController::onProcessFinished() {
         qWarning("[MpvController] mpv exited with code %d", exitCode);
     m_connectTimer->stop();
     m_watchdogTimer->stop();
+    // Drain any buffered-but-unread IPC data before tearing the socket down.
+    // readyRead and QProcess::finished are independent event-loop signals with
+    // no ordering guarantee, so mpv's final "end-file" event may still be sitting
+    // in the socket buffer here. Flushing it now ensures m_lastEndFileReason is
+    // accurate, so a natural EOF reliably triggers autoplay-next.
+    if (m_ipc->state() == QLocalSocket::ConnectedState)
+        onIpcReadyRead();
     m_ipc->abort();
     QFile::remove(m_socketPath);
     const int pos = m_position;

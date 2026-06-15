@@ -1565,8 +1565,15 @@ QString PlexBackend::mediaFilePath(const QJsonObject &meta) {
 
 QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
     const QString uri = serverUrl();
-    QJsonObject media = meta["Media"].toArray().first().toObject();
-    QJsonObject part  = media["Part"].toArray().first().toObject();
+    // Guard against metadata with no media/part (e.g. an item the server can't
+    // play). Return an empty map so callers fall back to their no-detail path
+    // instead of emitting a detail with empty stream/part keys.
+    QJsonArray mediaArr = meta["Media"].toArray();
+    if (mediaArr.isEmpty()) return {};
+    QJsonObject media = mediaArr.first().toObject();
+    QJsonArray partArr = media["Part"].toArray();
+    if (partArr.isEmpty()) return {};
+    QJsonObject part  = partArr.first().toObject();
     QJsonArray streams = part["Stream"].toArray();
 
     static const QSet<QString> IMAGE_SUB_CODECS = {
