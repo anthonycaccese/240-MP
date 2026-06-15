@@ -271,6 +271,15 @@ FocusScope {
         subtitleStreams = detail.subtitleStreams || []
         isTranscoding   = detail.forceTranscode  || false
 
+        // Recompute the image-subtitle IDs for THIS episode (stream IDs are
+        // per-file), mirroring Item.qml's build before the initial hand-off.
+        var imageSubs = []
+        for (var k = 0; k < subtitleStreams.length; k++) {
+            if (subtitleStreams[k] && subtitleStreams[k].imageSubtitle)
+                imageSubs.push(subtitleStreams[k].id)
+        }
+        imageSubtitleIds = imageSubs
+
         // Fresh-start state for the new episode.
         viewOffset           = 0
         transcodeStartOffset = 0
@@ -371,7 +380,10 @@ FocusScope {
         initStreamIndices()
         if (streamUrl === "") return
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
-        autoplayNext  = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode") === true
+        // Match ModuleSettings.qml's reading of a toggle: stored as a real bool
+        // once the user touches it, but accept the legacy "ON" string too.
+        var autoplayRaw = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode")
+        autoplayNext  = (autoplayRaw === true || autoplayRaw === "ON")
 
         // Plex HLS transcode segments start at time 0 regardless of viewOffset.
         // Track the offset so every reported position is absolute in the video.

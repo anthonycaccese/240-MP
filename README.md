@@ -39,6 +39,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - User profile switching and auto sign in
 - Select specific libraries to display
 - Continue Watching and Resume
+- Autoplay next episode in a season (optional, off by default)
 - Hub, Playlist, Collection and Category support
 - Movie editions
 - Select preferred audio/subtitle track before playback and switch tracks during playback
