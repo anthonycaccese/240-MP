@@ -183,6 +183,8 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
 
     At this point you can type `240mp` at any time to start up the app.  And if you installed the autostart service then the next time you boot your Pi it will boot directly into 240-MP.
 
+    **Exit to Terminal (autostart only):** with the autostart service installed, the Quit dialog gains an `Exit to Terminal` option alongside `Power Off`. Choosing it drops you to a login shell on the Pi instead of powering off, and leaves autostart intact. To get back into 240-MP from that shell you can type `240mp`, run `sudo systemctl start 240mp`, or `sudo reboot` — any of the three reopens the app.
+
 ### Update
 
 To update to the latest release on Raspberry Pi please follow these steps (your settings will be retained):
@@ -212,7 +214,7 @@ To update to the latest release on Raspberry Pi please follow these steps (your 
     ```bash
     sudo systemctl unmask getty@tty1.service autovt@.service
     sudo systemctl disable 240mp.service
-    sudo rm /etc/systemd/system/240mp.service
+    sudo rm -f /etc/systemd/system/240mp.service /etc/systemd/system/240mp-terminal.service /usr/local/bin/240mp-stop
     sudo systemctl daemon-reload
     ```
 

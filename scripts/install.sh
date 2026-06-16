@@ -146,16 +146,53 @@ Environment=QT_QPA_PLATFORM=eglfs
 Environment=QT_QPA_EGLFS_ALWAYS_SET_MODE=1
 Environment=QT_QPA_EGLFS_KMS_ATOMIC=1
 Environment=QML2_IMPORT_PATH=/usr/lib/aarch64-linux-gnu/qt6/qml
+Environment=MP240_AUTOSTART=1
+ExecStartPre=+-/usr/bin/systemctl stop 240mp-terminal.service
 ExecStart=${LAUNCHER}
 Restart=on-failure
 RestartSec=5s
-ExecStopPost=+systemctl poweroff
+RestartPreventExitStatus=10
+ExecStopPost=+/usr/local/bin/240mp-stop
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+    # ExecStopPost helper: normal quit (exit 0) or a crash powers the Pi off as
+    # before; exit 10 means the user chose "Exit to Terminal", so instead spawn a
+    # login shell on tty1 (see views/Settings.qml). RestartPreventExitStatus=10
+    # keeps Restart=on-failure from relaunching the app over that shell.
+    sudo tee /usr/local/bin/240mp-stop > /dev/null << 'STOP_HELPER'
+#!/usr/bin/env bash
+# Called by 240mp.service ExecStopPost. systemd sets $EXIT_STATUS to the app's exit code.
+if [ "${EXIT_STATUS:-}" = "10" ]; then
+    systemctl start 240mp-terminal.service
+else
+    systemctl poweroff
+fi
+STOP_HELPER
+    sudo chmod +x /usr/local/bin/240mp-stop
+
+    # On-demand login shell for "Exit to Terminal". Not enabled (no boot race with
+    # 240mp.service); getty@tty1 stays masked. Started only by 240mp-stop, and
+    # stopped again by 240mp.service's ExecStartPre when the app comes back.
+    sudo tee /etc/systemd/system/240mp-terminal.service > /dev/null << 'TERMINAL_UNIT'
+[Unit]
+Description=240-MP exit-to-terminal login shell
+
+[Service]
+Type=idle
+ExecStart=-/sbin/agetty --noclear tty1 linux
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+KillMode=process
+Restart=no
+TERMINAL_UNIT
 
     sudo systemctl mask getty@tty1.service autovt@.service
     sudo systemctl daemon-reload
