@@ -219,7 +219,7 @@ How you read logs depends on whether you installed the autostart service:
     journalctl -u 240mp -b        # logs from this boot
     journalctl -u 240mp -f        # follow live
     ```
-    Heads-up: the autostart service runs `ExecStopPost=240mp-stop`, which **powers the Pi off when you quit** (exit 0) — the console disappears with it. To debug without powering off, either pick **Exit to Terminal** in the Quit dialog (drops to a login shell on `tty1` without removing the service — type `240mp`, `sudo systemctl start 240mp`, or `sudo reboot` to return), or stop the service and run the binary directly:
+    Heads-up: the autostart service runs `ExecStopPost=240mp-stop`, which **powers the Pi off when you quit** (exit 0) — the console disappears with it. To debug without powering off, either pick **Exit to Terminal** in the Quit dialog (drops to a login shell on `tty1` without removing the service — `sudo systemctl start 240mp` or `sudo reboot` to return to the service), or stop the service and run the binary directly:
     ```bash
     sudo systemctl stop 240mp
     240mp

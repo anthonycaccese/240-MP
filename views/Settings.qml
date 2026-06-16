@@ -19,12 +19,9 @@ FocusScope {
     property bool quitOverlayVisible: false
     property int quitChoiceIndex: 0
 
-    // Quit overlay choices. Under the autostart service (headless RPi) we offer an
+    // Quit overlay choices. Under the autostart service (headless RPi) the quit menu has an
     // "Exit to Terminal" option that drops to a tty1 login without powering off; that
-    // option is meaningless on macOS/Desktop and when run by hand, so it's hidden there.
-    // autostartSession is cached once in buildModel() (not bound to appCore directly):
-    // a live binding on the appCore context property throws a TypeError when this view's
-    // Loader tears down — e.g. during the Qt.exit(10) the "terminal" choice triggers.
+    // option is not needed on macOS/Desktop or when run by hand, so it's yes/no for that case.
     property bool autostartSession: false
     property var quitOptions: settingsRoot.autostartSession
         ? [{ label: "Power Off",        action: "quit"     },
