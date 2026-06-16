@@ -6,14 +6,21 @@ The following steps will set up an image for your Raspberry Pi with the latest v
 
 ### Requirements
 
-- A RaspberryPi [4](https://www.raspberrypi.com/products/raspberry-pi-4-model-b/) or [3B+](https://www.raspberrypi.com/products/raspberry-pi-3-model-b-plus/) - These are the models I've tested most and are my recommendation. The [5](https://www.raspberrypi.com/products/raspberry-pi-5/) also works but **over HDMI only** — the Pi 5 has no composite output, so it can't drive a CRT. It may work on other models too but sorry I can't say for sure
-- SD Card (minimum of 4GB)
+- A RaspberryPi [4](https://www.raspberrypi.com/products/raspberry-pi-4-model-b/) or [3B+](https://www.raspberrypi.com/products/raspberry-pi-3-model-b-plus/).
+    - These are the models I've tested with. The Pi 4 fits in a nice sweet spot of performance + composite out so that is the model I use daily.  
+    The [5](https://www.raspberrypi.com/products/raspberry-pi-5/) also works but I've only tested **over HDMI** to a modern TV (the Pi 5 has no composite output port and I don't have the hardware to test direct video over HDMI to a CRT). 
+    = It may work on other models too, but sorry I can't say for sure.
+    - I've started a [hardware testing](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) page on the wiki with more details
+- SD Card (minimum of 4GB) with RaspberryPi OS already set up
+    - Note: 240-MP is only an application, it's not an OS so you will need to make sure you have an OS setup and working with the display you'd like to use. 
+    - In the below steps I provide an example using Raspberry Pi OS Lite that you can use to create a fresh SD card along with configs i've tested for CRT and HDMI output.
+    - The 240-MP specific steps start at step 5 so you can skip to that if you already have an OS running.
 - A keyboard to navigate
 - Internet Access (either WiFi or network cable will work)
 
 ### Optional
 
-- A CRT TV and a composite cable - Composite out is my recommended way to use 240-MP but it will also work over HDMI as well so just select the config that works for your setup in step 2 below.  This is the composite cable I use if you happen to have a CRT: https://www.adafruit.com/product/2881 (note: composite is only available on the Pi 3/4 — the Pi 5 is HDMI-only.)
+- A CRT TV and a composite cable - Composite out is my recommended way to use 240-MP but it will also work over HDMI as well so just select the config that works for your setup in step 2 below.  This is the composite cable I use if you happen to have a CRT: https://www.adafruit.com/product/2881 (note: composite is only available on the Pi 3/4 — the Pi 5 works well over HDMI.)
 - USB remote control - Keyboard input works well but if you want that experience of sitting back and playing video on a VCR then a remote will definitely help with that.  I use this one: https://www.amazon.com/dp/B01FVUGPE8
 - USB game controller - Most controllers (Xbox, PlayStation, 8BitDo, NES-style, etc.) should work out of the box: D-pad/left stick to navigate, A to select, B to go back, Start for play/pause.  Controllers can be plugged in at any time, and the button mapping can be customized — see [BUILDING.md → Gamepad input](BUILDING.md#gamepad-input-inputcfg).  If a controller isn't detected, make sure your user is in the `input` group: `sudo usermod -aG input $USER` then reboot.
 
