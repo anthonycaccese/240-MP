@@ -178,6 +178,19 @@ The current MPV implementation is a good reference implementation of the "browse
 3. **State back to QML** — `MpvController` issues `observe_property` for `time-pos`, `duration`, and `playlist-pos`, and re-publishes them as `Q_PROPERTY`s + the `positionChanged` / `durationChanged` / `playlistPosChanged` signals. A watchdog timer logs a warning if no `time-pos` event arrives for ~10 s (freeze detection).
 4. **Exit** — when mpv quits, `MpvController` emits **`playbackFinished(finalPos, finalDur)`** on a normal exit (used to record resume position), or **`playbackFailed()`** when mpv exits with code 2 (file couldn't be played) — `Player.qml` listens for this to retry with transcoding.
 
+### Per-device video decode profiles
+
+The `--vo`/`--hwdec` flags mpv launches with are **auto-selected per device** so each target hardware-decodes efficiently with no user setup. `MpvController::detectVideoProfile()` reads `/proc/device-tree/model` once at startup; `appendVideoArgs()` then picks the flag set:
+
+| Target | Boot driver | Video flags |
+|---|---|---|
+| Pi 3B / 3B+ / 4B | Fake KMS (`vc4-fkms-v3d`) | `--vo=gpu --gpu-context=drm --hwdec=v4l2m2m-copy` |
+| Pi 5 | Full KMS (`vc4-kms-v3d`) | `--vo=drm --hwdec=auto-safe` |
+| Unknown headless Linux | — | `--vo=drm --hwdec=auto-safe` (safe fallback) |
+| macOS (Apple Silicon) | — | `--hwdec=videotoolbox` |
+
+Under Fake KMS, `--vo=drm` cannot direct-render and mpv silently falls back to software decode — the gpu/drm VO plus the `v4l2m2m` stateful decoder is what keeps Pi 3/4 hardware-decoding H.264. Advanced users can override the auto-detected flags with the app-level `mpv_video_args` setting in `config.json` (a space-separated flag string under `"app"`); it is read at each launch, so changes apply on the next playback without a rebuild — useful for on-hardware tuning.
+
 ### Custom OSC (Lua)
 
 The on-screen controls mpv shows during playback are custom Lua scripts in `scripts/` (`mpv-osc.lua` for normal playback, `ambient-osc.lua` for Ambient Mode), loaded via mpv's `--script=` flag. Options are passed in with `--script-opts=` (e.g. `transcode-offset=<sec>`). The remote's key events reach these scripts through the `keypress` IPC bridge described above.

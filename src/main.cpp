@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
     LocalFilesBackend   localFiles(appRoot, dataRoot);
     PlexBackend         plexBackend(appRoot, dataRoot);
     AmbientModeBackend  ambientMode(dataRoot);
-    MpvController       mpvController(appRoot);
+    MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
 
     // When the Qt window is inactive (fullscreen mpv has OS focus on macOS),

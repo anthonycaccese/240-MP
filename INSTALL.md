@@ -160,6 +160,8 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     [all]
     ```
 
+    > 240-MP detects your Pi model at startup and automatically picks the most efficient hardware-decode settings for it — no extra configuration needed.
+
 3) Place the SD card in your Raspberry Pi and let it run through its first boot sequence
 
 4) Once complete, SSH in and run `sudo raspi-config`

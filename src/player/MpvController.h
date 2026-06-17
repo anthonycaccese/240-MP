@@ -4,6 +4,9 @@
 #include <QLocalSocket>
 #include <QTimer>
 #include <QJsonArray>
+#include <QStringList>
+
+class AppCore;
 
 #ifdef Q_OS_LINUX
 #include <xf86drm.h>
@@ -27,7 +30,8 @@ class MpvController : public QObject {
     Q_PROPERTY(int playlistPos READ playlistPos NOTIFY playlistPosChanged)
 
 public:
-    explicit MpvController(const QString &appRoot, QObject *parent = nullptr);
+    explicit MpvController(const QString &appRoot, AppCore *appCore = nullptr,
+                           QObject *parent = nullptr);
     ~MpvController() override;
 
     int position()    const { return m_position;    }
@@ -67,9 +71,19 @@ private slots:
     void onIpcReadyRead();
 
 private:
+    // Hardware video-decode profile, detected once from /proc/device-tree/model.
+    // PiFkms  = Pi 3/3B+/4B — boot Fake KMS (vc4-fkms-v3d), need gpu/drm VO + v4l2m2m.
+    // PiFullKms = Pi 5 — boots Full KMS (vc4-kms-v3d), --vo=drm direct-renders.
+    // Generic = unknown Linux / non-Linux — safe fallback.
+    enum class VideoProfile { PiFkms, PiFullKms, Generic };
+
     void sendCommand(const QJsonArray &args);
     void doHeadlessRestore(int pos, int dur, bool naturalEof);
     bool detectHeadlessMode() const;
+    VideoProfile detectVideoProfile() const;
+    // Appends the profile-specific --vo/--gpu-context/--hwdec flags (honouring the
+    // app-level "mpv_video_args" override) to a forming mpv argument list.
+    void appendVideoArgs(QStringList &args) const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;
@@ -79,6 +93,8 @@ private:
     void restoreDrmCrtcState(int fd);
 #endif
 
+    AppCore      *m_appCore        = nullptr;
+    VideoProfile  m_videoProfile  = VideoProfile::Generic;
     QProcess     *m_process        = nullptr;
     QLocalSocket *m_ipc            = nullptr;
     QTimer       *m_connectTimer   = nullptr;
