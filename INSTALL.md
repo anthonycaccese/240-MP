@@ -1,4 +1,4 @@
-# Install 240-MP 
+# Install 240-MP
 
 ## On a Raspberry Pi
 
@@ -47,53 +47,58 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     **Option 1: For composite out on a CRT TV (NTSC)...**
     ```
     # --- Global ---
-
     arm_64bit=1
     disable_fw_kms_setup=1
     disable_splash=1
     disable_overscan=1
     dtparam=audio=on
-    
+
     # Composite
     enable_tvout=1
-    sdtv_mode=0
-    sdtv_aspect=1
-    
-    # --- Pi 4B ---
-    [pi4]
-    
-    # Drivers & Video
-    dtoverlay=vc4-fkms-v3d,cma-256
-    dtoverlay=rpivid-v4l2
-    
-    # Overclocking
-    over_voltage=2
-    arm_freq=1750
-    gpu_freq=600
-    
+    sdtv_mode=0      # 0 = NTSC, 2 = PAL
+    sdtv_aspect=1    # 1 = 4:3
+
     # --- Pi 3B ---
     [pi3]
-    
+
     # Drivers & Video
     dtoverlay=vc4-fkms-v3d,cma-256
-    
+
     # Overclocking
     over_voltage=4
     arm_freq=1300
     core_freq=450
     sdram_freq=500
-    
+
     # --- Pi 3B+ ---
     [pi3+]
-    
+
     # Drivers & Video
     dtoverlay=vc4-fkms-v3d,cma-256
-    
+
     # Overclocking
     over_voltage=2
     arm_freq=1500
     core_freq=500
     sdram_freq=500
+
+    # --- Pi 4B ---
+    [pi4]
+
+    # Drivers & Video
+    dtoverlay=vc4-fkms-v3d,cma-256
+    dtoverlay=rpivid-v4l2
+
+    # Overclocking
+    over_voltage=2
+    arm_freq=1750
+    gpu_freq=600
+
+    # --- Pi 5 ---
+    [pi5]
+
+    # Drivers & Video
+    dtoverlay=vc4-kms-v3d,cma-512,composite=1
     
     # --- Global ---
     [all]
@@ -102,7 +107,6 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     or **Option 2: for HDMI out on a modern TV...**
     ```
     # --- Global ---
-
     arm_64bit=1
     disable_fw_kms_setup=1
     disable_splash=1
@@ -113,54 +117,51 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     display_auto_detect=1
     hdmi_force_hotplug=1
 
-    # --- Pi 4B ---
-    [pi4]
-    
-    # Drivers & Video
-    dtoverlay=vc4-fkms-v3d,cma-256
-    dtoverlay=rpivid-v4l2
-    
-    # Overclocking
-    over_voltage=2
-    arm_freq=1750
-    gpu_freq=600
-    
     # --- Pi 3B ---
     [pi3]
-    
+
     # Drivers & Video
     dtoverlay=vc4-fkms-v3d,cma-256
-    
+
     # Overclocking
     over_voltage=4
     arm_freq=1300
     core_freq=450
     sdram_freq=500
-    
+
     # --- Pi 3B+ ---
     [pi3+]
-    
+
     # Drivers & Video
     dtoverlay=vc4-fkms-v3d,cma-256
-    
+
     # Overclocking
     over_voltage=2
     arm_freq=1500
     core_freq=500
     sdram_freq=500
-    
+
+    # --- Pi 4B ---
+    [pi4]
+
+    # Drivers & Video
+    dtoverlay=vc4-fkms-v3d,cma-256
+    dtoverlay=rpivid-v4l2
+
+    # Overclocking
+    over_voltage=2
+    arm_freq=1750
+    gpu_freq=600
+
     # --- Pi 5 ---
     [pi5]
-    
-    # Drivers & Video (Pi 5 requires full KMS — fkms is not supported, and
-    # there is no hardware H.264 block so video uses fast software decode)
-    dtoverlay=vc4-kms-v3d
+
+    # Drivers & Video
+    dtoverlay=vc4-kms-v3d,cma-512,composite=1
     
     # --- Global ---
     [all]
     ```
-
-    > 240-MP detects your Pi model at startup and automatically picks the most efficient hardware-decode settings for it — no extra configuration needed.
 
 3) Place the SD card in your Raspberry Pi and let it run through its first boot sequence
 
@@ -178,16 +179,19 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
 
     This will install all of the needed dependencies (note: over WiFi it will take about 20 mins to complete) 
 
-    **[Optional]** 
+    **Optional** 
     - You will get an option at the end of the install script that asks: `Install systemd autostart service? [y/N]` 
     - If you type `Y` and press enter it will set up 240-MP to autostart when your Raspberry Pi boots which creates a nice appliance experience (bascially a dedicated 240-MP device).
     - If you choose that option please make sure to enter your primary user for the pi at the next prompt.  If you don't provide one it will set it up for the `Pi` user.
 
-    At this point you can type `240mp` at any time to start up the app.  And if you installed the autostart service then the next time you boot your Pi it will boot directly into 240-MP.
+At this point you can type `240mp` at any time to start up the app.  And if you installed the autostart service then the next time you boot your Pi it will boot directly into 240-MP.
 
-    **Exit to Terminal (autostart only):** with the autostart service installed, the Quit dialog gains an `Exit to Terminal` option alongside `Power Off`. Choosing it drops you to a login shell on the Pi instead of powering off, and leaves autostart intact. To get back into 240-MP from that shell you can:
-        - `sudo systemctl start 240mp` (or `sudo reboot`) — returns to the autostart service, so quitting again powers off as usual.
-        - type `240mp` — relaunches the app unmanaged in your shell; here the Quit dialog shows the plain Yes/No menu and quitting just returns you to the shell rather than powering off.
+**Exit to Terminal:** 
+- If you have the autostart service installed, the Quit dialog gains an `Exit to Terminal` option alongside `Power Off`. Choosing that will drop you to a login shell on the Pi instead of powering off, and leaves autostart intact for subsequent reboots. 
+- To get back into 240-MP from that shell you can do one of the following:
+    1. (*Recommended*) type `sudo systemctl start 240mp` to start up 240-MP and the autostart service again
+    2. type `sudo reboot` to reboot and start up the device from scratch (which will also restart the autostart service)
+    3. type `240mp` which will relaunch the app unmanaged in your shell; here the Quit dialog shows the plain Yes/No menu and selecting Yes will just return you to the shell rather than powering off
 
 ### Update
 

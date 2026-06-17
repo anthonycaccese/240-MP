@@ -180,31 +180,40 @@ The current MPV implementation is a good reference implementation of the "browse
 
 ### Per-device video decode profiles
 
-The `--vo`/`--hwdec` flags mpv launches with are **auto-selected per device** so each target hardware-decodes efficiently with no user setup. `MpvController::detectVideoProfile()` reads `/proc/device-tree/model` once at startup; `appendVideoArgs()` then picks the flag set:
+The `--vo`/`--hwdec` flags mpv launches with are auto-selected per device to try to target hardware-decodes efficiently per device without the need for user setup. `MpvController::detectVideoProfile()` reads `/proc/device-tree/model` once at startup; `appendVideoArgs()` then picks the flag set:
 
 | Target | Boot driver | Video flags |
 |---|---|---|
 | Pi 4B | Fake KMS (`vc4-fkms-v3d`) | `--vo=drm --hwdec=v4l2m2m-copy` |
 | Pi 3B / 3B+ | Fake KMS (`vc4-fkms-v3d`) | `--vo=gpu --gpu-context=drm --hwdec=v4l2m2m` |
 | Pi 5 | Full KMS (`vc4-kms-v3d`) | `--vo=drm --hwdec=auto-safe` |
-| Unknown headless Linux | — | `--vo=drm --hwdec=auto-safe` (safe fallback) |
+| Unknown headless Linux | — | `--vo=drm --hwdec=auto-safe` (a safe fallback for now - will research this more later) |
 | macOS (Apple Silicon) | — | `--hwdec=videotoolbox` |
 
-The key levers are **which decoder** (the `v4l2m2m` hardware block vs `auto-safe`, which on the Pi 3/Pi 4 falls to *software* because v4l2m2m isn't in its allow-list, but on the Pi 5 finds the V3D Vulkan decoder — see below) and **which DRM plane** the frames land on. Hardware-decoded frames go to a **drmprime overlay plane**, which is the cheapest path but can't zoom/crop (so `--panscan` blanks the video); copying them back to RAM (`-copy`) or software-decoding puts them on the **primary draw plane**, where the native `--vo=drm` VO page-flips with clean cadence and crop works. So:
+The key levers are which decoder and which DRM plane the frames land on:
 
-- **Pi 4** has the CPU headroom to pay the `-copy` + software-downscale cost (~50–70% across four cores) in exchange for the primary-plane path with working crop (`--panscan`), so it uses native `--vo=drm` + hardware decode. This drives the H.264 hardware block; **HEVC software-decodes** — `v4l2m2m-copy` can't reach the Pi4's HEVC decoder (rpivid is a stateless V4L2-request device, not the stateful `hevc_v4l2m2m` wrapper mpv tries), so it falls back cleanly. Fine for 1080p (~50% CPU); 4K HEVC would not sustain. There's no better single value: `auto`/`auto-copy` exclude `v4l2m2m` entirely (so they'd drop H.264 to software too), the Pi5's Vulkan path is unavailable here (the Pi4's older V3D 4.2 GPU lacks `VK_KHR_video_decode_queue`), and the only door to rpivid (`--hwdec=drm`) is non-copy → overlay plane (judder, no crop) and wouldn't help H.264. So `v4l2m2m-copy` is the chosen compromise.
-- **Pi 3** does not — the copy path pegs all four cores and goes choppy — so it takes the lowest-CPU path: zero-copy `v4l2m2m` straight to the overlay plane (~15% CPU), smooth playback, with the single trade-off that crop (`--panscan`) is unavailable on the overlay.
-- **Pi 5** boots Full KMS, so plain `--vo=drm` direct-renders. `auto-safe` finds no working VA-API/V4L2 path (the V3D VA-API driver fails to open) and selects FFmpeg's **Vulkan video decoder (`vulkan-copy`) on the V3D GPU** for *both* codecs. HEVC reaches the Pi5's hardware HEVC block this way — ~15% for 1080p, ~45% for 4K; H.264 goes through the same Vulkan path and stays light (~20–27% for 1080p). Because it's a `-copy` decoder, frames land on the primary draw plane (not the overlay), so this path is smooth and supports crop.
+- **Pi 4** 
+    - H264 - in my testing I found that the Pi4 has the CPU headroom to implement `-copy` + software-downscale cost (~50–70% across four cores) in exchange for the primary-plane path with working crop (`--panscan`), so it uses native `--vo=drm` + hardware decode.
+    - HEVC — `v4l2m2m-copy` doesn't look like it can reach the Pi4's HEVC decoder from my testing (rpivid is a stateless V4L2-request device, not the stateful `hevc_v4l2m2m` wrapper that mpv tries), so it falls back cleanly. It's seems to work fine for 1080p (~50% CPU) but 4K HEVC does not look feasbile with my current set up so I am accepting that as a limitation for now considering my primary target is a CRT TV. 
+    - I tried a bunch of other paths just to be safe... `auto`/`auto-copy` excludes `v4l2m2m` entirely (so they'd drop H.264 to software too), the Pi5's Vulkan path is unavailable here (the Pi4's V3D 4.2 GPU looks ot lack `VK_KHR_video_decode_queue`), and the only door to rpivid (`--hwdec=drm`) is non-copy → overlay plane which causes judder and it wouldn't help H.264. So that's why I settled on `v4l2m2m-copy` as the current compromise.
+- **Pi 3**
+    - H264 - the copy path I am using on the pi4 sadly pegs all four cores and goes choppy on the pi3. So I chose to take lowest-CPU path with zero-copy (e.g. `v4l2m2m` straight to the overlay plane).  
+    - That gives around ~15% CPU, smooth playback, with the single trade-off that crop (`--panscan`) is unavailable with this set up.  I figured that was an acceptable tradeoff for supporting 1080p video but if you want to retain the ability to crop on a pi3 then you can use the override args to set v4l2m2m-copy which will allow crop to work but limit performance to 720p content instead.
+- **Pi 5** 
+    - boots Full KMS, so plain `--vo=drm` direct-renders. when testing `auto-safe` I found no working VA-API/V4L2 path (the V3D VA-API driver fails to open) and it selects FFmpeg's Vulkan video decoder (`vulkan-copy`) on the V3D GPU for both H264 and HEVC. HEVC reaches the Pi5's hardware HEVC block this way — ~15% for 1080p, ~45% for 4K; H.264 goes through the same Vulkan path and stays light (~20–27% for 1080p). Because it's a `-copy` decoder the frames land on the primary draw plane, so I found this path is smooth and supports crop.
 
 Advanced users can override the auto-detected flags with the app-level `mpv_video_args` setting in `config.json` (a space-separated flag string under `"app"`); it is read at each launch, so changes apply on the next playback without a rebuild — useful for on-hardware tuning.
 
 ### How mpv flags are layered (the precedence cascade)
 
-Every flag mpv receives belongs to one of a few layers, and the model that keeps them straight is a **single precedence cascade** — each layer can only override what the layers above it didn't nail down:
+Every flag mpv receives belongs to one of a few layers, and the model that keeps them straight is a single precedence cascade where each layer can only override what the layers above it didn't nail down:
 
+I think of it like this:
 ```
-app constants → app per-playback → device decode (user-overridable) → [future extra-args] → ~/.config/mpv/mpv.conf
-   (highest precedence, command-line)                                                          (lowest, config file)
+app constants → 
+  app per-playback → 
+    device decode (user-overridable in config) → 
+      ~/.config/mpv/mpv.conf
 ```
 
 | Layer | Examples | Owner | Where |
@@ -214,12 +223,8 @@ app constants → app per-playback → device decode (user-overridable) → [fut
 | **Device decode** | `--vo` / `--gpu-context` / `--hwdec` | App auto-detects; user may override via `mpv_video_args` | command-line |
 | **User prefs** | `deinterlace`, `cache`, `sub-scale`, profiles | User | `mpv.conf` |
 
-Two axes separate these, and conflating them causes confusion:
-
-- **Ownership/intent.** The first three layers are *app-owned* — and the first two are **load-bearing**: they wire the IPC control channel, the input/OSC bridge, and (headless) the DRM/VT hand-off. Changing them breaks the app, not just playback, so they are never user-overridable. The *device decode* layer is the one command-line slot deliberately delegated to the user.
-- **Precedence.** All app layers are command-line, so they all beat `mpv.conf`. We pass no `--no-config`, so mpv reads `~/.config/mpv/mpv.conf` on every launch — which means users already have a zero-code passthrough for anything the app doesn't set explicitly (it simply can't shadow `--vo`/`--hwdec`, which is exactly *why* the `mpv_video_args` override had to exist).
-
-This gives a crisp rule for triaging any "can I also pass flag X?" request: if X is an app constant/per-playback flag, **no** (it's load-bearing); if it's decode-related, it's already the `mpv_video_args` layer; everything else, **point the user at `mpv.conf`**. A general in-app `mpv_extra_args` (appended last, highest precedence, with a guard stripping the load-bearing flags above) would be the natural sibling of `mpv_video_args` — build it only if `mpv.conf` proves insufficient.
+- The first three layers are app-owned and the first two are load-bearing because they wire the IPC control channel, the input/OSC bridge, and (headless) the DRM/VT hand-off. Changing them would break functionality in the app, not just playback, so they are never user-overridable. The 3rd layer (*device decode*) allows a direct user path to override video decode settings if per device tweaks are needed.
+- And all app layers are command-line, so they all win over `mpv.conf`. I do pass no `--no-config`, so mpv will look to read `~/.config/mpv/mpv.conf` on launch, which means users can add anything the app doesn't set explicitly direclty in their MPV config.
 
 ### Custom OSC (Lua)
 

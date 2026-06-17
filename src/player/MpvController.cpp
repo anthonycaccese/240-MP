@@ -512,7 +512,7 @@ void MpvController::appendVideoArgs(QStringList &args) const {
             args << "--vo=drm" << "--hwdec=v4l2m2m-copy";
         } else if (m_videoProfile == VideoProfile::Pi3) {
             // Pi 3B/3B+: too weak for the copy + software-scale path above (it pegs
-            // all four cores and goes choppy). Zero-copy v4l2m2m hands decoded frames
+            // all four cores and gets choppy). Zero-copy v4l2m2m hands decoded frames
             // straight to a DRM overlay plane for the lowest possible CPU (~15%) with
             // smooth playback. The one trade-off: the overlay plane can't zoom/crop,
             // so mpv's --panscan (the OSC crop button) blanks the video on this path.

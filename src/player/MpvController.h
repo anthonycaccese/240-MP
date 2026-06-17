@@ -72,12 +72,6 @@ private slots:
 
 private:
     // Hardware video-decode profile, detected once from /proc/device-tree/model.
-    // Pi3       = Pi 3B/3B+ — weak CPU; zero-copy v4l2m2m onto a DRM overlay plane
-    //             is the only path with enough headroom (trade-off: no crop/panscan).
-    // Pi4       = Pi 4B — enough CPU to take the primary-plane path: native --vo=drm
-    //             with v4l2m2m-copy (HW decode, smooth, and crop/panscan works).
-    // PiFullKms = Pi 5 — boots Full KMS (vc4-kms-v3d), --vo=drm direct-renders.
-    // Generic   = unknown Linux / non-Linux — safe fallback.
     enum class VideoProfile { Pi3, Pi4, PiFullKms, Generic };
 
     void sendCommand(const QJsonArray &args);

@@ -194,11 +194,11 @@ Any bad lines are skipped with a warning in the log (line number included)
 
 ## Video decode tuning (mpv_video_args)
 
-240-MP detects your device at startup and launches mpv with the most efficient video-output and hardware-decode flags for it — no setup needed. In short: the Pi 3 uses a low-CPU overlay path, the Pi 4 a hardware-decode + copy path, the Pi 5 the V3D Vulkan path, and macOS VideoToolbox. The exact flags and the reasoning per board are in [ARCHITECTURE.md → Per-device video decode profiles](ARCHITECTURE.md#per-device-video-decode-profiles).
+240-MP detects your device at startup and attempts to launch with the most efficient video-output and hardware-decode flags for it. Currently the Pi 3 uses a low-CPU overlay path, the Pi 4 a hardware-decode + copy path, the Pi 5 the V3D Vulkan path, and macOS VideoToolbox. The exact flags and the reasoning per board are in [ARCHITECTURE.md → Per-device video decode profiles](ARCHITECTURE.md#per-device-video-decode-profiles).
 
 **Overriding the decode flags**
 
-If you need to retune for your hardware, add an `mpv_video_args` string under `"app"` in `config.json` — a space-separated list of mpv flags that **replaces** the auto-detected `--vo` / `--hwdec` set:
+If you find the need to tune for your hardware, you can add an `mpv_video_args` string under `"app"` in `config.json`.  It accepts a a space-separated list of mpv flags to replace the auto-detected `--vo` / `--hwdec` params that 240-MP sets.
 
 ```json
 {
@@ -208,15 +208,15 @@ If you need to retune for your hardware, add an `mpv_video_args` string under `"
 }
 ```
 
-It is read at **each launch**, so a change applies on the next playback — no rebuild or restart needed. Only the video-output/decode flags are yours to set here; the app owns the rest (the IPC control channel, OSC, input). For *other* mpv preferences (deinterlace, cache, subtitle styling…) just create a standard `~/.config/mpv/mpv.conf` — mpv reads it automatically every launch. (See [ARCHITECTURE.md → How mpv flags are layered](ARCHITECTURE.md#how-mpv-flags-are-layered-the-precedence-cascade) for the full precedence model.)
+This config is read at each playback event, so a change applies on the next playback (no rebuild or restart needed). Only set video-output/decode flags here though; the app owns the rest (the IPC control channel, OSC, input) and for other mpv preferences (things like deinterlace, cache, subtitle styling...) please just create a standard `~/.config/mpv/mpv.conf`. MPV will read that automatically every launch. Please check out [ARCHITECTURE.md → How mpv flags are layered](ARCHITECTURE.md#how-mpv-flags-are-layered-the-precedence-cascade) if you are interested in the background on this approach.
 
-**Enabling crop on a Pi 3** — the Pi 3 default uses a zero-copy overlay path for performance, and a hardware overlay plane can't zoom/crop, so the OSC crop button blanks the video there. To get crop, override to the copy path (frames go through the scaler, where crop works):
+**Enabling crop on a Pi 3** — the Pi 3 default uses a zero-copy overlay path for performance, and a hardware overlay plane can't zoom/crop, so the OSC crop button blanks the video there. To allow crop to work on the Pi3 you can override to the copy path (so frames go through the scaler, where crop works):
 
 ```json
 "mpv_video_args": "--vo=drm --hwdec=v4l2m2m-copy"
 ```
 
-The trade-off: that path can't sustain 1080p on the Pi 3 — it pegs the CPU and stutters. So crop on a Pi 3 means keeping your source content to **720p and below**. Your call: smooth 1080p without crop (the default), or crop with a 720p ceiling.
+The trade-off with this approach: the copy path didn't look like it could reliabilty play back 1080p on the Pi 3 in my testing. I found it can easily peg the CPU and cause stuttering. So enabling crop on a Pi 3 means keeping your source content to **720p and below**. Ultimately its your call: smooth 1080p without crop (keep the default), or enable crop with a 720p ceiling using --hwdec=v4l2m2m-copy.
 
 ## Debugging & logs
 
