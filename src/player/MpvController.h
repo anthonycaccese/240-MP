@@ -25,9 +25,6 @@ class MpvController : public QObject {
     Q_PROPERTY(int position    READ position    NOTIFY positionChanged)
     Q_PROPERTY(int duration    READ duration    NOTIFY durationChanged)
     Q_PROPERTY(int playlistPos READ playlistPos NOTIFY playlistPosChanged)
-    // Selected theme's primary colour (#RRGGBB), bound once from Main.qml and
-    // forwarded to media-keys.lua so the volume bar matches the active theme.
-    Q_PROPERTY(QString primaryColor READ primaryColor WRITE setPrimaryColor NOTIFY primaryColorChanged)
 
 public:
     explicit MpvController(const QString &appRoot, QObject *parent = nullptr);
@@ -36,8 +33,6 @@ public:
     int position()    const { return m_position;    }
     int duration()    const { return m_duration;    }
     int playlistPos() const { return m_playlistPos; }
-    QString primaryColor() const { return m_primaryColor; }
-    void setPrimaryColor(const QString &color);
 
     Q_INVOKABLE void loadAndPlay(const QString &url, float startSeconds,
                                   int audioTrack, int subTrack,
@@ -57,7 +52,6 @@ signals:
     void positionChanged(int ms);
     void durationChanged(int ms);
     void playlistPosChanged(int pos);
-    void primaryColorChanged();
     // Emitted when mpv exits because the user quit/stopped playback before the end.
     void playbackFinished(int finalPositionMs, int finalDurationMs);
     // Emitted when mpv exits because the file played to its natural end (mpv's
@@ -98,7 +92,6 @@ private:
     int           m_position     = 0;
     int           m_duration     = 0;
     int           m_playlistPos  = -1;
-    QString       m_primaryColor;
     bool          m_headlessMode = false;
     int           m_previousVt   = -1;
     int           m_qtDrmFd      = -1;

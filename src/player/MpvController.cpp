@@ -179,14 +179,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QStringLiteral("--sid=no");
     // else: external sub(s) loaded, subTrack==0 → mpv auto-selects first loaded sub
 
-    // mpv honors only one --script-opts flag, so combine every option into one.
-    QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
-        scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
-    if (!m_primaryColor.isEmpty())
-        scriptOpts << QString("primary-color=%1").arg(QString(m_primaryColor).remove('#'));
-    if (!scriptOpts.isEmpty())
-        args << QString("--script-opts=%1").arg(scriptOpts.join(','));
+        args << QString("--script-opts=transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
 
     if (loop)
         args << QStringLiteral("--loop-playlist=inf");
@@ -325,13 +319,6 @@ void MpvController::seekTo(int positionMs) {
 
 void MpvController::sendKey(const QString &key) {
     sendCommand({"keypress", key});
-}
-
-void MpvController::setPrimaryColor(const QString &color) {
-    if (m_primaryColor == color)
-        return;
-    m_primaryColor = color;
-    emit primaryColorChanged();
 }
 
 void MpvController::tryConnectIpc() {

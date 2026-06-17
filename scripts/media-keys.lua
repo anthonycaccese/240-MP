@@ -5,9 +5,9 @@
 -- keys (macOS, where mpv holds the keyboard) and synthetic `keypress` events
 -- forwarded from InputManager over IPC (RPi/EGLFS) resolve to.
 --
--- Volume keys also draw a retro "VOLUME" bar in the selected theme's primary
--- colour. The bar uses its own create_osd_overlay surface so it never clobbers
--- the navigation menu in mpv-osc.lua, which owns the legacy set_osd_ass surface.
+-- Volume keys also draw a retro "VOLUME" bar. The bar uses its own
+-- create_osd_overlay surface so it never clobbers the navigation menu in
+-- mpv-osc.lua, which owns the legacy set_osd_ass surface.
 
 local assdraw = require 'mp.assdraw'
 
@@ -16,15 +16,7 @@ local SEEK_FORWARD   = 30    -- Fast Forward jump, seconds
 local SEEK_BACK      = 10    -- Rewind jump, seconds
 local BAR_TIMEOUT    = 1.5   -- seconds the volume bar stays on screen
 
--- ASS colours are &HBBGGRR& (byte-reversed from #RRGGBB). Default to white when
--- the host app does not pass a primary colour.
-local function ass_colour(hex)
-    hex = (hex or ""):gsub("^#", "")
-    if #hex ~= 6 then return "&HFFFFFF&" end
-    return "&H" .. hex:sub(5, 6) .. hex:sub(3, 4) .. hex:sub(1, 2) .. "&"
-end
-
-local C_PRIMARY = ass_colour(mp.get_opt("primary-color"))
+local C_WHITE   = "&HFFFFFF&"
 local A_OPAQUE  = "&H00&"
 local A_DIM     = "&HB0&"   -- ~30% opacity for the unfilled "dash" ticks
 
@@ -93,16 +85,16 @@ local function show_volume_bar()
     -- never overlaps the ticks below it. Label reflects mute state so a mute
     -- toggle (which leaves the volume ticks unchanged) is still legible.
     local label = mp.get_property_bool("mute", false) and "MUTE" or "VOLUME"
-    draw_text(ass, lm, row1_y, 1, label, label_fs, C_PRIMARY)
+    draw_text(ass, lm, row1_y, 1, label, label_fs, C_WHITE)
 
     local x = lm
     for i = 1, ticks do
         if i <= filled then
-            draw_rect(ass, math.floor(x), bar_y, tick_w, bar_h, C_PRIMARY, A_OPAQUE)
+            draw_rect(ass, math.floor(x), bar_y, tick_w, bar_h, C_WHITE, A_OPAQUE)
         else
             -- Dash centred vertically within the tick's slot.
             draw_rect(ass, math.floor(x), bar_y + math.floor((bar_h - dash_h) / 2),
-                      tick_w, dash_h, C_PRIMARY, A_DIM)
+                      tick_w, dash_h, C_WHITE, A_DIM)
         end
         x = x + slot_w
     end

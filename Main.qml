@@ -75,13 +75,6 @@ Window {
     readonly property real sw: width
     readonly property real sh: height
 
-    // Keep mpv's media-key volume bar in sync with the active theme colour.
-    Binding {
-        target: mpvController
-        property: "primaryColor"
-        value: root.primaryColor
-    }
-
     Connections {
         target: appCore
         function onAppSettingChanged(key, value) {
