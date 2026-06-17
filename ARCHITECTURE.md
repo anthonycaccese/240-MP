@@ -194,6 +194,7 @@ The key levers are **which decoder** (the `v4l2m2m` hardware block vs `auto-safe
 
 - **Pi 4** has the CPU headroom to pay the `-copy` + software-downscale cost (~50–70% across four cores) in exchange for the primary-plane path with working crop (`--panscan`), so it uses native `--vo=drm` + hardware decode. This drives the H.264 hardware block; **HEVC software-decodes** — `v4l2m2m-copy` can't reach the Pi4's HEVC decoder (rpivid is a stateless V4L2-request device, not the stateful `hevc_v4l2m2m` wrapper mpv tries), so it falls back cleanly. Fine for 1080p (~50% CPU); 4K HEVC would not sustain.
 - **Pi 3** does not — the copy path pegs all four cores and goes choppy — so it takes the lowest-CPU path: zero-copy `v4l2m2m` straight to the overlay plane (~15% CPU), smooth playback, with the single trade-off that crop (`--panscan`) is unavailable on the overlay.
+- **Pi 5** boots Full KMS, so plain `--vo=drm` direct-renders. Here `auto-safe` *does* reach the hardware HEVC block (it's in the allow-list, unlike the Pi4's v4l2m2m H.264 block), so HEVC is hardware-decoded — measured ~15% for 1080p, ~45% for 4K. H.264 has no hardware block on the Pi5 and software-decodes (~20–30% for 1080p), which the CPU handles easily.
 
 Advanced users can override the auto-detected flags with the app-level `mpv_video_args` setting in `config.json` (a space-separated flag string under `"app"`); it is read at each launch, so changes apply on the next playback without a rebuild — useful for on-hardware tuning.
 
