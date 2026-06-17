@@ -184,12 +184,18 @@ The `--vo`/`--hwdec` flags mpv launches with are **auto-selected per device** so
 
 | Target | Boot driver | Video flags |
 |---|---|---|
-| Pi 3B / 3B+ / 4B | Fake KMS (`vc4-fkms-v3d`) | `--vo=gpu --gpu-context=drm --hwdec=v4l2m2m-copy` |
+| Pi 4B | Fake KMS (`vc4-fkms-v3d`) | `--vo=drm --hwdec=v4l2m2m-copy` |
+| Pi 3B / 3B+ | Fake KMS (`vc4-fkms-v3d`) | `--vo=gpu --gpu-context=drm --hwdec=v4l2m2m` |
 | Pi 5 | Full KMS (`vc4-kms-v3d`) | `--vo=drm --hwdec=auto-safe` |
 | Unknown headless Linux | — | `--vo=drm --hwdec=auto-safe` (safe fallback) |
 | macOS (Apple Silicon) | — | `--hwdec=videotoolbox` |
 
-Under Fake KMS, `--vo=drm` cannot direct-render and mpv silently falls back to software decode — the gpu/drm VO plus the `v4l2m2m` stateful decoder is what keeps Pi 3/4 hardware-decoding H.264. Advanced users can override the auto-detected flags with the app-level `mpv_video_args` setting in `config.json` (a space-separated flag string under `"app"`); it is read at each launch, so changes apply on the next playback without a rebuild — useful for on-hardware tuning.
+The key levers are **which decoder** (the `v4l2m2m` hardware block vs `auto-safe`, which on the Pi resolves to *software* because v4l2m2m isn't in its allow-list) and **which DRM plane** the frames land on. Hardware-decoded frames go to a **drmprime overlay plane**, which is the cheapest path but can't zoom/crop (so `--panscan` blanks the video); copying them back to RAM (`-copy`) or software-decoding puts them on the **primary draw plane**, where the native `--vo=drm` VO page-flips with clean cadence and crop works. So:
+
+- **Pi 4** has the CPU headroom to pay the `-copy` + software-downscale cost (~50–70% across four cores) in exchange for the primary-plane path with working crop (`--panscan`), so it uses native `--vo=drm` + hardware decode. This drives the H.264 hardware block; **HEVC software-decodes** — `v4l2m2m-copy` can't reach the Pi4's HEVC decoder (rpivid is a stateless V4L2-request device, not the stateful `hevc_v4l2m2m` wrapper mpv tries), so it falls back cleanly. Fine for 1080p (~50% CPU); 4K HEVC would not sustain.
+- **Pi 3** does not — the copy path pegs all four cores and goes choppy — so it takes the lowest-CPU path: zero-copy `v4l2m2m` straight to the overlay plane (~15% CPU), smooth playback, with the single trade-off that crop (`--panscan`) is unavailable on the overlay.
+
+Advanced users can override the auto-detected flags with the app-level `mpv_video_args` setting in `config.json` (a space-separated flag string under `"app"`); it is read at each launch, so changes apply on the next playback without a rebuild — useful for on-hardware tuning.
 
 ### Custom OSC (Lua)
 

@@ -52,7 +52,8 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
 {
     m_videoProfile = detectVideoProfile();
     qInfo("[MpvController] video profile: %s",
-          m_videoProfile == VideoProfile::PiFkms    ? "Pi (Fake KMS) — gpu/drm + v4l2m2m"
+          m_videoProfile == VideoProfile::Pi4       ? "Pi 4 — drm + v4l2m2m-copy"
+        : m_videoProfile == VideoProfile::Pi3       ? "Pi 3 — gpu/drm + v4l2m2m (zero-copy)"
         : m_videoProfile == VideoProfile::PiFullKms ? "Pi 5 (Full KMS) — drm + auto-safe"
                                                     : "generic");
 
@@ -467,17 +468,19 @@ bool MpvController::detectHeadlessMode() const {
 MpvController::VideoProfile MpvController::detectVideoProfile() const {
 #ifdef Q_OS_LINUX
     // The Raspberry Pi model string (e.g. "Raspberry Pi 4 Model B Rev 1.5") is
-    // exposed NUL-terminated at /proc/device-tree/model. Pi 3/4 boot Fake KMS
-    // and need the gpu/drm VO + v4l2m2m decoder; Pi 5 boots Full KMS and direct-
-    // renders with --vo=drm.
+    // exposed NUL-terminated at /proc/device-tree/model. Pi 3 and Pi 4 both boot
+    // Fake KMS but have different CPU budgets, so they get different decode paths;
+    // Pi 5 boots Full KMS and direct-renders with --vo=drm.
     QFile f("/proc/device-tree/model");
     if (f.open(QIODevice::ReadOnly)) {
         const QString model =
             QString::fromLatin1(f.readAll()).remove(QChar('\0')).trimmed();
         if (model.startsWith("Raspberry Pi 5"))
             return VideoProfile::PiFullKms;
-        if (model.startsWith("Raspberry Pi 3") || model.startsWith("Raspberry Pi 4"))
-            return VideoProfile::PiFkms;
+        if (model.startsWith("Raspberry Pi 4"))
+            return VideoProfile::Pi4;
+        if (model.startsWith("Raspberry Pi 3"))
+            return VideoProfile::Pi3;
     }
 #endif
     return VideoProfile::Generic;
@@ -497,11 +500,23 @@ void MpvController::appendVideoArgs(QStringList &args) const {
     }
 
     if (m_headlessMode) {
-        if (m_videoProfile == VideoProfile::PiFkms) {
-            // Under Fake KMS --vo=drm cannot direct-render and mpv silently drops
-            // to software decode; gpu/drm + the v4l2m2m stateful decoder restores
-            // hardware H.264 decode on Pi 3/3B+/4B.
-            args << "--vo=gpu" << "--gpu-context=drm" << "--hwdec=v4l2m2m-copy";
+        if (m_videoProfile == VideoProfile::Pi4) {
+            // Pi 4B: native --vo=drm draws on the primary plane with precise KMS
+            // page-flip timing (smooth cadence). v4l2m2m-copy keeps decode on the
+            // hardware block but copies frames back to RAM so they land on that
+            // primary plane instead of the drmprime *overlay* plane — the overlay
+            // path (vo=gpu zero-copy) decodes just as cheaply but its presentation
+            // jitters into visible 24p judder. The copy + zimg downscale costs more
+            // CPU (~50-70% across 4 cores) but the Pi4 has the headroom, and crop
+            // (--panscan) works because frames go through the normal scaler.
+            args << "--vo=drm" << "--hwdec=v4l2m2m-copy";
+        } else if (m_videoProfile == VideoProfile::Pi3) {
+            // Pi 3B/3B+: too weak for the copy + software-scale path above (it pegs
+            // all four cores and goes choppy). Zero-copy v4l2m2m hands decoded frames
+            // straight to a DRM overlay plane for the lowest possible CPU (~15%) with
+            // smooth playback. The one trade-off: the overlay plane can't zoom/crop,
+            // so mpv's --panscan (the OSC crop button) blanks the video on this path.
+            args << "--vo=gpu" << "--gpu-context=drm" << "--hwdec=v4l2m2m";
         } else {
             // Pi 5 (Full KMS) and the safe fallback for unknown headless Linux.
             args << "--vo=drm" << "--hwdec=auto-safe";
