@@ -35,6 +35,12 @@
       "options_source": "dynamic",
       "options_slot": "get_resume_playback_options",
       "default": "ask"
+    },
+    {
+      "key": "auto_subtitles",
+      "label": "Automatically Show Subtitles",
+      "type": "toggle",
+      "default": "OFF"
     }
   ]
 }

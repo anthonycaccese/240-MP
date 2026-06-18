@@ -184,8 +184,12 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--sub-file=%1").arg(sf);
     if (subTrack > 0)
         args << QString("--sid=%1").arg(subTrack);
-    else if (subFiles.isEmpty() || subTrack < 0)
+    else if (subTrack < 0)
+        // subs disabled or provided via transcode
         args << QStringLiteral("--sid=no");
+    else if (subFiles.isEmpty() && subTrack == 0)
+        // use embedded or auto-matched sub
+        args << QStringLiteral("--sid=auto");
     // else: external sub(s) loaded, subTrack==0 → mpv auto-selects first loaded sub
 
     if (transcodeOffsetSec > 0.5f)

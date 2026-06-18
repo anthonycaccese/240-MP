@@ -18,6 +18,8 @@ FocusScope {
     property bool   shuffleOn:           false
     property string resumeSetting:       "ask"
 
+    property bool   subtitlesOn:       false
+
     // Track last non-null values during playback for robust save on exit
     property int    lastKnownPositionMs:  0
     property int    lastKnownDurationMs:  0
@@ -33,6 +35,8 @@ FocusScope {
     focus: true
 
     Keys.onPressed: function(event) {
+        subtitlesOn = !!appCore.get_setting(moduleRoot.moduleId, "auto_subtitles")
+
         if (overlayVisible) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
                 goBack()
@@ -49,7 +53,7 @@ FocusScope {
                 if (choiceIndex === 0 && startPlPos >= 0)
                     resumedFromPlaylistPos = startPlPos
                 overlayVisible = false
-                mpvController.loadAndPlay(filePath, startMs / 1000.0, 0, -1, [], loopOn, startPlPos)
+                mpvController.loadAndPlay(filePath, startMs / 1000.0, 0, subtitlesOn ? 0 : -1, [], loopOn, startPlPos)
                 event.accepted = true
             }
         } else {
@@ -130,17 +134,18 @@ FocusScope {
         if (filePath === "") return
         loopOn        = !!appCore.get_setting(moduleRoot.moduleId, "loop_playback")
         shuffleOn     = !!appCore.get_setting(moduleRoot.moduleId, "shuffle_playback")
+        subtitlesOn   = !!appCore.get_setting(moduleRoot.moduleId, "auto_subtitles")
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
 
         // Shuffle wins: a shuffled playlist starts fresh & random; resume position
         // (a sequential item index) is meaningless once order is randomized.
         if (shuffleOn && isPlaylist(filePath)) {
-            mpvController.loadAndPlay(filePath, 0.0, 0, -1, [], loopOn, -1, 0.0, "", false, "", true)
+            mpvController.loadAndPlay(filePath, 0.0, 0, subtitlesOn ? 0 : -1, [], loopOn, -1, 0.0, "", false, "", true)
             return
         }
 
         if (resumeSetting === "no") {
-            mpvController.loadAndPlay(filePath, 0.0, 0, -1, [], loopOn, -1)
+            mpvController.loadAndPlay(filePath, 0.0, 0, subtitlesOn ? 0 : -1, [], loopOn, -1)
             return
         }
 
@@ -152,14 +157,14 @@ FocusScope {
             if (savedPos > 0 && savedPl >= 0)
                 resumedFromPlaylistPos = savedPl
             mpvController.loadAndPlay(filePath, savedPos > 0 ? savedPos / 1000.0 : 0.0,
-                                      0, -1, [], loopOn, savedPos > 0 ? savedPl : -1)
+                                      0, subtitlesOn ? 0 : -1, [], loopOn, savedPos > 0 ? savedPl : -1)
         } else {
             if (savedPos > 0) {
                 savedPositionMs  = savedPos
                 savedPlaylistPos = savedPl
                 overlayVisible   = true
             } else {
-                mpvController.loadAndPlay(filePath, 0.0, 0, -1, [], loopOn, -1)
+                mpvController.loadAndPlay(filePath, 0.0, 0, subtitlesOn ? 0 : -1, [], loopOn, -1)
             }
         }
     }
