@@ -38,7 +38,7 @@
     },
     {
       "key": "auto_subtitles",
-      "label": "Automatically Show Subtitles",
+      "label": "Auto Show Subtitles",
       "type": "toggle",
       "default": "OFF"
     }
