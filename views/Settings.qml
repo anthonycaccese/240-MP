@@ -39,7 +39,7 @@ FocusScope {
         var items = []
 
         // APPLICATION section
-        var colorOpts = ["Video 1","Late Night","Synthwave","Terminal","T-120","Amber","Kinescope"]
+        var colorOpts = ["Video 1","Late Night","Synthwave","Terminal","T-120","Amber","Kinescope","SMPTE ECR 1-1978"]
         var custom = appCore.getCustomColorScheme()
         if (Object.keys(custom).length === 5) colorOpts.push("Custom")
         items.push({

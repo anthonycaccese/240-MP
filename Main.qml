@@ -62,6 +62,13 @@ Window {
             "tertiary": "#424242",
             "surface": "#121212",
             "accent": "#FFFFFF"
+        },
+        "SMPTE ECR 1-1978": {  // 75% max 0xFF == 0xBF, 40% max 0xFF == 0x66, 7.5% max 0xFF == 0x13; 75/7.5 targets per https://en.wikipedia.org/wiki/SMPTE_color_bars#Analog_NTSC - mixed with 40% in "off channels" to both wash out and improve contrast
+            "primary": "#BFBFBF",
+            "secondary": "#66BF66",
+            "tertiary": "#6666BF",
+            "surface": "#131313",
+            "accent": "#BF6666"
         }
     })
     property var allThemes: themes  // may gain a "Custom" entry on startup
