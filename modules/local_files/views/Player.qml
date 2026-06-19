@@ -17,8 +17,7 @@ FocusScope {
     property bool   loopOn:              false
     property bool   shuffleOn:           false
     property string resumeSetting:       "ask"
-
-    property bool   subtitlesOn:       false
+    property bool   subtitlesOn:         false
 
     // Track last non-null values during playback for robust save on exit
     property int    lastKnownPositionMs:  0
@@ -35,8 +34,6 @@ FocusScope {
     focus: true
 
     Keys.onPressed: function(event) {
-        subtitlesOn = !!appCore.get_setting(moduleRoot.moduleId, "auto_subtitles")
-
         if (overlayVisible) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
                 goBack()
