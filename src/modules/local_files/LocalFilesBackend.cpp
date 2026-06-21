@@ -100,9 +100,14 @@ QVariantList LocalFilesBackend::getItems(const QString &path) {
         qWarning("[LocalFiles] directory not found: %s", qPrintable(path));
         return result;
     }
-    QString canonical = QDir(path).canonicalPath();
-    QString root      = QDir(m_mediaRoot).canonicalPath();
-    if (!canonical.startsWith(root)) {
+    // Validate against the media root lexically (absolutePath cleans "." / ".."
+    // without resolving symlinks) so intentional symlinks placed inside the media
+    // root are followed, while ".." traversal out of the root is still blocked.
+    QString clean = QDir(path).absolutePath();
+    QString root  = QDir(m_mediaRoot).absolutePath();
+    bool inside = (clean == root) ||
+                  clean.startsWith(root.endsWith('/') ? root : root + '/');
+    if (!inside) {
         qWarning("[LocalFiles] path escapes media root: %s", qPrintable(path));
         return result;
     }
