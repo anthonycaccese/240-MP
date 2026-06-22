@@ -41,6 +41,15 @@
       "label": "Auto Show Subtitles",
       "type": "toggle",
       "default": "OFF"
+    },
+    {
+      "key": "sub_lang",
+      "label": "Subtitle Language",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_subtitle_languages",
+      "default": "-",
+      "description": "Select which language to automatically load subtitles for.\n[Any] is the same as 'no preference'."
     }
   ]
 }

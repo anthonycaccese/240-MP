@@ -41,6 +41,7 @@ public:
     Q_INVOKABLE void loadAndPlay(const QString &url, float startSeconds,
                                   int audioTrack, int subTrack,
                                   const QStringList &subFiles = {},
+                                  const QStringList &subLangs = {},
                                   bool loop = false,
                                   int playlistStart = -1,
                                   float transcodeOffsetSec = 0.0f,

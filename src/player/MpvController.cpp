@@ -103,7 +103,8 @@ MpvController::~MpvController() {
 
 void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  int audioTrack, int subTrack,
-                                 const QStringList &subFiles, bool loop,
+                                 const QStringList &subFiles,
+                                 const QStringList &subLangs, bool loop,
                                  int playlistStart, float transcodeOffsetSec,
                                  const QString &plexToken, bool muteAudio,
                                  const QString &oscMode, bool shuffle) {
@@ -193,6 +194,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         // use embedded or auto-matched sub
         args << QStringLiteral("--sid=auto");
     // else: external sub(s) loaded, subTrack==0 → mpv auto-selects first loaded sub
+    if (!subLangs.isEmpty())
+        args << QString("--slang=%1").arg(subLangs.join(QStringLiteral(",")));
 
     if (transcodeOffsetSec > 0.5f)
         args << QString("--script-opts=transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);

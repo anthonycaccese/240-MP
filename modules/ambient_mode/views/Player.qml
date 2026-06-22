@@ -57,7 +57,7 @@ FocusScope {
             goBack()
             return
         }
-        mpvController.loadAndPlay(videoPath, 0.0, 0, -1, [], true, -1, 0.0, "", hasCustomAudio, "ambient")
+        mpvController.loadAndPlay(videoPath, 0.0, 0, -1, [], [], true, -1, 0.0, "", hasCustomAudio, "ambient")
         if (hasCustomAudio)
             ambientModeBackend.startAudio(audioPath)
     }

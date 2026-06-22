@@ -78,6 +78,28 @@ void LocalFilesBackend::get_resume_playback_options() {
     emit dynamicOptionsReady("resume_playback", options);
 }
 
+void LocalFilesBackend::get_subtitle_languages() {
+    QStringList addedLabels;
+    QVariantList options;
+
+    QFile file(m_appRoot + "/modules/local_files/iso639-1.json");
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+
+    options.append(QVariantMap{{"id","-"},{"label","Any"}});
+
+    QVariantList locList = QJsonDocument::fromJson(file.readAll()).toVariant().toList();
+    for (const QVariant loc : locList)
+    {
+        QVariantMap langOption = QVariantMap{{"id",loc.toJsonObject()["id"].toString()},{"label",loc.toJsonObject()["label"].toString()}};
+        if (langOption["label"].toString() == "" || addedLabels.contains(langOption["label"].toString())) continue;
+        addedLabels.append(langOption["label"].toString());
+        options.append(langOption);
+    }
+
+    emit dynamicOptionsReady("sub_lang", options);
+}
+
 QString LocalFilesBackend::mediaRoot() const {
     return m_mediaRoot;
 }
