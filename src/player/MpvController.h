@@ -61,14 +61,17 @@ signals:
     void positionChanged(int ms);
     void durationChanged(int ms);
     void playlistPosChanged(int pos);
-    // Emitted when mpv exits because the user quit/stopped playback before the end.
-    void playbackFinished(int finalPositionMs, int finalDurationMs);
-    // Emitted when mpv exits because the file played to its natural end (mpv's
-    // end-file event reported reason "eof"). Used to trigger autoplay-next.
-    void playbackFinishedNaturally(int finalPositionMs, int finalDurationMs);
-    // Emitted when mpv exits with an error (code 2 — file could not be played).
-    // Player.qml uses this to retry with transcoding.
-    void playbackFailed();
+    // Emitted exactly once when mpv exits, with the reason it ended:
+    //   "eof"     — file played to its natural end. (What a module does with this
+    //               is its own concern.  as an example: Plex may autoplay the next episode)
+    //   "stopped" — user quit/stopped before the end (also the safe default for a
+    //               crash/kill with no end-file event).
+    //   "failed"  — mpv exited with an error (code 2 — file could not be played;
+    //               Up to the module as to when/how to use; for example Plex retries when transcoding).
+    // A single signal (rather than one per reason) is deliberate: a Player view
+    // connects one handler and branches on `reason`, so it can never silently drop
+    // a case the way an unhandled per-reason signal would.
+    void playbackEnded(int finalPositionMs, int finalDurationMs, const QString &reason);
 
 private slots:
     void onProcessFinished();
@@ -80,7 +83,7 @@ private:
     enum class VideoProfile { Pi3, Pi4, PiFullKms, Generic };
 
     void sendCommand(const QJsonArray &args);
-    void doHeadlessRestore(int pos, int dur, bool naturalEof);
+    void doHeadlessRestore(int pos, int dur, const QString &reason);
     bool detectHeadlessMode() const;
     VideoProfile detectVideoProfile() const;
     // Appends the profile-specific --vo/--gpu-context/--hwdec flags (honouring the

@@ -139,7 +139,9 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     const QString bin = QStandardPaths::findExecutable("mpv");
     if (bin.isEmpty()) {
         qWarning("[MpvController] mpv not found in PATH");
-        QTimer::singleShot(0, this, [this]() { emit playbackFinished(0, 0); });
+        QTimer::singleShot(0, this, [this]() {
+            emit playbackEnded(0, 0, QStringLiteral("stopped"));
+        });
         return;
     }
 
@@ -405,10 +407,15 @@ void MpvController::onProcessFinished() {
     m_position = 0;
     m_duration = 0;
 
-    // mpv reports reason "eof" only when the file played to its natural end.
-    // Any other reason (quit/stop/error) or a missing end-file event (crash/kill)
-    // is treated as a non-natural exit — the safe default that never auto-advances.
-    const bool naturalEof = (m_lastEndFileReason == "eof");
+    // Classify why mpv exited, once, so both the headless and desktop paths emit
+    // the same playbackEnded reason:
+    //   exit code 2          -> "failed"  (file could not be played; up to the module as to what to do. As an example: Plex attemps a retry in this case)
+    //   end-file reason "eof"-> "eof"     (natural end; up to the module as to what to do. As an example: Plex autoplays next)
+    //   anything else        -> "stopped" (user quit/stop, crash, or kill; a safe default)
+    QString reason;
+    if (exitCode == 2)                    reason = QStringLiteral("failed");
+    else if (m_lastEndFileReason == "eof") reason = QStringLiteral("eof");
+    else                                   reason = QStringLiteral("stopped");
 
     if (m_headlessMode) {
         // Defer DRM restore and VT switch by 200 ms. mpv's last KMS atomic
@@ -418,20 +425,15 @@ void MpvController::onProcessFinished() {
         // the kernel falls back to showing the text console on Qt's VT.
         // 200 ms is more than three VSync periods at 60 Hz — enough to clear
         // any in-flight commit without a perceptible delay for the user.
-        QTimer::singleShot(200, this, [this, pos, dur, naturalEof]() {
-            doHeadlessRestore(pos, dur, naturalEof);
+        QTimer::singleShot(200, this, [this, pos, dur, reason]() {
+            doHeadlessRestore(pos, dur, reason);
         });
     } else {
-        if (exitCode == 2)
-            emit playbackFailed();
-        else if (naturalEof)
-            emit playbackFinishedNaturally(pos, dur);
-        else
-            emit playbackFinished(pos, dur);
+        emit playbackEnded(pos, dur, reason);
     }
 }
 
-void MpvController::doHeadlessRestore(int pos, int dur, bool naturalEof) {
+void MpvController::doHeadlessRestore(int pos, int dur, const QString &reason) {
 #ifdef Q_OS_LINUX
     if (m_qtDrmFd >= 0) {
         if (::ioctl(m_qtDrmFd, DRM_IOCTL_SET_MASTER, 0) < 0) {
@@ -454,10 +456,7 @@ void MpvController::doHeadlessRestore(int pos, int dur, bool naturalEof) {
         switchToVt(prevVt);
     }
     m_headlessMode = false;
-    if (naturalEof)
-        emit playbackFinishedNaturally(pos, dur);
-    else
-        emit playbackFinished(pos, dur);
+    emit playbackEnded(pos, dur, reason);
 }
 
 void MpvController::sendCommand(const QJsonArray &args) {

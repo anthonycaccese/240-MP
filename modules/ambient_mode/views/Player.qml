@@ -43,7 +43,10 @@ FocusScope {
 
     Connections {
         target: mpvController
-        function onPlaybackFinished(finalPositionMs, finalDurationMs) {
+        // Ambient clips loop, so in practice mpv only exits on a user quit; handle
+        // the single playbackEnded signal regardless of reason — stop the companion
+        // audio and return to the menu.
+        function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
             ambientModeBackend.stopAudio()
             goBack()
         }

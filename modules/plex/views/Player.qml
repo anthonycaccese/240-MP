@@ -340,32 +340,35 @@ FocusScope {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
         }
 
-        function onPlaybackFinished(finalPositionMs, finalDurationMs) {
-            // mpv exited because the user quit/stopped — return to the detail view.
-            reportStopped(finalPositionMs, finalDurationMs)
-            goBack()
-        }
-
-        function onPlaybackFinishedNaturally(finalPositionMs, finalDurationMs) {
-            // mpv reached the end of the file. Mark it stopped (watched) in Plex,
-            // then auto-advance to the next episode if the feature is enabled.
-            reportStopped(finalPositionMs, finalDurationMs)
-            if (!autoplayNext) { goBack(); return }
-            pendingNextEpisode = true
-            plexBackend.load_next_episode(ratingKey)
-        }
-
-        function onPlaybackFailed() {
-            if (!isTranscoding) {
-                // Direct play failed (e.g. HTTP 500 from PMS on WAN). Retry
-                // transparently with transcoding at the same resume offset.
-                pendingRetryTranscode = true
-                plexBackend.request_transcode(ratingKey, partKey, sessionId,
-                                              selectedAudioId, selectedSubtitleId,
-                                              0)
-            } else {
-                goBack()
+        function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
+            if (reason === "failed") {
+                if (!isTranscoding) {
+                    // Direct play failed (e.g. HTTP 500 from PMS on WAN). Retry
+                    // transparently with transcoding at the same resume offset.
+                    pendingRetryTranscode = true
+                    plexBackend.request_transcode(ratingKey, partKey, sessionId,
+                                                  selectedAudioId, selectedSubtitleId,
+                                                  0)
+                } else {
+                    goBack()
+                }
+                return
             }
+
+            // Both a natural end ("eof") and a user quit ("stopped") mark the item
+            // stopped in Plex. A natural end only *attempts* to auto-advance, and
+            // only when the user has autoplay enabled — and even then it's just a
+            // request: load_next_episode returns an empty detail when there is no
+            // next episode (a movie, or the last episode of a season), in which case
+            // onNextEpisodeReady falls back to goBack(). Everything else returns to
+            // the detail view here.
+            reportStopped(finalPositionMs, finalDurationMs)
+            if (reason === "eof" && autoplayNext) {
+                pendingNextEpisode = true
+                plexBackend.load_next_episode(ratingKey)
+                return
+            }
+            goBack()
         }
     }
 
