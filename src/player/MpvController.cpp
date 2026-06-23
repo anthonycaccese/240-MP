@@ -187,12 +187,19 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--sub-file=%1").arg(sf);
     if (subTrack > 0)
         args << QString("--sid=%1").arg(subTrack);
-    else if (subTrack < 0)
+    else if (subTrack < -1)
         // subs disabled or provided via transcode
         args << QStringLiteral("--sid=no");
-    else if (subFiles.isEmpty() && subTrack == 0)
-        // use embedded or auto-matched sub
-        args << QStringLiteral("--sid=auto");
+    else if (subTrack == -1)
+        // forced subs only
+        args << QStringLiteral("--subs-with-matching-audio=forced") << QStringLiteral("--subs-fallback-forced=always");
+    else if (subTrack == 0) {
+        // Always display subs, even if the audio and subtitle languages match
+        args << QStringLiteral("--subs-with-matching-audio=yes") << QStringLiteral("--subs-fallback=yes");
+        if (subFiles.isEmpty())
+            // use embedded or auto-matched sub
+            args << QStringLiteral("--sid=auto");
+    }
     // else: external sub(s) loaded, subTrack==0 → mpv auto-selects first loaded sub
     if (!subLangs.isEmpty())
         args << QString("--slang=%1").arg(subLangs.join(QStringLiteral(",")));

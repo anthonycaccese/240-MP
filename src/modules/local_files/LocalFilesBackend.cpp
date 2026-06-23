@@ -69,6 +69,15 @@ void LocalFilesBackend::clearPosition(const QString &filePath) {
     saveHistory(history);
 }
 
+void LocalFilesBackend::get_auto_subtitles_options() {
+    QVariantList options;
+    QVariantMap forced; forced["id"] = "forced"; forced["label"] = "Forced Only"; forced["old"] = false;
+    QVariantMap on;     on["id"] = "on";         on["label"] = "On";              on["old"] = true;
+    QVariantMap off;    off["id"] = "off";       off["label"] = "Off";
+    options << forced << on << off;
+    emit dynamicOptionsReady("auto_subtitles", options);
+}
+
 void LocalFilesBackend::get_resume_playback_options() {
     QVariantList options;
     QVariantMap ask; ask["id"] = "ask"; ask["label"] = "Ask";

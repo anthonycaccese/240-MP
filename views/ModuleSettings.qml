@@ -62,7 +62,7 @@ FocusScope {
                 var opts = dynamicOptions[key] || []
                 var storedId = currentValues[key] || null
                 for (var i = 0; i < opts.length; i++) {
-                    if (opts[i].id === storedId) return opts[i].label
+                    if (opts[i].id === storedId || (storedId !== null && opts[i].old === storedId)) return opts[i].label
                 }
                 return opts.length > 0 ? opts[0].label : "---"
             }

@@ -39,8 +39,11 @@
     {
       "key": "auto_subtitles",
       "label": "Auto Show Subtitles",
-      "type": "toggle",
-      "default": "OFF"
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_auto_subtitles_options",
+      "default": "forced",
+      "description": "Whether to automatically show subtitles when a video starts.\n[FORCED ONLY] displays for foreign dialogue only, when available."
     },
     {
       "key": "sub_lang",
