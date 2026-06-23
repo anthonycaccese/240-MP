@@ -50,7 +50,7 @@ static QString resolveDataRoot() {
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("240-MP");
-    app.setApplicationVersion("2026.06.22");
+    app.setApplicationVersion("2026.06.23");
 
     // Hide cursor — 240-MP is keyboard-only so the cursor serves no purpose.
     // On Linux, only hide on headless EGLFS (not desktop X11/Wayland sessions).
