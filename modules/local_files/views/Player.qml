@@ -107,24 +107,37 @@ FocusScope {
             }
         }
 
+        // mpv exited because the user quit/stopped before the end.
         function onPlaybackFinished(finalPositionMs, finalDurationMs) {
-            var pos   = lastKnownPositionMs  || finalPositionMs
-            var dur   = lastKnownDurationMs  || finalDurationMs
-            var plPos = lastKnownPlaylistPos
-
-            if (isPlaylist(filePath)) {
-                // Always save playlist state — skip completion detection
-                if (pos > 0 || plPos >= 0)
-                    localFilesBackend.savePosition(filePath, pos, plPos)
-            } else {
-                // Single file: clear if near completion, save otherwise
-                if (dur > 0 && pos >= dur * 0.95)
-                    localFilesBackend.clearPosition(filePath)
-                else if (pos > 5000)
-                    localFilesBackend.savePosition(filePath, pos, -1)
-            }
-            goBack()
+            finishPlayback(finalPositionMs, finalDurationMs)
         }
+        // mpv exited because the file played to its natural end (reason "eof").
+        // Local Files has no autoplay-next, so this behaves the same as a quit:
+        // save/clear resume position and return to the menu. Without this handler
+        // the signal is dropped, goBack() never runs, and the app freezes on the
+        // defunct Player view.
+        function onPlaybackFinishedNaturally(finalPositionMs, finalDurationMs) {
+            finishPlayback(finalPositionMs, finalDurationMs)
+        }
+    }
+
+    function finishPlayback(finalPositionMs, finalDurationMs) {
+        var pos   = lastKnownPositionMs  || finalPositionMs
+        var dur   = lastKnownDurationMs  || finalDurationMs
+        var plPos = lastKnownPlaylistPos
+
+        if (isPlaylist(filePath)) {
+            // Always save playlist state — skip completion detection
+            if (pos > 0 || plPos >= 0)
+                localFilesBackend.savePosition(filePath, pos, plPos)
+        } else {
+            // Single file: clear if near completion, save otherwise
+            if (dur > 0 && pos >= dur * 0.95)
+                localFilesBackend.clearPosition(filePath)
+            else if (pos > 5000)
+                localFilesBackend.savePosition(filePath, pos, -1)
+        }
+        goBack()
     }
 
     Component.onCompleted: {
