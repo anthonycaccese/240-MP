@@ -71,6 +71,9 @@ private:
     QJsonObject loadConfig() const;
     void saveConfig(const QJsonObject &config) const;
     QString moduleIdForBackend(QObject *backend) const;
+    // Resolve a module's enabled state: config override if present, else the
+    // manifest default (an "enabled" setting whose default is "OFF"), else true.
+    bool isModuleEnabled(const ModuleEntry &m, const QJsonObject &modulesConfig) const;
 
     QString m_appRoot;
     QString m_dataRoot;

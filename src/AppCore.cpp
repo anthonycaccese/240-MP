@@ -73,6 +73,19 @@ void AppCore::saveConfig(const QJsonObject &config) const {
     f.write(QJsonDocument(config).toJson(QJsonDocument::Indented));
 }
 
+bool AppCore::isModuleEnabled(const ModuleEntry &m, const QJsonObject &modulesConfig) const {
+    QJsonObject mCfg = modulesConfig[m.id].toObject();
+    bool manifestDefault = true;
+    for (const auto &sv : m.settings) {
+        QVariantMap s = sv.toMap();
+        if (s["key"].toString() == "enabled") {
+            manifestDefault = s["default"].toString().toUpper() != "OFF";
+            break;
+        }
+    }
+    return mCfg.contains("enabled") ? mCfg["enabled"].toBool(true) : manifestDefault;
+}
+
 // ---------------------------------------------------------------------------
 // Q_INVOKABLE slots
 // ---------------------------------------------------------------------------
@@ -84,17 +97,7 @@ void AppCore::scan_for_modules() {
     QVariantList displayData;
     for (const auto &m : m_modules) {
         // Respect "enabled" setting; fall back to manifest default, then true
-        QJsonObject mCfg = modulesConfig[m.id].toObject();
-        bool manifestDefault = true;
-        for (const auto &sv : m.settings) {
-            QVariantMap s = sv.toMap();
-            if (s["key"].toString() == "enabled") {
-                manifestDefault = s["default"].toString().toUpper() != "OFF";
-                break;
-            }
-        }
-        bool enabled = mCfg.contains("enabled") ? mCfg["enabled"].toBool(true) : manifestDefault;
-        if (!enabled) {
+        if (!isModuleEnabled(m, modulesConfig)) {
             qDebug("[AppCore] Module disabled: %s", qPrintable(m.name));
             continue;
         }
@@ -270,12 +273,14 @@ QString AppCore::get_module_auth_state(const QString &moduleId) {
 }
 
 QVariant AppCore::get_installed_modules() {
+    QJsonObject modulesConfig = loadConfig()["modules"].toObject();
     QVariantList result;
     for (const auto &m : m_modules) {
         result.append(QVariantMap{
             {"id",           m.id},
             {"name",         m.name},
-            {"has_settings", !m.settings.isEmpty()}
+            {"has_settings", !m.settings.isEmpty()},
+            {"enabled",      isModuleEnabled(m, modulesConfig)}
         });
     }
     return result;
@@ -340,11 +345,15 @@ QString AppCore::homePath() {
 
 QString AppCore::startupModuleEntryPoint() const {
     QJsonObject config = loadConfig();
-    QString moduleName = config["app"].toObject()["startup_module"].toString();
-    if (moduleName.isEmpty() || moduleName == "None") return {};
+    // Keyed by module id (robust to display-name changes); "None"/empty = disabled.
+    QString moduleId = config["app"].toObject()["startup_module"].toString();
+    if (moduleId.isEmpty() || moduleId == "None") return {};
 
+    QJsonObject modulesConfig = config["modules"].toObject();
     for (const auto &m : m_modules) {
-        if (m.name == moduleName) {
+        // Skip a disabled module so we never auto-launch into one that isn't
+        // present in the module list (e.g. set as startup, then disabled later).
+        if (m.id == moduleId && isModuleEnabled(m, modulesConfig)) {
             return QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
         }
     }

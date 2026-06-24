@@ -52,17 +52,27 @@ FocusScope {
             moduleId: ""
         })
 
-        // Start on Module — pick a module to auto-launch into on startup
-        var moduleOpts = ["None"]
+        // Start on Module — pick a module to auto-launch into on startup.
+        // Only present enabled modules as options so disabled ones won't display.
+        // The setting is keyed by module id and the picker shows the display name
+        // If the stored id isn't an enabled module, the display falls back to None.
+        var moduleOpts = ["None"] // display labels
+        var moduleVals = ["None"] // stored values (module ids)
+        var startupId = appSettings["startup_module"] || "None"
+        var startupValue = "None"
         for (var mi = 0; mi < installedModules.length; mi++) {
+            if (!installedModules[mi].enabled) continue
             moduleOpts.push(installedModules[mi].name)
+            moduleVals.push(installedModules[mi].id)
+            if (installedModules[mi].id === startupId) startupValue = installedModules[mi].name
         }
         items.push({
             type: "list_single",
             key: "startup_module",
             label: "Start on Module",
             options: moduleOpts,
-            value: appSettings["startup_module"] || "None",
+            values: moduleVals,
+            value: startupValue,
             description: "Directly launch into a specific module on startup",
             moduleId: ""
         })
@@ -173,12 +183,14 @@ FocusScope {
                 var idx = opts.indexOf(row.value)
                 var newIdx = (idx - 1 + opts.length) % opts.length
                 var newVal = opts[newIdx]
+                // Display the label; persist the parallel value when one exists.
+                var savedVal = row.values ? row.values[newIdx] : newVal
                 var updated = settingsItems.slice()
                 updated[currentIndex] = Object.assign({}, row, { value: newVal })
                 var savedIndex = currentIndex
                 settingsItems = updated
                 currentIndex = savedIndex
-                appCore.save_setting(row.moduleId, row.key, newVal)
+                appCore.save_setting(row.moduleId, row.key, savedVal)
             }
         }
 
@@ -189,12 +201,14 @@ FocusScope {
                 var idx = opts.indexOf(row.value)
                 var newIdx = (idx + 1) % opts.length
                 var newVal = opts[newIdx]
+                // Display the label; persist the parallel value when one exists.
+                var savedVal = row.values ? row.values[newIdx] : newVal
                 var updated = settingsItems.slice()
                 updated[currentIndex] = Object.assign({}, row, { value: newVal })
                 var savedIndex = currentIndex
                 settingsItems = updated
                 currentIndex = savedIndex
-                appCore.save_setting(row.moduleId, row.key, newVal)
+                appCore.save_setting(row.moduleId, row.key, savedVal)
             }
         }
 
