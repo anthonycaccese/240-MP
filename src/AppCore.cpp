@@ -286,22 +286,10 @@ QVariant AppCore::get_installed_modules() {
     return result;
 }
 
-QVariantMap AppCore::getCustomColorScheme() const {
+QVariantMap AppCore::importColorScheme(QJsonObject &obj) const {
     static const QStringList kRequiredKeys = {"primary","secondary","tertiary","surface","accent"};
     static const QRegularExpression kHexColor("^#[0-9A-Fa-f]{6}$");
 
-    QFile f(m_dataRoot + "/custom_color_scheme.json");
-    if (!f.exists()) return {};
-    if (!f.open(QIODevice::ReadOnly)) return {};
-
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-        qWarning("[AppCore] custom_color_scheme.json: invalid JSON");
-        return {};
-    }
-
-    QJsonObject obj = doc.object();
     QVariantMap result;
     for (const QString &key : kRequiredKeys) {
         if (!obj.contains(key) || !obj[key].isString()) {
@@ -315,6 +303,55 @@ QVariantMap AppCore::getCustomColorScheme() const {
             return {};
         }
         result[key] = value;
+    }
+    return result;
+}
+
+QVariantMap AppCore::getCustomColorScheme() const {
+    QFile f(m_dataRoot + "/custom_color_scheme.json");
+    if (!f.exists()) return {};
+    if (!f.open(QIODevice::ReadOnly)) return {};
+
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning("[AppCore] custom_color_scheme.json: invalid JSON");
+        return {};
+    }
+
+    QJsonObject obj = doc.object();
+    QVariantMap result = this->importColorScheme(obj);
+    return result;
+}
+
+QVariantMap AppCore::getCustomColorSchemes() const {
+    static const QRegularExpression validThemeName("^[\\w\\d !#-/:-@\\[-_{-~]{3,28}$", QRegularExpression::CaseInsensitiveOption);
+
+    QFile f(m_dataRoot + "/custom_color_schemes.json");
+    if (!f.exists()) return {};
+    if (!f.open(QIODevice::ReadOnly)) return {};
+
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning("[AppCore] custom_color_schemes.json: invalid JSON");
+        return {};
+    }
+
+    QJsonObject obj = doc.object();
+    QVariantMap result;
+    for (const QString &theme : obj.keys()) {
+        if (!validThemeName.match(theme).hasMatch()) {
+            qWarning("[AppCore] custom_color_schemes.json: invalid theme name '%s' detected - only 28 letters, numbers, and ASCII symbols (other than backtick and double-quote)",
+                    qPrintable(theme));
+            continue;
+        }
+        QJsonObject tObj = obj[theme].toObject();
+        QVariantMap tResult = this->importColorScheme(tObj);
+        if (tResult.count() == 5) {
+            result[theme] = tResult;
+            qDebug("[AppCore] custom_color_schemes.json: loaded '%s' custom theme", qPrintable(theme));
+        }
     }
     return result;
 }

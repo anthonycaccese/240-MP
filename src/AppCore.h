@@ -41,6 +41,7 @@ public:
     Q_INVOKABLE void invoke_module_action(const QString &moduleId, const QString &slotName);
     Q_INVOKABLE QVariant get_installed_modules();
     Q_INVOKABLE QVariantMap getCustomColorScheme() const;
+    Q_INVOKABLE QVariantMap getCustomColorSchemes() const;
     Q_INVOKABLE QVariantList listDirectories(const QString &path);
     Q_INVOKABLE QString parentDirectory(const QString &path);
     Q_INVOKABLE QString homePath();
@@ -74,6 +75,7 @@ private:
     // Resolve a module's enabled state: config override if present, else the
     // manifest default (an "enabled" setting whose default is "OFF"), else true.
     bool isModuleEnabled(const ModuleEntry &m, const QJsonObject &modulesConfig) const;
+    QVariantMap importColorScheme(QJsonObject &obj) const;
 
     QString m_appRoot;
     QString m_dataRoot;

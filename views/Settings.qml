@@ -40,6 +40,14 @@ FocusScope {
 
         // APPLICATION section
         var colorOpts = ["Video 1","Late Night","Synthwave","Terminal","T-120","Amber","Kinescope","SMPTE ECR 1-1978"]
+        // Adding a new approach to add multiple custom themes at once
+        var cThemes = appCore.getCustomColorSchemes()
+        if (Object.keys(cThemes).length > 0) {
+            for (var cTheme in cThemes) {
+                if (Object.keys(cThemes[cTheme]).length === 5) colorOpts.push(cTheme)
+            }
+        }
+        // Still support the single-theme approach
         var custom = appCore.getCustomColorScheme()
         if (Object.keys(custom).length === 5) colorOpts.push("Custom")
         items.push({
