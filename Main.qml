@@ -135,6 +135,7 @@ Window {
     // --- APP-LEVEL NAV STACK ---
     property var appNavStack: []
     property var appCurrentParams: ({})
+    property bool _startupNavigated: false
 
     // --- MODULE LOADER ---
     Loader {
@@ -149,7 +150,21 @@ Window {
             }
         }
 
-        onLoaded: item.forceActiveFocus()
+        onLoaded: {
+            item.forceActiveFocus()
+            if (!root._startupNavigated) {
+                root._startupNavigated = true
+                var entryPoint = appCore.startupModuleEntryPoint()
+                if (entryPoint) {
+                    root.appNavStack.push({
+                        source: moduleLoader.source,
+                        params: root.appCurrentParams,
+                        listState: {}
+                    })
+                    moduleLoader.setSource(entryPoint, { "navParams": {} })
+                }
+            }
+        }
 
         Connections {
             target: moduleLoader.item

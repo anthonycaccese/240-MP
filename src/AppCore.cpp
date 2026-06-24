@@ -337,3 +337,16 @@ QString AppCore::parentDirectory(const QString &path) {
 QString AppCore::homePath() {
     return QDir::homePath();
 }
+
+QString AppCore::startupModuleEntryPoint() const {
+    QJsonObject config = loadConfig();
+    QString moduleName = config["app"].toObject()["startup_module"].toString();
+    if (moduleName.isEmpty() || moduleName == "None") return {};
+
+    for (const auto &m : m_modules) {
+        if (m.name == moduleName) {
+            return QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
+        }
+    }
+    return {};
+}

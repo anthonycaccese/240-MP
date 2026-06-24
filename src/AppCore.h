@@ -44,6 +44,7 @@ public:
     Q_INVOKABLE QVariantList listDirectories(const QString &path);
     Q_INVOKABLE QString parentDirectory(const QString &path);
     Q_INVOKABLE QString homePath();
+    Q_INVOKABLE QString startupModuleEntryPoint() const;
     Q_INVOKABLE QString get_module_auth_state(const QString &moduleId);
 
     // Registers a module backend: stores it for action routing, exposes it to QML under

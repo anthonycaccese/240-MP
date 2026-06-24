@@ -52,6 +52,21 @@ FocusScope {
             moduleId: ""
         })
 
+        // Start on Module — pick a module to auto-launch into on startup
+        var moduleOpts = ["None"]
+        for (var mi = 0; mi < installedModules.length; mi++) {
+            moduleOpts.push(installedModules[mi].name)
+        }
+        items.push({
+            type: "list_single",
+            key: "startup_module",
+            label: "Start on Module",
+            options: moduleOpts,
+            value: appSettings["startup_module"] || "None",
+            description: "Directly launch into a specific module on startup",
+            moduleId: ""
+        })
+
         // Smooth Playback — only shown on devices whose smooth decode path can't
         // crop/zoom (the Pi 3 overlay path). Default ON; turning it off restores the
         // crop-capable video output. Takes effect on the next video.
