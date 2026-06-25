@@ -13,6 +13,7 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
 - A [RaspberryPi 4](https://www.raspberrypi.com/products/raspberry-pi-4-model-b/)
     - The Pi 4 fits in a nice sweet spot of performance + composite out and its the model I use daily so its the model I am most familiar with. It supports 1080p H264/HEVC playback well on both a CRT and over HDMI.
     - The [Pi 3B and 3B+](https://www.raspberrypi.com/products/raspberry-pi-3-model-b/) work well too with some caveats...  The default configuration for Pi 3 supports smooth 1080p H264 playback at the expense of inconsistent crop functionality during playback (cropping will display a black screen on some videos).  If crop is important for your use case on a Pi 3 then you can change the video decode settings with the caveat that 1080p H264 playback will no longer be smooth (720p and below  will still work well). The [hardware testing](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#raspberry-pi-3b) page has details on how to make that change.
+    - If you choose to boot a Pi 3/3B+ from USB mass storage instead of SD, some USB flash drives can hang during early boot. If that happens, try an SD card or a different USB drive first before assuming the 240-MP install is the issue.
     - The [Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5/) also works but I've only tested over HDMI to a modern TV. The Pi 5 doesn't have a direct composite output port, one can be added through a mod but I don't have the hardware to test that.
     - Full details on all models can be found on the [hardware testing](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) page on the wiki.  If you have a setup that is working for you and would like to help out others please add a comment to [this discussion](https://github.com/anthonycaccese/240-MP/discussions/44) so we can add it to the wiki.
 - SD Card (minimum of 4GB) with RaspberryPi OS already set up
@@ -48,7 +49,7 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     | --- | --- |
     | <img src="https://github.com/user-attachments/assets/bb9f7a47-12b7-4580-abf4-ec8ad22153ba" /> | <img src="https://github.com/user-attachments/assets/30c39fce-99f8-48c9-9ad0-2b39b52690c1" /> |
 
-    I would also suggest filling out Hostname, User and Wifi in the customization section as it will you save you from having to set them up manually later.
+    I would also suggest filling out Hostname, User and Wifi in the customization section and enabling SSH there as it will save you from having to set those up manually later.
 
 2) After the write is complete, reconnect the card to your PC and update your config.txt to one of the following (please make sure to choose the one that best matches your TV):
 
@@ -168,7 +169,12 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
 
 3) Place the SD card in your Raspberry Pi and let it run through its first boot sequence
 
+    - Raspberry Pi OS Lite does **not** boot to a desktop. On first boot you may see boot log text, a text login console, or sometimes just a blinking cursor for a bit while it finishes booting.
+
 4) Once complete, SSH in and run `sudo raspi-config`
+
+    - If you set the hostname/user in Raspberry Pi Imager, SSH should usually be as simple as `ssh your-user@your-hostname.local`
+    - If `.local` doesn't resolve on your network, use the Pi's IP address instead (`ssh your-user@192.168.x.x`). You can find it in your router's client list or on the Pi itself with `hostname -I`
 
     - Turn on Auto Login: `System Options > Auto Login > Yes`
     - Expand filesystem: `Advanced Options > Expand Filesystem > Yes`
@@ -186,8 +192,13 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     - You will get an option at the end of the install script that asks: `Install systemd autostart service? [y/N]` 
     - If you type `Y` and press enter it will set up 240-MP to autostart when your Raspberry Pi boots which creates a nice appliance experience (bascially a dedicated 240-MP device).
     - If you choose that option please make sure to enter your primary user for the pi at the next prompt.  If you don't provide one it will set it up for the `Pi` user.
+    - If you ever need to inspect the autostart logs later, use `sudo journalctl -u 240mp -f`
 
 At this point you can type `240mp` at any time to start up the app.  And if you installed the autostart service then the next time you boot your Pi it will boot directly into 240-MP.
+
+**If analog / composite audio is unusually quiet:** 
+- Run `amixer sset PCM 100%`
+- If that solves it and you want to keep the level across reboots, run `sudo alsactl store`
 
 **Exit to Terminal:** 
 - If you have the autostart service installed, the Quit dialog gains an `Exit to Terminal` option alongside `Power Off`. Choosing that will drop you to a login shell on the Pi instead of powering off, and leaves autostart intact for subsequent reboots. 
