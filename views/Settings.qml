@@ -44,12 +44,12 @@ FocusScope {
         var cThemes = appCore.getCustomColorSchemes()
         if (Object.keys(cThemes).length > 0) {
             for (var cTheme in cThemes) {
-                if (Object.keys(cThemes[cTheme]).length === 5) colorOpts.push(cTheme)
+                if (!colorOpts.includes(cTheme) && Object.keys(cThemes[cTheme]).length === 5) colorOpts.push(cTheme)
             }
         }
         // Still support the single-theme approach
         var custom = appCore.getCustomColorScheme()
-        if (Object.keys(custom).length === 5) colorOpts.push("Custom")
+        if (!colorOpts.includes("Custom") && Object.keys(custom).length === 5) colorOpts.push("Custom")
         items.push({
             type: "list_single",
             key: "color_scheme",
