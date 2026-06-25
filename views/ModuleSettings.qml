@@ -321,6 +321,33 @@ FocusScope {
         }
     }
 
+    // --- HELP TEXT --- (shown when a focused row has a description)
+    Rectangle {
+        id: rowHelpBackground
+        property var currentRow: moduleSettingsRoot.schemaItems[settingsList.currentIndex]
+        visible: !!(currentRow && currentRow.description)
+        color: root.accentColor
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.bottomMargin: root.sh * 0.1583333 //76
+        anchors.leftMargin: root.sw * 0.125 //80
+        width: root.sw * 0.75 //480
+        height: root.sh * 0.0583333 //28
+        clip: true
+        Text {
+            id: rowHelp
+            text: (rowHelpBackground.currentRow && rowHelpBackground.currentRow.description) || ""
+            color: root.surfaceColor
+            font.family: root.globalFont
+            font.pixelSize: root.sh * 0.0291667 //14
+            wrapMode: Text.WordWrap
+            anchors.fill: parent
+            anchors.margins: root.sw * 0.0125 //6
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
     // --- FOOTER ---
     Text {
         id: footer
