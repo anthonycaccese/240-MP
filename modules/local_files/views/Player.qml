@@ -143,7 +143,11 @@ FocusScope {
         // Leaving this as an array since MPV - like most players - expects a *list* of languages
         // to progressively fall back to until a sub track is found. If we ever switch back to
         // selecting a list in Settings, the change to support them all will be considerably simpler.
-        var subLangString = appCore.get_setting(moduleRoot.moduleId, "sub_lang") || "any"
+        // "-" is the value we store for "Any" (i.e. no preference) thats also the manifest default and
+        // "Any" option's id. If the user never opened this setting, then get_setting returns nothing,
+        // so it will fall back to "-" too. With this, "haven't picked one" will behave the same as "Any":
+        // the check below adds nothing to the list and MPV is launched without a --slang preference.
+        var subLangString = appCore.get_setting(moduleRoot.moduleId, "sub_lang") || "-"
         subtitleLangs = []
         if (subLangString !== "-") {
             subtitleLangs.push(subLangString)
