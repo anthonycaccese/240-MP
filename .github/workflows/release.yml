@@ -27,14 +27,27 @@ jobs:
           arch: clang_64
           cache: true
 
-      - name: Install mpv and SDL2
-        run: brew install mpv sdl2
+      - name: Build SDL2 from source (pinned — Homebrew's sdl2 is now the sdl2-compat/SDL3 shim)
+        run: |
+          SDL2_VERSION=2.32.10
+          SRC="${RUNNER_TEMP}/SDL2-src"
+          BUILD="${RUNNER_TEMP}/SDL2-build"
+          git clone --depth 1 --branch "release-${SDL2_VERSION}" \
+            https://github.com/libsdl-org/SDL "$SRC"
+          cmake -S "$SRC" -B "$BUILD" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_INSTALL_PREFIX="${RUNNER_TEMP}/sdl2-install" \
+            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF
+          cmake --build "$BUILD" --parallel
+          cmake --install "$BUILD"
+          echo "SDL2_PREFIX=${RUNNER_TEMP}/sdl2-install" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR};${SDL2_PREFIX}" \
             -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install"
 
       - name: Build
@@ -47,6 +60,12 @@ jobs:
         run: |
           APP="${GITHUB_WORKSPACE}/install/240mp.app"
           "${QT_ROOT_DIR}/bin/macdeployqt" "$APP" -qmldir="${GITHUB_WORKSPACE}" -verbose=2
+
+      - name: Verify SDL bundling
+        run: |
+          FW="${GITHUB_WORKSPACE}/install/240mp.app/Contents/Frameworks"
+          test -f "$FW/libSDL2-2.0.0.dylib" || { echo "SDL2 not bundled"; exit 1; }
+          ! ls "$FW" | grep -qi sdl3 || { echo "SDL3 leaked into bundle"; exit 1; }
 
       - name: Import signing certificate
         env:
