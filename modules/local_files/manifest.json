@@ -43,7 +43,7 @@
       "options_source": "dynamic",
       "options_slot": "get_auto_subtitles_options",
       "default": "forced",
-      "description": "Whether to automatically show subtitles when a video starts.\n[FORCED ONLY] displays for foreign dialogue only, when available."
+      "description": "Choose to automatically show subtitles when a video starts.\n[FORCED ONLY] displays for foreign dialogue only."
     },
     {
       "key": "sub_lang",
