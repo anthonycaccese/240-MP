@@ -1,0 +1,20 @@
+{
+  "id": "com.240mp.nfc_reader",
+  "name": "NFC Reader",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "ON"
+    },
+    {
+      "key": "mapping_file",
+      "label": "Mapping File",
+      "type": "directory_browser",
+      "default": "modules/nfc_reader/nfc_mapping.json"
+    }
+  ]
+}

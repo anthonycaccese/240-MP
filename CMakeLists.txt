@@ -11,11 +11,43 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
 find_package(OpenSSL REQUIRED)
 find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
+# PC/SC for NFC reader support (Tested with ACS ACR122U and it uses CCID/PCSC)
+# On macOS: PCSC.framework; on Linux: libpcsclite
+if(APPLE)
+    find_library(PCSC_LIBRARIES PCSC)
+else()
+    find_library(PCSC_LIBRARIES pcsclite)
+    find_path(PCSC_INCLUDE_DIRS PCSC/winscard.h
+        PATHS /usr/include /usr/local/include
+    )
+endif()
+if(NOT PCSC_LIBRARIES)
+    message(FATAL_ERROR "Could not find PC/SC. "
+            "macOS: bundled. Linux: apt install libpcsclite-dev")
+endif()
+if(NOT PCSC_INCLUDE_DIRS AND NOT APPLE)
+    message(FATAL_ERROR "Could not find PC/SC headers. "
+            "Linux: apt install libpcsclite-dev")
+endif()
+
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
 # around mpv playback so Qt EGLFS can resume cleanly after mpv exits.
 if(NOT APPLE)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(Libdrm REQUIRED libdrm)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(Libdrm REQUIRED libdrm)
+    else()
+        find_path(Libdrm_INCLUDE_DIRS libdrm/drm.h
+            PATHS /usr/include /usr/local/include
+        )
+        find_library(Libdrm_LIBRARIES
+            NAMES drm
+            PATHS /usr/lib /usr/local/lib
+        )
+        if(NOT Libdrm_INCLUDE_DIRS OR NOT Libdrm_LIBRARIES)
+            message(FATAL_ERROR "Could not find libdrm. Install libdrm-dev")
+        endif()
+    endif()
 endif()
 
 if(APPLE)
@@ -28,6 +60,7 @@ add_executable(240mp
     src/modules/local_files/LocalFilesBackend.cpp
     src/modules/plex/PlexBackend.cpp
     src/modules/ambient_mode/AmbientModeBackend.cpp
+    src/modules/nfc_reader/NfcReaderBackend.cpp
     src/player/MpvController.cpp
     src/input/InputManager.cpp
     $<$<BOOL:${APPLE}>:src/macos_utils.mm>
@@ -42,15 +75,19 @@ target_link_libraries(240mp PRIVATE
     Qt6::Svg
     OpenSSL::Crypto
     SDL2::SDL2
+    ${PCSC_LIBRARIES}
     $<$<NOT:$<BOOL:${APPLE}>>:${Libdrm_LIBRARIES}>
 )
 
 if(APPLE)
-    target_link_libraries(240mp PRIVATE "-framework AppKit")
+    target_link_libraries(240mp PRIVATE "-framework AppKit" ${PCSC_LIBRARIES})
 endif()
 
 if(NOT APPLE)
-    target_include_directories(240mp PRIVATE ${Libdrm_INCLUDE_DIRS})
+    target_include_directories(240mp PRIVATE
+        ${PCSC_INCLUDE_DIRS}
+        ${Libdrm_INCLUDE_DIRS}
+    )
 endif()
 
 target_include_directories(240mp PRIVATE
