@@ -94,6 +94,9 @@ private:
     // App-level "smooth_playback" setting (default ON). On the Pi 3 this selects the
     // smooth zero-copy overlay path; turning it OFF restores the crop-capable scaler path.
     bool smoothPlaybackEnabled() const;
+    // App-level "auto_crop" setting (default OFF). When ON, playback starts with
+    // panscan=1 so video fills a CRT/4:3 screen by default (still toggleable live).
+    bool autoCropEnabled() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;

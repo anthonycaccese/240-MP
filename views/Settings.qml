@@ -108,6 +108,18 @@ FocusScope {
             })
         }
 
+        // Auto Crop — default crop (panscan) state for every video. Off by default;
+        // crop can still be toggled live during playback via the mpv OSC.
+        items.push({
+            type: "list_single",
+            key: "auto_crop",
+            label: "Auto Crop",
+            options: ["Off", "On"],
+            value: appSettings["auto_crop"] || "Off",
+            description: "[ON] Video starts cropped to fill screen\n[OFF] Video starts at its original aspect ratio",
+            moduleId: ""
+        })
+
         // MODULES section — only show modules with has_settings
         var hasModuleSettings = false
         for (var i = 0; i < installedModules.length; i++) {
