@@ -334,7 +334,8 @@ FocusScope {
         id: rowHelpBackground
         property var currentRow: settingsRoot.settingsItems[settingsList.currentIndex]
         visible: !!(currentRow && currentRow.description)
-        color: root.accentColor
+        property color baseColor: root.primaryColor
+        color: Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.2)
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.bottomMargin: root.sh * 0.1583333 //76
@@ -345,7 +346,7 @@ FocusScope {
         Text {
             id: rowHelp
             text: (rowHelpBackground.currentRow && rowHelpBackground.currentRow.description) || ""
-            color: root.surfaceColor
+            color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: root.sh * 0.0291667 //14
             wrapMode: Text.WordWrap
