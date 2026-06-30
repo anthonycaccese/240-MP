@@ -6,15 +6,19 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-// Single source of truth for image types. kMediaExts (the browse filter) is built
-// from it, and QML asks isImage() rather than keeping its own copy of the list.
+// supported image types
 static const QStringList kImageExts = {
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"
 };
+// supported playlist types
+static const QStringList kPlaylistExts = { 
+    "m3u", "m3u8" 
+};
+// full list of supported playback types (combo of video, image and playlist)
 static const QStringList kMediaExts =
     QStringList{ "mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob" }
     + kImageExts
-    + QStringList{ "m3u", "m3u8" };
+    + kPlaylistExts;
 
 LocalFilesBackend::LocalFilesBackend(const QString &appRoot, const QString &dataRoot, QObject *parent)
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot), m_mediaRoot(dataRoot + "/media")
@@ -32,6 +36,10 @@ LocalFilesBackend::LocalFilesBackend(const QString &appRoot, const QString &data
 
 bool LocalFilesBackend::isImage(const QString &path) const {
     return kImageExts.contains(QFileInfo(path).suffix().toLower());
+}
+
+bool LocalFilesBackend::isPlaylist(const QString &path) const {
+    return kPlaylistExts.contains(QFileInfo(path).suffix().toLower());
 }
 
 QString LocalFilesBackend::historyFilePath() const {
@@ -164,7 +172,6 @@ QVariantList LocalFilesBackend::getItems(const QString &path) {
         return result;
     }
 
-    static const QStringList kPlaylistExts = { "m3u", "m3u8" };
     for (const QString &name : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
         QString suffix = QFileInfo(name).suffix().toLower();
         if (kPlaylistExts.contains(suffix)) {

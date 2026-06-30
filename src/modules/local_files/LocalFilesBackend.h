@@ -11,6 +11,7 @@ public:
 
     Q_INVOKABLE QVariantList getItems(const QString &path);
     Q_INVOKABLE bool         isImage(const QString &path) const;
+    Q_INVOKABLE bool         isPlaylist(const QString &path) const;
     Q_INVOKABLE QString      mediaRoot() const;
     Q_INVOKABLE void         setMediaRoot(const QString &path);
 

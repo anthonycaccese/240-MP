@@ -280,8 +280,7 @@ FocusScope {
     }
 
     function isPlaylist(path) {
-        var lower = path.toLowerCase()
-        return lower.endsWith(".m3u") || lower.endsWith(".m3u8")
+        return localFilesBackend.isPlaylist(path)
     }
 
     function isImage(path) {
