@@ -1,13 +1,20 @@
 #include "LocalFilesBackend.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QVariantMap>
 #include <QJsonDocument>
 #include <QJsonObject>
 
-static const QStringList kMediaExts = {
-    "mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob", "m3u", "m3u8"
+// Single source of truth for image types. kMediaExts (the browse filter) is built
+// from it, and QML asks isImage() rather than keeping its own copy of the list.
+static const QStringList kImageExts = {
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"
 };
+static const QStringList kMediaExts =
+    QStringList{ "mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob" }
+    + kImageExts
+    + QStringList{ "m3u", "m3u8" };
 
 LocalFilesBackend::LocalFilesBackend(const QString &appRoot, const QString &dataRoot, QObject *parent)
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot), m_mediaRoot(dataRoot + "/media")
@@ -21,6 +28,10 @@ LocalFilesBackend::LocalFilesBackend(const QString &appRoot, const QString &data
         if (!dir.isEmpty())
             setMediaRoot(dir);
     }
+}
+
+bool LocalFilesBackend::isImage(const QString &path) const {
+    return kImageExts.contains(QFileInfo(path).suffix().toLower());
 }
 
 QString LocalFilesBackend::historyFilePath() const {
@@ -85,6 +96,16 @@ void LocalFilesBackend::get_resume_playback_options() {
     QVariantMap no;  no["id"]  = "no";  no["label"]  = "Never";
     options << ask << yes << no;
     emit dynamicOptionsReady("resume_playback", options);
+}
+
+void LocalFilesBackend::get_image_duration_options() {
+    QVariantList options;
+    QVariantMap five;   five["id"]   = "5";  five["label"]   = "5 Seconds";
+    QVariantMap ten;    ten["id"]    = "10"; ten["label"]    = "10 Seconds";
+    QVariantMap thirty; thirty["id"] = "30"; thirty["label"] = "30 Seconds";
+    QVariantMap sixty;  sixty["id"]  = "60"; sixty["label"]  = "60 Seconds";
+    options << five << ten << thirty << sixty;
+    emit dynamicOptionsReady("image_duration", options);
 }
 
 void LocalFilesBackend::get_subtitle_languages() {
