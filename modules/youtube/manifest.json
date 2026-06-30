@@ -1,0 +1,16 @@
+{
+  "id": "com.240mp.youtube",
+  "name": "YouTube",
+  "icon": "assets/images/logo.svg",
+  "version": "1.0",
+  "entry_point_qml": "views/Root.qml",
+
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "ON"
+    }
+  ]
+}
