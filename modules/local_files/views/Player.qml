@@ -19,6 +19,14 @@ FocusScope {
     property string resumeSetting:       "ask"
     property string subtitleMode:        "forced"
     property var    subtitleLangs:       []
+    property int    imageDurationSec:    5
+
+    // True when playback is images (a standalone image, or a playlist that contains
+    // at least one image). Gates the slideshow-redraw mpv script — see MpvController.
+    property bool   imageContent:        false
+
+    // mpv subtitle-track flag derived from subtitleMode: 0 = on, -1 = forced only, -2 = off.
+    property int    subFlag:             (subtitleMode == "on") ? 0 : ((subtitleMode == "forced") ? -1 : -2)
 
     // Track last non-null values during playback for robust save on exit
     property int    lastKnownPositionMs:  0
@@ -51,7 +59,7 @@ FocusScope {
                 if (choiceIndex === 0 && startPlPos >= 0)
                     resumedFromPlaylistPos = startPlPos
                 overlayVisible = false
-                mpvController.loadAndPlay(filePath, startMs / 1000.0, 0, (subtitleMode == "on") ? 0 : ((subtitleMode == "forced") ? -1 : -2), [], subtitleLangs, loopOn, startPlPos)
+                mpvController.loadAndPlay(filePath, startMs / 1000.0, 0, subFlag, [], subtitleLangs, loopOn, startPlPos, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
                 event.accepted = true
             }
         } else {
@@ -122,8 +130,9 @@ FocusScope {
                 // Always save playlist state — skip completion detection
                 if (pos > 0 || plPos >= 0)
                     localFilesBackend.savePosition(filePath, pos, plPos)
-            } else {
-                // Single file: clear if near completion, save otherwise
+            } else if (!isImage(filePath)) {
+                // Single file: clear if near completion, save otherwise.
+                // Images carry no resume position, so they never write history.
                 if (dur > 0 && pos >= dur * 0.95)
                     localFilesBackend.clearPosition(filePath)
                 else if (pos > 5000)
@@ -141,6 +150,11 @@ FocusScope {
         var autoSubs  = appCore.get_setting(moduleRoot.moduleId, "auto_subtitles")
         subtitleMode  = (typeof autoSubs === "boolean") ? ((autoSubs === true) ? "on" : "forced") : (autoSubs || "forced")
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        var imgDur = parseFloat(appCore.get_setting(moduleRoot.moduleId, "image_duration"))
+        imageDurationSec = isNaN(imgDur) ? 5 : imgDur
+
+        imageContent = isImage(filePath) ||
+                       (isPlaylist(filePath) && localFilesBackend.playlistContainsImages(filePath))
 
         // Leaving this as an array since MPV - like most players - expects a *list* of languages
         // to progressively fall back to until a sub track is found. If we ever switch back to
@@ -158,12 +172,20 @@ FocusScope {
         // Shuffle wins: a shuffled playlist starts fresh & random; resume position
         // (a sequential item index) is meaningless once order is randomized.
         if (shuffleOn && isPlaylist(filePath)) {
-            mpvController.loadAndPlay(filePath, 0.0, 0, (subtitleMode == "on") ? 0 : ((subtitleMode == "forced") ? -1 : -2), [], subtitleLangs, loopOn, -1, 0.0, "", false, "", true)
+            mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", true, [], imageDurationSec, imageContent)
+            return
+        }
+
+        // A standalone image has no meaningful playback position, so it bypasses
+        // resume entirely (no saved-position lookup, no "RESUME PLAYBACK?" overlay).
+        // Images inside a playlist still resume via the playlist's item index below.
+        if (!isPlaylist(filePath) && isImage(filePath)) {
+            mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
             return
         }
 
         if (resumeSetting === "no") {
-            mpvController.loadAndPlay(filePath, 0.0, 0, (subtitleMode == "on") ? 0 : ((subtitleMode == "forced") ? -1 : -2), [], subtitleLangs, loopOn, -1)
+            mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
             return
         }
 
@@ -175,14 +197,14 @@ FocusScope {
             if (savedPos > 0 && savedPl >= 0)
                 resumedFromPlaylistPos = savedPl
             mpvController.loadAndPlay(filePath, savedPos > 0 ? savedPos / 1000.0 : 0.0,
-                                      0, (subtitleMode == "on") ? 0 : ((subtitleMode == "forced") ? -1 : -2), [], subtitleLangs, loopOn, savedPos > 0 ? savedPl : -1)
+                                      0, subFlag, [], subtitleLangs, loopOn, savedPos > 0 ? savedPl : -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
         } else {
             if (savedPos > 0) {
                 savedPositionMs  = savedPos
                 savedPlaylistPos = savedPl
                 overlayVisible   = true
             } else {
-                mpvController.loadAndPlay(filePath, 0.0, 0, (subtitleMode == "on") ? 0 : ((subtitleMode == "forced") ? -1 : -2), [], subtitleLangs, loopOn, -1)
+                mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
             }
         }
     }
@@ -265,8 +287,11 @@ FocusScope {
     }
 
     function isPlaylist(path) {
-        var lower = path.toLowerCase()
-        return lower.endsWith(".m3u") || lower.endsWith(".m3u8")
+        return localFilesBackend.isPlaylist(path)
+    }
+
+    function isImage(path) {
+        return localFilesBackend.isImage(path)
     }
 
     function formatTime(ms) {

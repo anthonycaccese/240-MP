@@ -1,4 +1,21 @@
 local assdraw = require 'mp.assdraw'
+local mp_utils = require 'mp.utils'
+
+-- Optional map of external sub-file URL -> friendly track name, written by the app
+-- so the OSC can show a real subtitle name instead of mpv's URL-derived title
+-- (Jellyfin sidecars are served as "Stream.srt?api_key=..."). Absent for most plays.
+local subinfo = {}
+do
+    local path = mp.get_opt("subinfo-file")
+    if path then
+        local f = io.open(path, "r")
+        if f then
+            local parsed = mp_utils.parse_json(f:read("*a") or "")
+            f:close()
+            if type(parsed) == "table" then subinfo = parsed end
+        end
+    end
+end
 
 local menu_visible = false
 local focus_row = 0  -- 0: Seek Bar, 1: Buttons
@@ -36,6 +53,12 @@ end
 local function get_sub_str()
     local id = mp.get_property_number("current-tracks/sub/id", 0)
     if id == 0 then return "(NONE)" end
+    -- External sidecar with an app-provided friendly name (e.g. Jellyfin): use it
+    -- instead of mpv's URL-derived title.
+    local ext = mp.get_property("current-tracks/sub/external-filename", "") or ""
+    if ext ~= "" and subinfo[ext] and subinfo[ext] ~= "" then
+        return tostring(subinfo[ext]):upper()
+    end
     local title = (mp.get_property("current-tracks/sub/title", "") or ""):upper()
     local lang  = (mp.get_property("current-tracks/sub/lang",  "") or ""):upper()
     local codec = (mp.get_property("current-tracks/sub/codec", "") or ""):upper()

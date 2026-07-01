@@ -1,7 +1,7 @@
 import QtQuick
 import Components
 
-// Main Plex home screen: Continue Watching + library list
+// Main Jellyfin home screen: Continue Watching + library list
 FocusScope {
     id: browseRoot
 
@@ -14,15 +14,13 @@ FocusScope {
     property var libraries: []
     property string serverName: ""
     property string userName: ""
-    // Servers the active user can switch to from the main menu. More than one
-    // means the quick-switch action (◄/►) is offered.
-    property var switchableServers: []
-    property bool canSwitchServer: switchableServers.length > 1
 
     Connections {
-        target: plexBackend
+        target: jellyfinBackend
 
         function onLibrariesLoaded(items) {
+            // The backend prepends Continue Watching / Up Next (only when they
+            // have content), so render the list as given.
             browseRoot.libraries = items
             if (items.length > 0) {
                 var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
@@ -32,22 +30,14 @@ FocusScope {
         }
 
         function onErrorOccurred(msg) {
-            console.log("[Library] Error: " + msg)
+            console.log("[Jellyfin Library] Error: " + msg)
         }
     }
 
     Component.onCompleted: {
-        browseRoot.serverName = plexBackend.get_active_server_name()
-        browseRoot.userName = plexBackend.get_active_user_name()
-        browseRoot.switchableServers = plexBackend.get_switchable_servers()
-        plexBackend.load_libraries()
-    }
-
-    function openServerSwitch() {
-        if (!canSwitchServer) return
-        browseRoot.navigateTo("ServerSelect.qml",
-                              { servers: switchableServers, switching: true },
-                              { currentIndex: libraryList.currentIndex })
+        browseRoot.serverName = jellyfinBackend.get_server_name()
+        browseRoot.userName = jellyfinBackend.get_user_name()
+        jellyfinBackend.load_libraries()
     }
 
     focus: true
@@ -92,8 +82,6 @@ FocusScope {
 
         Keys.onUpPressed: if (currentIndex > 0) currentIndex--
         Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
-        Keys.onLeftPressed: browseRoot.openServerSwitch()
-        Keys.onRightPressed: browseRoot.openServerSwitch()
 
         Keys.onReturnPressed: {
             var lib = libraries[currentIndex]
@@ -101,21 +89,57 @@ FocusScope {
 
             if (lib.key === "continue_watching") {
                 browseRoot.navigateTo("Items.qml", {
-                    listType: "continue_watching",
+                    mode: "resume",
                     title: "CONTINUE WATCHING",
-                    libraryName: lib.title
+                    libraryName: "CONTINUE WATCHING"
                 }, { currentIndex: libraryList.currentIndex })
-            } else if (lib.key === "live_tv") {
-                browseRoot.navigateTo("LiveChannels.qml", {
-                    libraryName: lib.title
-                }, { currentIndex: libraryList.currentIndex })
-            } else {
-                browseRoot.navigateTo("Library.qml", {
-                    libraryName: lib.title,
-                    sectionId: lib.sectionId,
-                    sectionType: lib.sectionType
-                }, { currentIndex: libraryList.currentIndex })
+                return
             }
+
+            if (lib.key === "up_next") {
+                browseRoot.navigateTo("Items.qml", {
+                    mode: "up_next",
+                    title: "NEXT UP",
+                    libraryName: "NEXT UP"
+                }, { currentIndex: libraryList.currentIndex })
+                return
+            }
+
+            // Box-set libraries list their box sets (direct children); Items.qml
+            // "boxset" mode fetches them and routes each box set into Boxset.qml.
+            var collectionType = lib.collectionType || ""
+            if (collectionType === "boxsets") {
+                browseRoot.navigateTo("Items.qml", {
+                    parentId: lib.itemId,
+                    title: lib.title,
+                    libraryName: lib.title,
+                    mode: "boxset"
+                }, { currentIndex: libraryList.currentIndex })
+                return
+            }
+
+            // homevideos libraries are a tree of folders + videos, browsed one
+            // level at a time via Items.qml "folder" mode.
+            if (collectionType === "homevideos") {
+                browseRoot.navigateTo("Items.qml", {
+                    parentId: lib.itemId,
+                    title: lib.title,
+                    libraryName: lib.title,
+                    mode: "folder"
+                }, { currentIndex: libraryList.currentIndex })
+                return
+            }
+
+            // Map the (gated) library type to its item-type filter.
+            var includeTypes = ""
+            if (collectionType === "movies") includeTypes = "Movie"
+            else if (collectionType === "tvshows") includeTypes = "Series"
+            browseRoot.navigateTo("Items.qml", {
+                parentId: lib.itemId,
+                title: lib.title,
+                libraryName: lib.title,
+                includeTypes: includeTypes
+            }, { currentIndex: libraryList.currentIndex })
         }
 
         Keys.onPressed: function(event) {
@@ -178,7 +202,6 @@ FocusScope {
     Text {
         id: footer
         text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SELECT"
-              + (browseRoot.canSwitchServer ? " " + root.hints.change + ":SERVER" : "")
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

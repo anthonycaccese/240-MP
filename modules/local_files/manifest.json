@@ -53,6 +53,15 @@
       "options_slot": "get_subtitle_languages",
       "default": "-",
       "description": "Select which language to automatically load subtitles for.\n[Any] is the same as 'no preference'."
+    },
+    {
+      "key": "image_duration",
+      "label": "Image Duration",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_image_duration_options",
+      "default": "5",
+      "description": "How long an image is shown before advancing.\nApplies to images in folders and playlists."
     }
   ]
 }

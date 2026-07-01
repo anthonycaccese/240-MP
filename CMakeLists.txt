@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+# Strip qDebug(...) calls in Release builds to reduce CPU/disk noise on Pi
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DQT_NO_DEBUG_OUTPUT")
+
 include(GNUInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
@@ -59,6 +62,7 @@ add_executable(240mp
     src/AppCore.cpp
     src/modules/local_files/LocalFilesBackend.cpp
     src/modules/plex/PlexBackend.cpp
+    src/modules/jellyfin/JellyfinBackend.cpp
     src/modules/ambient_mode/AmbientModeBackend.cpp
     src/modules/nfc_reader/NfcReaderBackend.cpp
     src/player/MpvController.cpp

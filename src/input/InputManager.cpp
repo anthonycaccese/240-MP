@@ -1,6 +1,8 @@
 #include "InputManager.h"
 
 #include <QCoreApplication>
+#include <QGuiApplication>
+#include <QInputMethodQueryEvent>
 #include <QQuickWindow>
 #include <QKeyEvent>
 #include <QFile>
@@ -32,6 +34,19 @@ bool isRightShift(const QKeyEvent *ke) {
     const quint32 sc = ke->nativeScanCode();
     return sc == 54 || sc == 62;             // KEY_RIGHTSHIFT, +8 offset
 #endif
+}
+
+// True when an editable text field (e.g. a QML TextInput/TextField) currently
+// holds focus. Detected via the Qt::ImEnabled input-method query — the same
+// signal virtual keyboards use to decide when to appear — so it doesn't depend
+// on QML class names. Used to let Right Shift type shifted characters instead
+// of acting as Back while the user is editing text.
+bool textInputHasFocus() {
+    QObject *fo = QGuiApplication::focusObject();
+    if (!fo) return false;
+    QInputMethodQueryEvent query(Qt::ImEnabled);
+    QCoreApplication::sendEvent(fo, &query);
+    return query.value(Qt::ImEnabled).toBool();
 }
 }
 
@@ -513,7 +528,12 @@ bool InputManager::eventFilter(QObject *obj, QEvent *event) {
     // mpv, not us, and mpv can't bind a bare modifier — so right shift only
     // works in the player on platforms where the app keeps the keyboard
     // (RPi/EGLFS). Same asymmetry as gamepads, minus their SDL workaround.
-    if (ke->key() == Qt::Key_Shift && isRightShift(ke)) {
+    // While a text field is focused, let Right Shift behave as an ordinary
+    // modifier so the user can type shifted characters (e.g. ':' in a server
+    // URL); only repurpose it as Back when nothing editable has focus. Falling
+    // through (no return) lets the bare Shift event reach QML, where it's a
+    // harmless no-op until the next character key arrives with the modifier.
+    if (ke->key() == Qt::Key_Shift && isRightShift(ke) && !textInputHasFocus()) {
         if (!ke->isAutoRepeat()) {
             if (type == QEvent::KeyPress)
                 deliverPress(Action::Back, false);

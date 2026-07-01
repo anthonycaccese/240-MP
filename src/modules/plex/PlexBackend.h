@@ -62,6 +62,18 @@ public:
     Q_INVOKABLE void set_audio_stream(const QString &streamId, const QString &partId);
     Q_INVOKABLE void set_subtitle_stream(const QString &streamId, const QString &partId);
 
+    // Live TV — minimal "watch live channels" support (no DVR/recording features).
+    // load_live_channels lists the channel lineup of the first available DVR;
+    // tune_channel allocates a tuner + HLS transcode session and emits streamUrlReady;
+    // update_live_timeline keeps that tuner alive (state "playing") or releases it
+    // (state "stopped"). The grabbed media key is remembered between calls.
+    Q_INVOKABLE void load_live_channels();
+    Q_INVOKABLE void tune_channel(const QString &channelId, const QString &sessionId);
+    Q_INVOKABLE void update_live_timeline(const QString &state);
+    // Stops the live transcode for sessionId and forgets the tuned key, so the
+    // server can release the tuner. Called on exit and before a channel change.
+    Q_INVOKABLE void stop_live_session(const QString &sessionId);
+
     // Settings dynamic options
     Q_INVOKABLE void getUsers();
     Q_INVOKABLE void getServers();
@@ -95,6 +107,8 @@ signals:
     void childrenLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);
     void nextEpisodeReady(const QVariant &detail);
+
+    void liveChannelsLoaded(const QVariant &channels);
 
     void dynamicOptionsReady(const QString &key, const QVariant &options);
 
@@ -193,4 +207,18 @@ private:
     QString m_clientId;          // cached after first load
     bool    m_refreshInFlight  = false;
     bool    m_deviceVerified   = false; // set after first successful plex.tv check per session
+
+    // Live TV session state. m_liveDvrId is cached from the last load_live_channels.
+    // The rest are set by tune_channel and drive the timeline keep-alive that stops
+    // Plex from reaping the DVR grab (which would 404 the stream after a few
+    // minutes): m_liveTimelineKey is the grabbed live-session key, m_liveRatingKey
+    // and m_liveDurationMs identify the airing, m_liveSessionId ties the timeline to
+    // the transcode session, and m_liveStartedMs gives the keep-alive an advancing
+    // playback time.
+    QString m_liveDvrId;
+    QString m_liveTimelineKey;
+    QString m_liveRatingKey;
+    QString m_liveSessionId;
+    int     m_liveDurationMs = 0;
+    qint64  m_liveStartedMs  = 0;
 };

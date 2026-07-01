@@ -1,0 +1,53 @@
+{
+  "id": "com.240mp.jellyfin",
+  "name": "Jellyfin",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "libraries",
+      "label": "Libraries",
+      "type": "multiselect_submenu",
+      "options_source": "dynamic",
+      "options_slot": "getLibraries",
+      "requires_auth": true
+    },
+    {
+      "key": "video_quality",
+      "label": "Video Quality",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "getVideoQualities",
+      "requires_auth": true
+    },
+    {
+      "key": "resume_playback",
+      "label": "Resume Playback",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_resume_playback_options",
+      "default": "ask",
+      "requires_auth": true
+    },
+    {
+      "key": "autoplay_next_episode",
+      "label": "Autoplay Next Episode",
+      "type": "toggle",
+      "default": "OFF",
+      "requires_auth": true
+    },
+    {
+      "key": "logout",
+      "label": "Sign out",
+      "type": "action",
+      "action_slot": "logout",
+      "requires_auth": true
+    }
+  ]
+}

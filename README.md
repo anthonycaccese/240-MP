@@ -4,7 +4,7 @@
 
 240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV).
 
-Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 3 currently included playback modules; one for [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), one for [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex) and a module similar to art/wallpaper modes on modern tvs called ([Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode))
+Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 4 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
 It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps outlined below.
 
@@ -43,6 +43,19 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Autoplay next episode in a season (optional, off by default)
 - Hub, Playlist, Collection and Category support
 - Movie editions
+- Select preferred audio/subtitle track before playback and switch tracks during playback
+- Full library browsing by letter
+- Show/Season browsing
+- Video quality selection: Direct Playback (Default) or Transcode options
+
+### Jellyfin Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin))
+- Designed for CRT navigation (simple, fast, list browsing)
+- Supported library types: `movies, tvshows, homevideos, boxsets`
+- "Quick Connect" authentication
+- Select specific libraries to display
+- Continue Watching, Next Up and Resume Playback
+- Autoplay next episode in a season (optional, off by default)
+- Collections support
 - Select preferred audio/subtitle track before playback and switch tracks during playback
 - Full library browsing by letter
 - Show/Season browsing

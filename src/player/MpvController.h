@@ -48,7 +48,10 @@ public:
                                   const QString &plexToken = {},
                                   bool muteAudio = false,
                                   const QString &oscMode = {},
-                                  bool shuffle = false);
+                                  bool shuffle = false,
+                                  const QStringList &subTitles = {},
+                                  float imageDurationSec = 0.0f,
+                                  bool imageContent = false);
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seekTo(int positionMs);
     Q_INVOKABLE void sendKey(const QString &key);
@@ -93,6 +96,9 @@ private:
     // App-level "smooth_playback" setting (default ON). On the Pi 3 this selects the
     // smooth zero-copy overlay path; turning it OFF restores the crop-capable scaler path.
     bool smoothPlaybackEnabled() const;
+    // App-level "auto_crop" setting (default OFF). When ON, playback starts with
+    // panscan=1 so video fills a CRT/4:3 screen by default (still toggleable live).
+    bool autoCropEnabled() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;
@@ -113,6 +119,7 @@ private:
     QString       m_socketPath;
     QString       m_inputConfPath;
     QString       m_logFilePath;
+    QString       m_subInfoPath;       // JSON map: external sub URL -> friendly name (for the OSC)
     QString       m_lastEndFileReason;  // mpv end-file "reason" for the current session
     int           m_position     = 0;
     int           m_duration     = 0;

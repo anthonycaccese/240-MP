@@ -1,9 +1,10 @@
 import QtQuick
 import Components
 
-// Main Plex home screen: Continue Watching + library list
+// Live TV channel list. Lists the tunable channels of the server's DVR; selecting
+// one hands off to LivePlayer.qml, which tunes it and can switch channels in place.
 FocusScope {
-    id: browseRoot
+    id: channelsRoot
 
     property var navParams: ({})
     property var navListState: navParams.navListState || ({})
@@ -11,44 +12,32 @@ FocusScope {
     signal navigateTo(string path, var params, var listState)
     signal goBack()
 
-    property var libraries: []
-    property string serverName: ""
-    property string userName: ""
-    // Servers the active user can switch to from the main menu. More than one
-    // means the quick-switch action (◄/►) is offered.
-    property var switchableServers: []
-    property bool canSwitchServer: switchableServers.length > 1
+    property string libraryName: navParams.libraryName || "LIVE TV"
+    property var channels: []
+    property bool loaded: false
+    property string errorMessage: ""
 
     Connections {
         target: plexBackend
 
-        function onLibrariesLoaded(items) {
-            browseRoot.libraries = items
+        function onLiveChannelsLoaded(items) {
+            channelsRoot.channels = items
+            channelsRoot.loaded = true
             if (items.length > 0) {
                 var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
-                libraryList.currentIndex = Math.min(restore, items.length - 1)
-                libraryList.positionViewAtIndex(libraryList.currentIndex, ListView.Contain)
+                channelList.currentIndex = Math.min(restore, items.length - 1)
+                channelList.positionViewAtIndex(channelList.currentIndex, ListView.Contain)
             }
         }
 
         function onErrorOccurred(msg) {
-            console.log("[Library] Error: " + msg)
+            console.log("[LiveChannels] Error: " + msg)
+            channelsRoot.loaded = true
+            channelsRoot.errorMessage = msg
         }
     }
 
-    Component.onCompleted: {
-        browseRoot.serverName = plexBackend.get_active_server_name()
-        browseRoot.userName = plexBackend.get_active_user_name()
-        browseRoot.switchableServers = plexBackend.get_switchable_servers()
-        plexBackend.load_libraries()
-    }
-
-    function openServerSwitch() {
-        if (!canSwitchServer) return
-        browseRoot.navigateTo("ServerSelect.qml",
-                              { servers: switchableServers, switching: true },
-                              { currentIndex: libraryList.currentIndex })
-    }
+    Component.onCompleted: plexBackend.load_live_channels()
 
     focus: true
 
@@ -60,27 +49,31 @@ FocusScope {
     AppBar {
         iconSource: moduleRoot.moduleIcon
         title: moduleRoot.moduleName
-        subtitle: browseRoot.serverName + (browseRoot.userName ? " (" + browseRoot.userName + ")" : "")
+        subtitle: channelsRoot.libraryName
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.125 //60
         anchors.leftMargin: root.sw * 0.125 //80
     }
 
-    // Loading Indicator
+    // Loading / empty / error indicator
     Text {
-        visible: libraries.length === 0
-        text: "LOADING..."
+        visible: channels.length === 0
+        text: channelsRoot.errorMessage !== "" ? channelsRoot.errorMessage
+              : (channelsRoot.loaded ? "NO CHANNELS" : "LOADING...")
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.centerIn: parent
+        wrapMode: Text.WordWrap
+        horizontalAlignment: Text.AlignHCenter
+        width: root.sw * 0.6
         font.pixelSize: root.sh * 0.05 //24
     }
 
     // Body
     ListView {
-        id: libraryList
-        model: libraries
+        id: channelList
+        model: channels
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.25 //120
@@ -92,59 +85,41 @@ FocusScope {
 
         Keys.onUpPressed: if (currentIndex > 0) currentIndex--
         Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
-        Keys.onLeftPressed: browseRoot.openServerSwitch()
-        Keys.onRightPressed: browseRoot.openServerSwitch()
 
         Keys.onReturnPressed: {
-            var lib = libraries[currentIndex]
-            if (!lib) return
-
-            if (lib.key === "continue_watching") {
-                browseRoot.navigateTo("Items.qml", {
-                    listType: "continue_watching",
-                    title: "CONTINUE WATCHING",
-                    libraryName: lib.title
-                }, { currentIndex: libraryList.currentIndex })
-            } else if (lib.key === "live_tv") {
-                browseRoot.navigateTo("LiveChannels.qml", {
-                    libraryName: lib.title
-                }, { currentIndex: libraryList.currentIndex })
-            } else {
-                browseRoot.navigateTo("Library.qml", {
-                    libraryName: lib.title,
-                    sectionId: lib.sectionId,
-                    sectionType: lib.sectionType
-                }, { currentIndex: libraryList.currentIndex })
-            }
+            if (channels.length === 0) return
+            channelsRoot.navigateTo("LivePlayer.qml", {
+                channel: channels[currentIndex]
+            }, { currentIndex: channelList.currentIndex })
         }
 
         Keys.onPressed: function(event) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
-                browseRoot.goBack()
+                channelsRoot.goBack()
                 event.accepted = true
             }
         }
 
         delegate: Item {
-            width: libraryList.width
+            width: channelList.width
             height: root.sh * 0.0583333 //28
 
             Item {
                 id: textClip
-                width: Math.min(rowText.implicitWidth, libraryList.width)
+                width: Math.min(rowText.implicitWidth, channelList.width)
                 height: parent.height
                 clip: true
 
                 Rectangle {
                     color: root.accentColor
                     anchors.fill: rowText
-                    visible: libraryList.currentIndex === index
+                    visible: channelList.currentIndex === index
                 }
 
                 Text {
                     id: rowText
-                    text: modelData.title || ""
-                    color: libraryList.currentIndex === index ? root.surfaceColor : root.primaryColor
+                    text: (modelData.number ? modelData.number + "  " : "") + (modelData.title || "")
+                    color: channelList.currentIndex === index ? root.surfaceColor : root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
                     anchors.verticalCenter: parent.verticalCenter
@@ -157,7 +132,7 @@ FocusScope {
                 }
 
                 SequentialAnimation {
-                    running: (libraryList.currentIndex === index) &&
+                    running: (channelList.currentIndex === index) &&
                              (rowText.implicitWidth > textClip.width)
                     loops: Animation.Infinite
                     onRunningChanged: if (!running) rowText.x = 0
@@ -177,8 +152,7 @@ FocusScope {
     // Footer
     Text {
         id: footer
-        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SELECT"
-              + (browseRoot.canSwitchServer ? " " + root.hints.change + ":SERVER" : "")
+        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":WATCH"
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

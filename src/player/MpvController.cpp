@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QDateTime>
+#include <QRegularExpression>
 #include <QDebug>
 
 #ifdef Q_OS_LINUX
@@ -49,6 +50,7 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
     , m_socketPath(QDir::tempPath() + "/240mp-mpv.sock")
     , m_inputConfPath(QDir::tempPath() + "/240mp-input.conf")
     , m_logFilePath(QDir::tempPath() + "/240mp-mpv.log")
+    , m_subInfoPath(QDir::tempPath() + "/240mp-mpv-subinfo.json")
 {
     m_videoProfile = detectVideoProfile();
     qInfo("[MpvController] video profile: %s",
@@ -107,7 +109,9 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  const QStringList &subLangs, bool loop,
                                  int playlistStart, float transcodeOffsetSec,
                                  const QString &plexToken, bool muteAudio,
-                                 const QString &oscMode, bool shuffle) {
+                                 const QString &oscMode, bool shuffle,
+                                 const QStringList &subTitles, float imageDurationSec,
+                                 bool imageContent) {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -154,9 +158,13 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     {
         QFile lf(m_logFilePath);
         if (lf.open(QFile::Append | QFile::Text)) {
+            QString safeUrl = url;
+            safeUrl.replace(QRegularExpression("Api[_-]?Key=[^&\\s]+", QRegularExpression::CaseInsensitiveOption), "ApiKey=REDACTED");
+            safeUrl.replace(QRegularExpression("X-Plex-Token:[^\\s]+"), "X-Plex-Token=REDACTED");
+            safeUrl.replace(QRegularExpression("Token=\"[^\"]+\""), "Token=\"REDACTED\"");
             lf.write(QString("\n=== 240-MP session start %1 ===\n    url: %2\n\n")
                          .arg(QDateTime::currentDateTime().toString(Qt::ISODate))
-                         .arg(url)
+                         .arg(safeUrl)
                          .toUtf8());
         }
     }
@@ -176,6 +184,17 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     const QString mediaKeysScript = m_appRoot + "/scripts/media-keys.lua";
     if (QFile::exists(mediaKeysScript))
         args << QString("--script=%1").arg(mediaKeysScript);
+
+    // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
+    // primary plane between two consecutive same-size/format stills, so a photo
+    // playlist freezes on the first frame while the clock advances. This script
+    // nudges a render-affecting property on each playlist advance to force a
+    // page-flip. Loaded only for image content, so video playback is untouched.
+    if (imageContent) {
+        const QString slideshowScript = m_appRoot + "/scripts/slideshow-redraw.lua";
+        if (QFile::exists(slideshowScript))
+            args << QString("--script=%1").arg(slideshowScript);
+    }
 
     if (playlistStart >= 0)
         args << QString("--playlist-start=%1").arg(playlistStart);
@@ -204,20 +223,48 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (!subLangs.isEmpty())
         args << QString("--slang=%1").arg(subLangs.join(QStringLiteral(",")));
 
+    QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
-        args << QString("--script-opts=transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
+        scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
+
+    // Hand the OSC a map of external sub-file URL -> friendly track name so it can show
+    // the real subtitle name. mpv otherwise titles an external sub from its URL basename,
+    // which for Jellyfin sidecars is an opaque "Stream.srt?api_key=...". Purely cosmetic —
+    // it does not affect which sub mpv loads or selects.
+    QFile::remove(m_subInfoPath);
+    if (!subTitles.isEmpty() && subTitles.size() == subFiles.size()) {
+        QJsonObject info;
+        for (int i = 0; i < subFiles.size(); ++i) {
+            if (!subTitles[i].isEmpty())
+                info.insert(subFiles[i], subTitles[i]);
+        }
+        QFile sf(m_subInfoPath);
+        if (!info.isEmpty() && sf.open(QFile::WriteOnly | QFile::Truncate)) {
+            sf.write(QJsonDocument(info).toJson(QJsonDocument::Compact));
+            sf.close();
+            // Path is comma- and space-free, so it is safe in the script-opts list.
+            scriptOpts << QString("subinfo-file=%1").arg(m_subInfoPath);
+        }
+    }
+    if (!scriptOpts.isEmpty())
+        args << QString("--script-opts=%1").arg(scriptOpts.join(QStringLiteral(",")));
 
     if (loop)
         args << QStringLiteral("--loop-playlist=inf");
     if (shuffle)
         args << QStringLiteral("--shuffle");
+    // How long a still image is shown before mpv advances (or EOFs back to the
+    // menu). Global for the launch, so it covers every image in a mixed playlist;
+    // mpv ignores it for video and animated formats.
+    if (imageDurationSec > 0.0f)
+        args << QString("--image-display-duration=%1").arg(double(imageDurationSec), 0, 'f', 1);
     if (muteAudio)
         args << QStringLiteral("--no-audio");
+    // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
+    // playback with spurious 401/400 errors — disable unconditionally.
+    args << QStringLiteral("--ytdl=no");
     if (!plexToken.isEmpty()) {
         args << QString("--http-header-fields=X-Plex-Token:%1").arg(plexToken);
-        // Plex URLs are direct file paths — yt-dlp hook is not needed and causes
-        // spurious 401 errors when mpv encounters a non-2xx response from PMS.
-        args << QStringLiteral("--ytdl=no");
     }
 
     // plex.direct certs are Let's Encrypt-signed but ffmpeg's bundled CA bundle
@@ -225,6 +272,15 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // hosts). Disable TLS verification only for plex.direct playback URLs.
     if (QUrl(url).host().endsWith(QStringLiteral(".plex.direct")))
         args << QStringLiteral("--tls-verify=no");
+
+    // Auto Crop: start with panscan=1 unless the current decode path can't crop.
+    // The Pi3 overlay (smooth) path blanks video under panscan, so suppress there —
+    // matching the 1080p Playback trade-off. The OSC CROP button still toggles live.
+    if (autoCropEnabled()) {
+        const bool cropSafe = !(m_videoProfile == VideoProfile::Pi3 && smoothPlaybackEnabled());
+        if (cropSafe)
+            args << QStringLiteral("--panscan=1");
+    }
 
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -327,7 +383,12 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         // approach doesn't apply here; --osd-fonts-dir is provider-independent.
         args << QString("--osd-fonts-dir=%1").arg(m_appRoot + "/assets/fonts");
 #endif
-        qDebug("[MpvController] desktop launch: mpv %s", qPrintable(args.join(" ")));
+        QString safeCmd = args.join(" ");
+        // Redact all token forms in debug output
+        safeCmd.replace(QRegularExpression("Api[_-]?Key=[^&\\s]+", QRegularExpression::CaseInsensitiveOption), "ApiKey=REDACTED");
+        safeCmd.replace(QRegularExpression("X-Plex-Token:[^\\s]+"), "X-Plex-Token=REDACTED");
+        safeCmd.replace(QRegularExpression("Token=\"[^\"]+\""), "Token=\"REDACTED\"");
+        qDebug("[MpvController] desktop launch: mpv %s", qPrintable(safeCmd));
         m_process->start(bin, args);
         m_connectTimer->start();
     }
@@ -544,7 +605,10 @@ void MpvController::appendVideoArgs(QStringList &args) const {
                 args << "--vo=drm" << "--hwdec=v4l2m2m-copy";
         } else {
             // Pi 5 (Full KMS) and the safe fallback for unknown headless Linux.
-            args << "--vo=drm" << "--hwdec=auto-safe";
+            // --monitorpixelaspect=0.82 corrects non-square pixel aspect on
+            // composite CRTs (704×432 on 4:3). Pure math, zero rendering cost.
+            args << "--vo=drm" << "--hwdec=auto-safe"
+                 << "--monitorpixelaspect=0.82";
         }
     } else {
 #ifdef Q_OS_MACOS
@@ -564,6 +628,15 @@ bool MpvController::smoothPlaybackEnabled() const {
     if (!v.isValid() || v.toString().isEmpty())
         return true;
     return v.toString().compare(QStringLiteral("Off"), Qt::CaseInsensitive) != 0;
+}
+
+bool MpvController::autoCropEnabled() const {
+    // Default OFF: only an explicit "On" opts in. Stored by Settings as a string
+    // ("On"/"Off") via the list_single row, so compare on the string form.
+    if (!m_appCore)
+        return false;
+    const QVariant v = m_appCore->get_setting(QString(), "auto_crop");
+    return v.toString().compare(QStringLiteral("On"), Qt::CaseInsensitive) == 0;
 }
 
 bool MpvController::hasSmoothPlaybackTradeoff() const {
