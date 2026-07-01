@@ -1,13 +1,24 @@
 #include "LocalFilesBackend.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QVariantMap>
 #include <QJsonDocument>
 #include <QJsonObject>
 
-static const QStringList kMediaExts = {
-    "mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob", "m3u", "m3u8"
+// supported image types
+static const QStringList kImageExts = {
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"
 };
+// supported playlist types
+static const QStringList kPlaylistExts = { 
+    "m3u", "m3u8" 
+};
+// full list of supported playback types (combo of video, image and playlist)
+static const QStringList kMediaExts =
+    QStringList{ "mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob" }
+    + kImageExts
+    + kPlaylistExts;
 
 LocalFilesBackend::LocalFilesBackend(const QString &appRoot, const QString &dataRoot, QObject *parent)
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot), m_mediaRoot(dataRoot + "/media")
@@ -21,6 +32,14 @@ LocalFilesBackend::LocalFilesBackend(const QString &appRoot, const QString &data
         if (!dir.isEmpty())
             setMediaRoot(dir);
     }
+}
+
+bool LocalFilesBackend::isImage(const QString &path) const {
+    return kImageExts.contains(QFileInfo(path).suffix().toLower());
+}
+
+bool LocalFilesBackend::isPlaylist(const QString &path) const {
+    return kPlaylistExts.contains(QFileInfo(path).suffix().toLower());
 }
 
 QString LocalFilesBackend::historyFilePath() const {
@@ -87,6 +106,16 @@ void LocalFilesBackend::get_resume_playback_options() {
     emit dynamicOptionsReady("resume_playback", options);
 }
 
+void LocalFilesBackend::get_image_duration_options() {
+    QVariantList options;
+    QVariantMap five;   five["id"]   = "5";  five["label"]   = "5 Seconds";
+    QVariantMap ten;    ten["id"]    = "10"; ten["label"]    = "10 Seconds";
+    QVariantMap thirty; thirty["id"] = "30"; thirty["label"] = "30 Seconds";
+    QVariantMap sixty;  sixty["id"]  = "60"; sixty["label"]  = "60 Seconds";
+    options << five << ten << thirty << sixty;
+    emit dynamicOptionsReady("image_duration", options);
+}
+
 void LocalFilesBackend::get_subtitle_languages() {
     QStringList addedLabels;
     QVariantList options;
@@ -143,10 +172,8 @@ QVariantList LocalFilesBackend::getItems(const QString &path) {
         return result;
     }
 
-    static const QStringList kPlaylistExts = { "m3u", "m3u8" };
     for (const QString &name : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
-        QString suffix = QFileInfo(name).suffix().toLower();
-        if (kPlaylistExts.contains(suffix)) {
+        if (isPlaylist(name)) {
             QString innerPath = dir.absoluteFilePath(name) + "/" + name;
             if (QFileInfo::exists(innerPath)) {
                 QVariantMap item;

@@ -110,7 +110,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  int playlistStart, float transcodeOffsetSec,
                                  const QString &plexToken, bool muteAudio,
                                  const QString &oscMode, bool shuffle,
-                                 const QStringList &subTitles) {
+                                 const QStringList &subTitles, float imageDurationSec) {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -241,6 +241,11 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QStringLiteral("--loop-playlist=inf");
     if (shuffle)
         args << QStringLiteral("--shuffle");
+    // How long a still image is shown before mpv advances (or EOFs back to the
+    // menu). Global for the launch, so it covers every image in a mixed playlist;
+    // mpv ignores it for video and animated formats.
+    if (imageDurationSec > 0.0f)
+        args << QString("--image-display-duration=%1").arg(double(imageDurationSec), 0, 'f', 1);
     if (muteAudio)
         args << QStringLiteral("--no-audio");
     // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin

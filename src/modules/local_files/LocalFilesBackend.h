@@ -10,6 +10,8 @@ public:
     explicit LocalFilesBackend(const QString &appRoot, const QString &dataRoot, QObject *parent = nullptr);
 
     Q_INVOKABLE QVariantList getItems(const QString &path);
+    Q_INVOKABLE bool         isImage(const QString &path) const;
+    Q_INVOKABLE bool         isPlaylist(const QString &path) const;
     Q_INVOKABLE QString      mediaRoot() const;
     Q_INVOKABLE void         setMediaRoot(const QString &path);
 
@@ -19,6 +21,7 @@ public:
     Q_INVOKABLE void        get_resume_playback_options();
     Q_INVOKABLE void        get_auto_subtitles_options();
     Q_INVOKABLE void        get_subtitle_languages();
+    Q_INVOKABLE void        get_image_duration_options();
 
 signals:
     void dynamicOptionsReady(const QString &key, const QVariant &options);

@@ -1222,7 +1222,30 @@ void PlexBackend::load_libraries_impl() {
                     {"sectionType", s["type"].toString()},
                 });
             }
-            emit librariesLoaded(items);
+
+            // Probe for a live-TV DVR. When present, inject a synthetic "LIVE TV"
+            // row right after CONTINUE WATCHING (mirrors that synthetic row). The
+            // emit is deferred into this callback so the row's position is stable.
+            QString uri = serverUrl(), token = serverToken();
+            bool hadCw = hasCw;
+            auto *dvrReply = plexGet(QUrl(uri + "/livetv/dvrs"), token);
+            connect(dvrReply, &QNetworkReply::finished, this,
+                    [this, dvrReply, items, hadCw]() mutable {
+                dvrReply->deleteLater();
+                bool hasLive = false;
+                if (dvrReply->error() == QNetworkReply::NoError) {
+                    QJsonArray dvrs = QJsonDocument::fromJson(dvrReply->readAll())
+                                      .object()["MediaContainer"].toObject()["Dvr"].toArray();
+                    for (const auto &dv : dvrs)
+                        if (!dv.toObject()["lineup"].toString().isEmpty()) { hasLive = true; break; }
+                }
+                if (hasLive) {
+                    items.insert(hadCw ? 1 : 0, QVariantMap{
+                        {"key","live_tv"},{"title","LIVE TV"},
+                        {"sectionId",QVariant()},{"sectionType",QVariant()}});
+                }
+                emit librariesLoaded(items);
+            });
         });
     });
 }
@@ -1897,6 +1920,247 @@ void PlexBackend::set_subtitle_stream(const QString &streamId, const QString &pa
     QUrl url(uri + "/library/parts/" + partId);
     QUrlQuery q; q.addQueryItem("subtitleStreamID", streamId); url.setQuery(q);
     auto *reply = plexPut(url, token);
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+// ---------------------------------------------------------------------------
+// Live TV (minimal — watch live channels only, no DVR/recording features)
+//
+// NOTE: the live endpoints below are reverse-engineered/version-sensitive (the
+// bundled openapi documents the shapes but real PMS responses vary). Each parse
+// logs its raw input on miss so field mappings can be confirmed against a live
+// DVR server (see the plan's verification step). The channel list is built from
+// the EPG lineup; tuning produces an HLS transcode reusing the same master-m3u8
+// parse + streamUrlReady hand-off as request_transcode.
+// ---------------------------------------------------------------------------
+
+void PlexBackend::load_live_channels() {
+    QString uri = serverUrl(), token = serverToken();
+    if (uri.isEmpty()) { emit errorOccurred("NO SERVER CONFIGURED"); return; }
+
+    auto *reply = plexGet(QUrl(uri + "/livetv/dvrs"), token);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, uri, token]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this]{ load_live_channels(); }); return;
+            }
+            emit errorOccurred("LOAD DVRS FAILED: " + reply->errorString()); return;
+        }
+        QJsonObject mc = QJsonDocument::fromJson(reply->readAll())
+                         .object()["MediaContainer"].toObject();
+        // The Dvr array can mix the EPG-backed DVR (carries a "lineup" URI) with
+        // raw tuner devices. Pick the one with a lineup — that's what we tune.
+        QString lineup;
+        for (const auto &dv : mc["Dvr"].toArray()) {
+            QJsonObject d = dv.toObject();
+            if (!d["lineup"].toString().isEmpty()) {
+                m_liveDvrId = d["key"].toString();
+                lineup      = d["lineup"].toString();
+                break;
+            }
+        }
+        if (m_liveDvrId.isEmpty() || lineup.isEmpty()) {
+            qDebug() << "[Plex] No tunable DVR/lineup in /livetv/dvrs";
+            emit liveChannelsLoaded(QVariantList{});
+            return;
+        }
+
+        // Resolve channel names/numbers via the EPG media provider's proxied
+        // "lineups/dvr/channels" route — the same one Plex Web uses. PMS forbids
+        // managed/restricted Home users from the raw /livetv/epg/* endpoints (403),
+        // but routes everyone through this provider-proxy path uniformly, so it
+        // works regardless of account type.
+        auto *provReply = plexGet(QUrl(uri + "/media/providers"), token);
+        connect(provReply, &QNetworkReply::finished, this, [this, uri, token, provReply]() {
+            provReply->deleteLater();
+            if (provReply->error() != QNetworkReply::NoError) {
+                emit errorOccurred("LOAD PROVIDERS FAILED: " + provReply->errorString()); return;
+            }
+            QJsonArray providers = QJsonDocument::fromJson(provReply->readAll())
+                                    .object()["MediaContainer"].toObject()["MediaProvider"].toArray();
+            QString providerId;
+            for (const auto &pv : providers) {
+                QJsonObject p = pv.toObject();
+                if (p["protocols"].toString().contains("livetv")) {
+                    providerId = p["identifier"].toString();
+                    break;
+                }
+            }
+            if (providerId.isEmpty()) {
+                qDebug() << "[Plex] No livetv media provider in /media/providers";
+                emit liveChannelsLoaded(QVariantList{});
+                return;
+            }
+
+            auto *chReply = plexGet(QUrl(uri + "/" + providerId + "/lineups/dvr/channels"), token);
+            connect(chReply, &QNetworkReply::finished, this, [this, chReply]() {
+                chReply->deleteLater();
+                if (chReply->error() != QNetworkReply::NoError) {
+                    emit errorOccurred("LOAD CHANNELS FAILED: " + chReply->errorString()); return;
+                }
+                QByteArray body = chReply->readAll();
+                QJsonObject cmc = QJsonDocument::fromJson(body)
+                                  .object()["MediaContainer"].toObject();
+                QVariantList channels;
+                for (const auto &cv : cmc["Channel"].toArray()) {
+                    QJsonObject c = cv.toObject();
+                    QString id    = c["id"].toString();
+                    if (id.isEmpty()) continue;
+                    QString number = c["vcn"].toString();
+                    QString name   = c["title"].toString(c["callSign"].toString());
+                    channels.append(QVariantMap{
+                        {"channelId", id},
+                        {"number",    number},
+                        {"title",     name.toUpper()},
+                    });
+                }
+                if (channels.isEmpty())
+                    qDebug() << "[Plex] Live lineup parsed empty — raw:" << body.left(800);
+                emit liveChannelsLoaded(channels);
+            });
+        });
+    });
+}
+
+void PlexBackend::tune_channel(const QString &channelId, const QString &sessionId) {
+    QString uri = serverUrl(), token = serverToken();
+    if (m_liveDvrId.isEmpty()) { emit errorOccurred("NO LIVE DVR"); return; }
+
+    QUrl url(uri + "/livetv/dvrs/" + m_liveDvrId + "/channels/" + channelId + "/tune");
+    QUrlQuery q;
+    q.addQueryItem("X-Plex-Client-Identifier",  clientId());
+    q.addQueryItem("X-Plex-Session-Identifier", sessionId);
+    url.setQuery(q);
+    auto *reply = plexPost(url, token);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, channelId, sessionId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this, channelId, sessionId]{ tune_channel(channelId, sessionId); }); return;
+            }
+            emit errorOccurred("TUNE FAILED: " + reply->errorString()); return;
+        }
+        QByteArray body = reply->readAll();
+        QJsonObject mc = QJsonDocument::fromJson(body).object()["MediaContainer"].toObject();
+
+        // The grab operation's Metadata (a single object, not an array) carries the
+        // playable live-session key, e.g. "/livetv/sessions/{uuid}". That's the path
+        // we hand to the universal transcoder and report the timeline against, plus
+        // the airing's ratingKey/duration that the keep-alive needs. A failed tune
+        // (busy tuner / no signal) returns size 0 with a "message".
+        QJsonObject meta;
+        QJsonArray subs = mc["MediaSubscription"].toArray();
+        if (!subs.isEmpty()) {
+            QJsonArray ops = subs[0].toObject()["MediaGrabOperation"].toArray();
+            if (!ops.isEmpty()) meta = ops[0].toObject()["Metadata"].toObject();
+        }
+        QString livePath = meta["key"].toString();
+        if (livePath.isEmpty()) {
+            QString msg = mc["message"].toString();
+            qDebug() << "[Plex] Tune produced no stream — raw:" << body.left(600);
+            emit errorOccurred("TUNE FAILED: " + (msg.isEmpty() ? QString("no playable stream") : msg));
+            return;
+        }
+        m_liveTimelineKey = livePath;
+        m_liveRatingKey   = meta["ratingKey"].toVariant().toString();
+        m_liveDurationMs  = meta["duration"].toInt();
+        m_liveSessionId   = sessionId;
+        m_liveStartedMs   = QDateTime::currentMSecsSinceEpoch();
+
+        // Start the HLS transcode against the tuned path. Reuses the universal
+        // transcoder + master-m3u8 parse from request_transcode.
+        QString uri = serverUrl(), token = serverToken();
+        QString quality = videoQuality();
+        QUrl startUrl(uri + "/video/:/transcode/universal/start.m3u8");
+        QUrlQuery sq;
+        sq.addQueryItem("hasMDE",       "1");
+        sq.addQueryItem("path",         livePath);
+        sq.addQueryItem("mediaIndex",   "0");
+        sq.addQueryItem("partIndex",    "0");
+        sq.addQueryItem("protocol",     "hls");
+        sq.addQueryItem("directPlay",   "0");
+        sq.addQueryItem("directStream", "0");
+        // Live always transcodes; cap bitrate when the user picked a fixed quality.
+        if (quality != "auto") sq.addQueryItem("maxVideoBitrate", quality);
+        sq.addQueryItem("subtitleSize", "100");
+        sq.addQueryItem("audioBoost",   "100");
+        sq.addQueryItem("session",      sessionId);
+        sq.addQueryItem("X-Plex-Platform", "Chrome");
+        sq.addQueryItem("X-Plex-Client-Identifier",  clientId());
+        sq.addQueryItem("X-Plex-Session-Identifier", sessionId);
+        startUrl.setQuery(sq);
+
+        QNetworkRequest req = plexRequest(startUrl, token);
+        req.setRawHeader("X-Plex-Platform", "Chrome");
+        auto *startReply = m_nam->get(req);
+        ignoreSslErrors(startReply);
+        connect(startReply, &QNetworkReply::finished, this, [this, startReply, token]() {
+            startReply->deleteLater();
+            if (startReply->error() != QNetworkReply::NoError) {
+                emit errorOccurred("LIVE STREAM FAILED: " + startReply->errorString()); return;
+            }
+            QByteArray sbody = startReply->readAll();
+            QString variantPath;
+            for (const QString &line : QString::fromUtf8(sbody).split('\n')) {
+                QString t = line.trimmed();
+                if (!t.isEmpty() && !t.startsWith('#')) { variantPath = t; break; }
+            }
+            QString streamUrl;
+            if (!variantPath.isEmpty()) {
+                QUrl base = startReply->url();
+                base.setQuery(QString());
+                streamUrl = base.resolved(QUrl(variantPath)).toString();
+            } else {
+                streamUrl = startReply->url().toString();
+            }
+            qDebug() << "[Plex] Live stream URL for mpv:" << streamUrl;
+            emit streamUrlReady(streamUrl, token);
+        });
+    });
+}
+
+void PlexBackend::update_live_timeline(const QString &state) {
+    if (m_liveTimelineKey.isEmpty()) return;
+    QString uri = serverUrl(), token = serverToken();
+    // The ratingKey + session + an advancing time are what let Plex match this
+    // timeline to the active airing and keep the DVR grab rolling. Without them the
+    // grab is reaped after a few minutes and the HLS playlist starts returning 404.
+    qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_liveStartedMs;
+    if (elapsed < 0) elapsed = 0;
+    if (m_liveDurationMs > 0 && elapsed > m_liveDurationMs) elapsed = m_liveDurationMs;
+    QUrl url(uri + "/:/timeline");
+    QUrlQuery q;
+    q.addQueryItem("ratingKey", m_liveRatingKey);
+    q.addQueryItem("key",       m_liveTimelineKey);
+    q.addQueryItem("state",     state);
+    q.addQueryItem("time",      QString::number(elapsed));
+    q.addQueryItem("duration",  QString::number(m_liveDurationMs));
+    q.addQueryItem("hasMDE",    "1");
+    q.addQueryItem("X-Plex-Session-Identifier", m_liveSessionId);
+    q.addQueryItem("X-Plex-Client-Identifier",  clientId());
+    url.setQuery(q);
+    auto *reply = plexGet(url, token);
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    // Releasing the tuner ends this session; forget the key so a stray timer tick
+    // can't re-ping a dead session.
+    if (state == "stopped") m_liveTimelineKey.clear();
+}
+
+void PlexBackend::stop_live_session(const QString &sessionId) {
+    QString uri = serverUrl(), token = serverToken();
+    // Stop the universal transcode consuming the tuner. Also report the timeline
+    // stopped (best effort) before forgetting the key, so the server reclaims the
+    // tuner promptly instead of waiting for the idle timeout.
+    update_live_timeline("stopped");
+    if (sessionId.isEmpty()) return;
+    QUrl url(uri + "/video/:/transcode/universal/stop");
+    QUrlQuery q;
+    q.addQueryItem("session", sessionId);
+    q.addQueryItem("X-Plex-Client-Identifier", clientId());
+    url.setQuery(q);
+    auto *reply = plexGet(url, token);
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
