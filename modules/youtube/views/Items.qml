@@ -19,7 +19,7 @@ FocusScope {
     }
 
     // TODO: replace with real data source
-    property var items: ["Item A", "Item B", "Item C", "Item D", "Item E"]
+    property var items: ["A SECOND DONKEY KONG 64 RECOMP IS COMING!", "INTERVIEW WITH DENNIS VAN DEN BROEK AKA...", "CHECK OUT THESE 7 INDIE BANGERS", "ANBERNIC RG DS UPDATES: MORE LINUX UPDATES", "CAN YOU KICKFLIP A HARP", "PLEX HARDWARE TRANSCODING ON AMD RYZEN! ZEN 2 THR...", "NEW SWITCH 2 MODEL, MASSIVE PS2 EMULATION ON ANDR...", "Item H"]
 
     // ---
     // UI
@@ -32,6 +32,7 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125
         iconSource: moduleRoot.moduleIcon
         title: moduleRoot.moduleName
+        subtitle: "Subscriptions"
     }
 
     ListView {
@@ -54,26 +55,54 @@ FocusScope {
 
         delegate: Item {
             width: itemList.width
-            height: root.sh * 0.0583333
+            height: root.sh * 0.075 //36 
 
+            // Full-width background highlight for the active row
             Rectangle {
                 color: root.accentColor
-                anchors.fill: label
+                anchors.fill: parent
                 visible: itemList.currentIndex === index
             }
 
+            // LEFT SIDE: Vertical stack for Subtitle and Title
+            Column {
+                id: textColumn
+                anchors.left: parent.left
+                anchors.leftMargin: root.sw * 0.0109375 //7
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: root.sh * 0.0041667 //2
+
+                Text {
+                    id: subtitleLabel
+                    text: "RETRO RGB" 
+                    color: itemList.currentIndex === index ? root.surfaceColor : root.secondaryColor
+                    font.family: root.globalFont
+                    font.capitalization: Font.AllUppercase
+                    font.pixelSize: root.sh * 0.0208333 //10
+                }
+
+                Text {
+                    id: titleLabel
+                    text: modelData 
+                    color: itemList.currentIndex === index ? root.surfaceColor : root.primaryColor
+                    font.family: root.globalFont
+                    font.capitalization: Font.AllUppercase
+                    font.pixelSize: root.sh * 0.0333333 //16
+                }
+            }
+
+            // RIGHT SIDE: Duration (only visible when highlighted)
             Text {
-                id: label
-                text: modelData
-                color: itemList.currentIndex === index ? root.surfaceColor : root.primaryColor
+                id: durationLabel
+                visible: itemList.currentIndex === index
+                text: "53:10" 
+                anchors.right: parent.right
+                anchors.rightMargin: root.sw * 0.015625 //10
+                anchors.verticalCenter: parent.verticalCenter
+                color: root.surfaceColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
-                font.pixelSize: root.sh * 0.05
-                anchors.verticalCenter: parent.verticalCenter
-                leftPadding: root.sw * 0.009375
-                rightPadding: root.sw * 0.009375
-                topPadding: root.sh * 0.0041667
-                bottomPadding: root.sh * 0.00625
+                font.pixelSize: root.sh * 0.025 //12
             }
         }
 
