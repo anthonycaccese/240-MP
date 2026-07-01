@@ -50,7 +50,8 @@ public:
                                   const QString &oscMode = {},
                                   bool shuffle = false,
                                   const QStringList &subTitles = {},
-                                  float imageDurationSec = 0.0f);
+                                  float imageDurationSec = 0.0f,
+                                  bool imageContent = false);
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seekTo(int positionMs);
     Q_INVOKABLE void sendKey(const QString &key);

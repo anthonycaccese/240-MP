@@ -42,6 +42,25 @@ bool LocalFilesBackend::isPlaylist(const QString &path) const {
     return kPlaylistExts.contains(QFileInfo(path).suffix().toLower());
 }
 
+// True if an .m3u/.m3u8 references at least one image entry. Used to decide whether
+// the slideshow-redraw mpv script is needed (see MpvController::loadAndPlay): mpv's
+// KMS output won't repaint consecutive same-size stills without it.
+bool LocalFilesBackend::playlistContainsImages(const QString &path) const {
+    if (!isPlaylist(path))
+        return false;
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+    while (!f.atEnd()) {
+        const QString line = QString::fromUtf8(f.readLine()).trimmed();
+        if (line.isEmpty() || line.startsWith('#'))
+            continue;
+        if (isImage(line))
+            return true;
+    }
+    return false;
+}
+
 QString LocalFilesBackend::historyFilePath() const {
     return m_dataRoot + "/local_files_history.json";
 }
