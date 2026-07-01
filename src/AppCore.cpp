@@ -262,6 +262,10 @@ void AppCore::onBackendAuthStateChanged() {
 QString AppCore::get_module_auth_state(const QString &moduleId) {
     auto it = m_backends.find(moduleId);
     if (it == m_backends.end()) return QString{};
+    if (it.value()->metaObject()->indexOfMethod(
+            QMetaObject::normalizedSignature("get_auth_state()")) < 0) {
+        return QString{};
+    }
     QString result;
     bool ok = QMetaObject::invokeMethod(
         it.value(), "get_auth_state",

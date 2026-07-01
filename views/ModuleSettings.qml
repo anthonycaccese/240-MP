@@ -31,7 +31,14 @@ FocusScope {
 
     function buildModel() {
         var schema = appCore.get_module_settings_schema(moduleId)
-        authState = appCore.get_module_auth_state(moduleId)
+        var needsAuthState = false
+        for (var n = 0; n < schema.length; n++) {
+            if (schema[n].requires_auth) {
+                needsAuthState = true
+                break
+            }
+        }
+        authState = needsAuthState ? appCore.get_module_auth_state(moduleId) : ""
         var filtered = []
         for (var i = 0; i < schema.length; i++) {
             var item = schema[i]
