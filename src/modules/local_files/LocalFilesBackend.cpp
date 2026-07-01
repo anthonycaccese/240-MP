@@ -173,8 +173,7 @@ QVariantList LocalFilesBackend::getItems(const QString &path) {
     }
 
     for (const QString &name : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
-        QString suffix = QFileInfo(name).suffix().toLower();
-        if (kPlaylistExts.contains(suffix)) {
+        if (isPlaylist(name)) {
             QString innerPath = dir.absoluteFilePath(name) + "/" + name;
             if (QFileInfo::exists(innerPath)) {
                 QVariantMap item;
