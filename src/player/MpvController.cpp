@@ -110,7 +110,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  int playlistStart, float transcodeOffsetSec,
                                  const QString &plexToken, bool muteAudio,
                                  const QString &oscMode, bool shuffle,
-                                 const QStringList &subTitles, float imageDurationSec) {
+                                 const QStringList &subTitles, float imageDurationSec,
+                                 bool imageContent) {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -183,6 +184,17 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     const QString mediaKeysScript = m_appRoot + "/scripts/media-keys.lua";
     if (QFile::exists(mediaKeysScript))
         args << QString("--script=%1").arg(mediaKeysScript);
+
+    // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
+    // primary plane between two consecutive same-size/format stills, so a photo
+    // playlist freezes on the first frame while the clock advances. This script
+    // nudges a render-affecting property on each playlist advance to force a
+    // page-flip. Loaded only for image content, so video playback is untouched.
+    if (imageContent) {
+        const QString slideshowScript = m_appRoot + "/scripts/slideshow-redraw.lua";
+        if (QFile::exists(slideshowScript))
+            args << QString("--script=%1").arg(slideshowScript);
+    }
 
     if (playlistStart >= 0)
         args << QString("--playlist-start=%1").arg(playlistStart);
