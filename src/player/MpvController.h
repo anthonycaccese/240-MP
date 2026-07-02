@@ -56,6 +56,8 @@ public:
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seekTo(int positionMs);
     Q_INVOKABLE void sendKey(const QString &key);
+    Q_INVOKABLE void showOsdSkipPrompt();
+    Q_INVOKABLE void clearOsdPrompt();
 
     // True only on devices whose smooth-playback decode path can't crop/zoom (the
     // Pi 3 DRM-overlay path). Settings uses this to show the "Smooth Playback"
@@ -77,6 +79,8 @@ signals:
     // connects one handler and branches on `reason`, so it can never silently drop
     // a case the way an unhandled per-reason signal would.
     void playbackEnded(int finalPositionMs, int finalDurationMs, const QString &reason);
+
+    void skipRequested();
 
 private slots:
     void onProcessFinished();
