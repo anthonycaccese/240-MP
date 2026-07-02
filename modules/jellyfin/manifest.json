@@ -49,7 +49,7 @@
       "options": ["Off", "Auto", "Button"],
       "default": "Off",
       "requires_auth": true,
-      "requires_capability": "mediasegments"
+      "description": "Requires the Jellyfin Intro Skipper plugin on your server"
     },
     {
       "key": "outro_skip",
@@ -58,7 +58,7 @@
       "options": ["Off", "Auto", "Button"],
       "default": "Off",
       "requires_auth": true,
-      "requires_capability": "mediasegments"
+      "description": "Requires the Jellyfin Intro Skipper plugin on your server"
     },
     {
       "key": "logout",
