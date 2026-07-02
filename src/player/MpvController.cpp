@@ -418,6 +418,15 @@ void MpvController::sendKey(const QString &key) {
     sendCommand({"keypress", key});
 }
 
+void MpvController::showOsdSkipPrompt() {
+    sendCommand({"script-message", "skip-overlay-state", "1"});
+    sendCommand({"keypress", "DOWN"});
+}
+
+void MpvController::clearOsdPrompt() {
+    sendCommand({"script-message", "skip-overlay-state", "0"});
+}
+
 void MpvController::tryConnectIpc() {
     if (m_ipc->state() == QLocalSocket::ConnectedState ||
         m_ipc->state() == QLocalSocket::ConnectingState)
@@ -437,8 +446,16 @@ void MpvController::onIpcReadyRead() {
             // mpv reports why playback ended: "eof" (played to the end),
             // "quit"/"stop" (user exited), "error", etc. Remember the last one
             // so onProcessFinished can distinguish a natural finish from a quit.
-            if (event == "end-file")
+            if (event == "end-file") {
                 m_lastEndFileReason = obj["reason"].toString();
+            } else if (event == "client-message") {
+                const QJsonArray args = obj["args"].toArray();
+                if (args.size() > 0) {
+                    const QString msg = args[0].toString();
+                    if (msg == "skip-segment")
+                        emit skipRequested();
+                }
+            }
             continue;
         }
 

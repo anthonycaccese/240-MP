@@ -49,6 +49,9 @@ public:
     Q_INVOKABLE void report_playback_stopped(const QString &itemId, const QString &mediaSourceId, qint64 positionTicks, bool failed = false);
     Q_INVOKABLE void report_playback_start(const QString &itemId, const QString &mediaSourceId, const QString &audioStreamId, const QString &subtitleStreamId, qint64 startPositionTicks = 0);
 
+    // Intro/outro skip — MediaSegments API
+    Q_INVOKABLE void fetchSegments(const QString &itemId);
+
     // URL helpers for QML
     Q_INVOKABLE QString image_url(const QString &itemId, const QString &imageType, int width, int height);
 
@@ -75,6 +78,7 @@ signals:
     void seriesNextUpReady(const QVariantMap &detail);
     void streamUrlReady(const QString &url);
     void dynamicOptionsReady(const QString &key, const QVariant &options);
+    void segmentsReady(const QString &itemId, const QVariantList &segments);
     void errorOccurred(const QString &message);
     void logoutComplete();
     void authRevoked();
@@ -108,6 +112,7 @@ private:
     QString m_currentPlaySessionId;
     QString m_currentPlayMethod; // "DirectPlay" or "Transcode" — for /Sessions reporting
     QString m_deviceId;
+    bool m_capabilitiesProbed = false;
 
     static QString normalizeServerUrl(const QString &url);
 

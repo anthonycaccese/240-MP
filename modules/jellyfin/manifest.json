@@ -43,6 +43,24 @@
       "requires_auth": true
     },
     {
+      "key": "intro_skip",
+      "label": "Intro Skip",
+      "type": "list_single",
+      "options": ["Off", "Auto", "Button"],
+      "default": "Off",
+      "requires_auth": true,
+      "requires_capability": "mediasegments"
+    },
+    {
+      "key": "outro_skip",
+      "label": "Credit Skip",
+      "type": "list_single",
+      "options": ["Off", "Auto", "Button"],
+      "default": "Off",
+      "requires_auth": true,
+      "requires_capability": "mediasegments"
+    },
+    {
       "key": "logout",
       "label": "Sign out",
       "type": "action",

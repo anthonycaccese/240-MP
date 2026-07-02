@@ -43,6 +43,15 @@ FocusScope {
     property int  choiceIndex:     0
     property string resumeSetting: "ask"
 
+    // Intro/outro skip
+    property var    segments:           []
+    property var    activeSegment:      null
+    property bool   skipPromptShown:    false
+    property bool   introAutoSkipped:   false
+    property bool   outroAutoSkipped:   false
+    property string introSkipSetting:   "Off"
+    property string outroSkipSetting:   "Off"
+
     property int lastKnownPositionMs: 0
     property int lastKnownDurationMs: 0
 
@@ -171,6 +180,22 @@ FocusScope {
         lastKnownPositionMs  = 0
         lastKnownDurationMs  = 0
 
+        // Reset skip state for the new episode
+        segments = []
+        activeSegment = null
+        skipPromptShown = false
+        introAutoSkipped = false
+        outroAutoSkipped = false
+        mpvController.clearOsdPrompt()
+
+        // Re-read settings (they could have changed)
+        introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
+        outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
+
+        // Fetch segments for the new episode if skip is enabled
+        if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
+            jellyfinBackend.fetchSegments(detail.itemId)
+
         // Repoint the BACK target so exiting returns to THIS episode's detail
         updateBackItem({
             itemId: detail.itemId,
@@ -278,9 +303,22 @@ FocusScope {
         return m + ":" + (sec < 10 ? "0" : "") + sec
     }
 
+    function findActiveSegment(ms) {
+        for (var i = 0; i < segments.length; i++) {
+            if (ms >= segments[i].startMs && ms < segments[i].endMs)
+                return segments[i]
+        }
+        return null
+    }
+
     Connections {
         target: jellyfinBackend
         function onErrorOccurred(msg) { console.log("[Jellyfin Player] Backend error: " + msg) }
+
+        function onSegmentsReady(itemId_, segments_) {
+            if (itemId_ !== playerRoot.itemId) return
+            playerRoot.segments = segments_
+        }
 
         function onStreamUrlReady(url) {
             if (pendingNextEpisode) {
@@ -322,10 +360,58 @@ FocusScope {
                 // First position update means mpv is up and playing — drop the
                 // loading indicator (mpv's own window now covers the screen).
                 playerRoot.playbackStarted = true
+
+                // --- Skip segment tracking ---
+                if (playerRoot.segments.length > 0) {
+                    var seg = findActiveSegment(ms)
+                    if (seg && seg !== playerRoot.activeSegment) {
+                        playerRoot.activeSegment = seg
+                        var setting = seg.type === "Intro"
+                            ? playerRoot.introSkipSetting
+                            : playerRoot.outroSkipSetting
+
+                        if (setting === "Auto") {
+                            if (seg.type === "Intro" && !playerRoot.introAutoSkipped) {
+                                playerRoot.introAutoSkipped = true
+                                mpvController.seekTo(seg.endMs)
+                            } else if (seg.type === "Outro" && !playerRoot.outroAutoSkipped) {
+                                playerRoot.outroAutoSkipped = true
+                                mpvController.seekTo(seg.endMs)
+                            }
+                        } else if (setting === "Button") {
+                            if (!playerRoot.skipPromptShown) {
+                                playerRoot.skipPromptShown = true
+                                mpvController.showOsdSkipPrompt()
+                            }
+                        }
+                    } else if (!seg && playerRoot.activeSegment) {
+                        // Segment ended naturally
+                        playerRoot.activeSegment = null
+                        playerRoot.skipPromptShown = false
+                        mpvController.clearOsdPrompt()
+                    }
+                }
+                // --- End skip segment tracking ---
             }
         }
         function onDurationChanged(ms) {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
+        }
+
+        function onSkipRequested() {
+            if (playerRoot.activeSegment) {
+                if (playerRoot.activeSegment.type === "Intro")
+                    playerRoot.introAutoSkipped = true
+                else
+                    playerRoot.outroAutoSkipped = true
+                mpvController.seekTo(playerRoot.activeSegment.endMs)
+                mpvController.clearOsdPrompt()
+                // Don't null activeSegment here — the async seek moves past the
+                // segment boundary, and the next onPositionChanged detects the
+                // end naturally. Nulling it before the seek completes causes a
+                // position update at the old location to re-detect the same
+                // segment as "new" and re-trigger the prompt.
+            }
         }
 
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
@@ -382,6 +468,14 @@ FocusScope {
         // once the user touches it, but accept the legacy "ON" string too.
         var autoplayRaw = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode")
         autoplayNext = (autoplayRaw === true || autoplayRaw === "ON")
+
+        // Hoist skip settings
+        introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
+        outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
+
+        // Fetch segments if either skip mode is enabled
+        if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
+            jellyfinBackend.fetchSegments(itemId)
 
         // "ask": prompt resume vs. start over when there's a saved position.
         // "always" (or anything else): resume directly.

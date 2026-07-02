@@ -1459,3 +1459,45 @@ void JellyfinBackend::load_server_preferences() {
         emit serverLanguagePreferencesReady(audioLang, subLang, subMode);
     });
 }
+
+void JellyfinBackend::fetchSegments(const QString &itemId) {
+    QUrl url(m_serverUrl + "/MediaSegments/" + itemId);
+    auto *reply = jellyfinGet(url);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
+        reply->deleteLater();
+
+        // One-shot capability probe on first call
+        if (!m_capabilitiesProbed) {
+            m_capabilitiesProbed = true;
+            if (reply->error() == QNetworkReply::NoError) {
+                emit dynamicOptionsReady("_capabilities",
+                    QVariantList{QString("mediasegments")});
+            } else {
+                emit dynamicOptionsReady("_capabilities", QVariantList{});
+                return;  // no segments to process, server doesn't support it
+            }
+        }
+
+        // Parse segments from the response
+        if (reply->error() != QNetworkReply::NoError) return;
+
+        QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+        QJsonArray items = root["Items"].toArray();
+
+        QVariantList segments;
+        for (const QJsonValue &val : items) {
+            QJsonObject item = val.toObject();
+            QString type = item["Type"].toString();
+            // Only include Intro and Outro segments
+            if (type != "Intro" && type != "Outro") continue;
+
+            QVariantMap seg;
+            seg["type"]    = type;                                  // "Intro" or "Outro"
+            seg["startMs"] = item["StartTicks"].toDouble() / 10000.0;  // ticks → ms
+            seg["endMs"]   = item["EndTicks"].toDouble()   / 10000.0;
+            segments.append(seg);
+        }
+
+        emit segmentsReady(itemId, segments);
+    });
+}

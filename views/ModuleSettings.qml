@@ -39,10 +39,12 @@ FocusScope {
             }
         }
         authState = needsAuthState ? appCore.get_module_auth_state(moduleId) : ""
+        var caps = dynamicOptions["_capabilities"] || []
         var filtered = []
         for (var i = 0; i < schema.length; i++) {
             var item = schema[i]
             if (item.requires_auth && (authState === "none" || authState === "")) continue
+            if (item.requires_capability && caps.indexOf(item.requires_capability) < 0) continue
             filtered.push(item)
         }
         schemaItems = filtered
@@ -139,7 +141,12 @@ FocusScope {
             var updated = Object.assign({}, moduleSettingsRoot.dynamicOptions)
             updated[key] = items
             moduleSettingsRoot.dynamicOptions = updated
-            settingsList.forceLayout()
+            // Capability changes affect schema filtering — rebuild the model so
+            // settings with requires_capability appear/disappear immediately.
+            if (key === "_capabilities")
+                buildModel()
+            else
+                settingsList.forceLayout()
         }
         function onModuleAuthStateChanged(mid) {
             if (mid !== moduleSettingsRoot.moduleId) return
