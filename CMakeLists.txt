@@ -90,6 +90,7 @@ endif()
 if(NOT APPLE)
     target_include_directories(240mp PRIVATE
         ${PCSC_INCLUDE_DIRS}
+        ${PCSC_INCLUDE_DIRS}/PCSC
         ${Libdrm_INCLUDE_DIRS}
     )
 endif()
