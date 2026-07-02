@@ -63,6 +63,14 @@ public:
     Q_INVOKABLE void get_resume_playback_options();
     Q_INVOKABLE void load_server_preferences();
 
+    Q_INVOKABLE QString get_last_audio_lang() const;
+    Q_INVOKABLE QString get_last_sub_lang() const;
+    Q_INVOKABLE QString get_last_audio_title() const;
+    Q_INVOKABLE QString get_last_sub_title() const;
+    Q_INVOKABLE void set_last_track_langs(const QString &audioLang, const QString &subLang,
+                                           const QString &audioTitle = QString(),
+                                           const QString &subTitle = QString());
+
 signals:
     void authStateChanged();
     void librariesLoaded(const QVariant &libraries);
@@ -114,6 +122,10 @@ private:
     QString m_currentPlayMethod; // "DirectPlay" or "Transcode" — for /Sessions reporting
     QString m_deviceId;
     bool m_capabilitiesProbed = false;
+    QString m_lastAudioLang;
+    QString m_lastSubLang;
+    QString m_lastAudioTitle;
+    QString m_lastSubTitle;
 
     static QString normalizeServerUrl(const QString &url);
 
