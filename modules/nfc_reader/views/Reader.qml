@@ -58,8 +58,11 @@ FocusScope {
                     anchors.fill: statusIndicatorImage
                     source: statusIndicatorImage
                     colorization: 1.0
-                    colorizationColor: root.accentColor // root.accentColor or root.primaryColor or root.primaryColor or root.primaryColor
-                    opacity: 0.5 // 1 or 0.2 or 0.2 or 0.5
+                    colorizationColor: nfcReaderBackend.cardState === "matched" ? root.accentColor : root.primaryColor
+                    opacity: !nfcReaderBackend.readerConnected ? 0.2
+                        : nfcReaderBackend.cardState === "matched" ? 0.8
+                        : nfcReaderBackend.cardState === "unmatched" ? 0.2
+                        : 0.5
                 }
             }
 
@@ -72,7 +75,10 @@ FocusScope {
                 clip: true
                 Text {
                     id: statusText
-                    text: "Tap a card to play" // "Playing \u25BA" or "Card not matched" or "Reader not connected" or "Tap a card to play"
+                    text: !nfcReaderBackend.readerConnected ? "Reader not connected"
+                        : nfcReaderBackend.cardState === "matched" ? "Playing \u25BA"
+                        : nfcReaderBackend.cardState === "unmatched" ? "Card not matched"
+                        : "Tap a card to play"
                     color: root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
@@ -89,8 +95,8 @@ FocusScope {
 
             Text {
                 id: additionalText
-                visible: false
-                text: "0F:25:14:S4"
+                visible: nfcReaderBackend.readerConnected && nfcReaderBackend.cardState !== "none"
+                text: nfcReaderBackend.cardState === "matched" ? nfcReaderBackend.videoTitle : nfcReaderBackend.cardUid
                 color: root.secondaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase

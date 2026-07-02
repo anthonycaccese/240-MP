@@ -1,4 +1,11 @@
 {
-  "7A:12:D0:3D": "https://www.youtube.com/watch?v=NC7Dzlh2EWk",
-  "E2:CD:CF:3D": "https://www.youtube.com/watch?v=NC7Dzlh2EWk"
+  "7A:12:D0:3D": {
+    "path": "https://www.youtube.com/watch?v=NC7Dzlh2EWk",
+    "title": "Sample Video"
+  },
+  "E2:CD:CF:3D": "https://www.youtube.com/watch?v=NC7Dzlh2EWk",
+  "04:23:58:DF:3F:02:89": {
+    "path": "https://www.youtube.com/watch?v=SRoj3jK37Vc",
+    "title": "Contact (1997)"
+  }
 }

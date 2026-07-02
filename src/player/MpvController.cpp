@@ -111,7 +111,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  const QString &plexToken, bool muteAudio,
                                  const QString &oscMode, bool shuffle,
                                  const QStringList &subTitles, float imageDurationSec,
-                                 bool imageContent) {
+                                 bool imageContent, bool ytdl) {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -261,8 +261,10 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (muteAudio)
         args << QStringLiteral("--no-audio");
     // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
-    // playback with spurious 401/400 errors — disable unconditionally.
-    args << QStringLiteral("--ytdl=no");
+    // playback with spurious 401/400 errors — off unless the caller opts in
+    // (NFC reader: YouTube-page mappings can't play without it; direct media
+    // still opens natively since the hook only runs when the demuxer fails).
+    args << (ytdl ? QStringLiteral("--ytdl=yes") : QStringLiteral("--ytdl=no"));
     if (!plexToken.isEmpty()) {
         args << QString("--http-header-fields=X-Plex-Token:%1").arg(plexToken);
     }

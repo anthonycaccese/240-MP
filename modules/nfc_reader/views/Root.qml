@@ -60,14 +60,16 @@ FocusScope {
     Connections {
         target: nfcReaderBackend
         function onPlaybackRequested(videoPath) {
-            mpvController.loadAndPlay(videoPath, 0, -1, -1)
+            // Last arg opts into yt-dlp so YouTube-page URLs in the mapping
+            // resolve; local files and direct media URLs play natively.
+            mpvController.loadAndPlay(videoPath, 0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, true)
         }
     }
 
     Connections {
         target: mpvController
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
-            nfcReaderBackend.clearLastUid()
+            nfcReaderBackend.resetAfterPlayback()
         }
     }
 }
