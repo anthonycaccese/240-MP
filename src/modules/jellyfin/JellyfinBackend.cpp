@@ -260,6 +260,7 @@ void JellyfinBackend::check_auth() {
             return;
         }
         emit authStateChanged();
+        probeCapabilities();
     });
 }
 
@@ -468,6 +469,7 @@ void JellyfinBackend::quick_connect_authenticate(const QString &secret) {
         cfg["modules"] = modules;
         saveConfig(cfg);
 
+        probeCapabilities();
         emit authStateChanged();
     });
 }
@@ -1371,6 +1373,11 @@ void JellyfinBackend::getLibraries() {
         return;
     }
 
+    // Re-emit cached capabilities so ModuleSettings.qml can filter settings
+    // correctly on every pageload (the signal may have been missed if
+    // ModuleSettings.qml was destroyed/recreated after the initial probe).
+    probeCapabilities();
+
     QUrl url(m_serverUrl + "/Users/" + m_userId + "/Views");
     auto *reply = jellyfinGet(url);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -1460,16 +1467,65 @@ void JellyfinBackend::load_server_preferences() {
     });
 }
 
+void JellyfinBackend::probeCapabilities() {
+    if (!has_auth()) return;
+
+    // Already probed: re-emit cached state. This is important because
+    // ModuleSettings.qml is destroyed/recreated on navigation and the
+    // one-shot dynamicOptionsReady signal may have been missed.
+    if (m_capabilitiesProbed) {
+        if (m_hasCapability)
+            emit dynamicOptionsReady("_capabilities",
+                QVariantList{QString("mediasegments")});
+        else
+            emit dynamicOptionsReady("_capabilities", QVariantList{});
+        return;
+    }
+
+    // First probe: use a null GUID — if the MediaSegments route exists
+    // (plugin installed), the server returns a non-404 HTTP response.
+    // If the route doesn't exist, ASP.NET returns 404.
+    QUrl url(m_serverUrl + "/MediaSegments/00000000-0000-0000-0000-000000000000");
+    auto *reply = jellyfinGet(url);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        // fetchSegments may have handled the probe while we were waiting
+        if (m_capabilitiesProbed) {
+            // fetchSegments already emitted — sync our cached flag
+            // m_hasCapability was already set by fetchSegments
+            return;
+        }
+
+        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status >= 200) {
+            // Got a definitive HTTP response from the server
+            m_capabilitiesProbed = true;
+            m_hasCapability = (status != 404);
+            if (m_hasCapability) {
+                emit dynamicOptionsReady("_capabilities",
+                    QVariantList{QString("mediasegments")});
+            } else {
+                emit dynamicOptionsReady("_capabilities", QVariantList{});
+            }
+        }
+        // Network error (status == 0): leave m_capabilitiesProbed false so
+        // fetchSegments can retry with a real item ID
+    });
+}
+
 void JellyfinBackend::fetchSegments(const QString &itemId) {
     QUrl url(m_serverUrl + "/MediaSegments/" + itemId);
     auto *reply = jellyfinGet(url);
     connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
         reply->deleteLater();
 
-        // One-shot capability probe on first call
+        // One-shot capability probe on first call (fallback if
+        // probeCapabilities failed or was never called)
         if (!m_capabilitiesProbed) {
             m_capabilitiesProbed = true;
-            if (reply->error() == QNetworkReply::NoError) {
+            m_hasCapability = (reply->error() == QNetworkReply::NoError);
+            if (m_hasCapability) {
                 emit dynamicOptionsReady("_capabilities",
                     QVariantList{QString("mediasegments")});
             } else {

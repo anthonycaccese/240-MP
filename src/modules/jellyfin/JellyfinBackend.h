@@ -51,6 +51,7 @@ public:
 
     // Intro/outro skip — MediaSegments API
     Q_INVOKABLE void fetchSegments(const QString &itemId);
+    Q_INVOKABLE void probeCapabilities();
 
     // URL helpers for QML
     Q_INVOKABLE QString image_url(const QString &itemId, const QString &imageType, int width, int height);
@@ -113,6 +114,7 @@ private:
     QString m_currentPlayMethod; // "DirectPlay" or "Transcode" — for /Sessions reporting
     QString m_deviceId;
     bool m_capabilitiesProbed = false;
+    bool m_hasCapability = false;
 
     static QString normalizeServerUrl(const QString &url);
 
