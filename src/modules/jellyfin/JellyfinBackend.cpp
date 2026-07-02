@@ -1433,9 +1433,33 @@ void JellyfinBackend::onSettingChanged(const QString &moduleId, const QString &k
     }
 }
 
+QString JellyfinBackend::get_last_audio_lang() const {
+    return m_lastAudioLang;
+}
+
+QString JellyfinBackend::get_last_sub_lang() const {
+    return m_lastSubLang;
+}
+
+QString JellyfinBackend::get_last_audio_title() const {
+    return m_lastAudioTitle;
+}
+
+QString JellyfinBackend::get_last_sub_title() const {
+    return m_lastSubTitle;
+}
+
+void JellyfinBackend::set_last_track_langs(const QString &audioLang, const QString &subLang,
+                                           const QString &audioTitle, const QString &subTitle) {
+    m_lastAudioLang = audioLang;
+    m_lastSubLang = subLang;
+    if (!audioTitle.isEmpty()) m_lastAudioTitle = audioTitle;
+    if (!subTitle.isEmpty())   m_lastSubTitle   = subTitle;
+}
+
 void JellyfinBackend::load_server_preferences() {
     if (!has_auth()) {
-        emit serverLanguagePreferencesReady(QString(), QString(), QString());
+        emit serverLanguagePreferencesReady(m_lastAudioLang, m_lastSubLang, QString());
         return;
     }
 
@@ -1444,18 +1468,14 @@ void JellyfinBackend::load_server_preferences() {
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit serverLanguagePreferencesReady(QString(), QString(), QString());
+            emit serverLanguagePreferencesReady(m_lastAudioLang, m_lastSubLang, QString());
             return;
         }
         QJsonObject userData = QJsonDocument::fromJson(reply->readAll()).object();
         QJsonObject config = userData["Configuration"].toObject();
-        QString audioLang = config["AudioLanguagePreference"].toString();
-        QString subLang   = config["SubtitleLanguagePreference"].toString();
-        // SubtitleMode drives the preselect rule (Default/Smart/Always/OnlyForced/None);
-        // Jellyfin's default when the field is absent is "Default".
+        QString audioLang = !m_lastAudioLang.isEmpty() ? m_lastAudioLang : config["AudioLanguagePreference"].toString();
+        QString subLang   = !m_lastSubLang.isEmpty()   ? m_lastSubLang   : config["SubtitleLanguagePreference"].toString();
         QString subMode   = config["SubtitleMode"].toString();
-        // [dev] qDebug("[JellyfinBackend] Server prefs: audio=%s sub=%s mode=%s",
-        // [dev]        qPrintable(audioLang), qPrintable(subLang), qPrintable(subMode));
         emit serverLanguagePreferencesReady(audioLang, subLang, subMode);
     });
 }
