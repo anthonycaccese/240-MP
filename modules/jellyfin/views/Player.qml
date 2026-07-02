@@ -276,12 +276,14 @@ FocusScope {
     }
 
     function doStartPlayback(offsetMs) {
+        var jfToken = jellyfinBackend.get_access_token()
         if (isTranscoding) {
             // HLS manifest bakes in the selected audio, and the chosen subtitle is
             // burned into the video — so there's no soft sub track for mpv to pick
             // (subTrack -1 = forced-only, a no-op when nothing soft exists).
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                       -1, -1, [], [], false, -1, 0.0, "")
+                                       -1, -1, [], [], false, -1, 0.0, "",
+                                       false, "", false, [], 0.0, false, jfToken)
         } else {
             // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
             // --aid; subtitles come from buildSubArgs (sidecars + --sid).
@@ -289,7 +291,7 @@ FocusScope {
             var sub = buildSubArgs()
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
                                        audioTrack, sub.track, sub.urls, [], false, -1, 0.0, "",
-                                       false, "", false, sub.titles)
+                                       false, "", false, sub.titles, 0.0, false, jfToken)
         }
     }
 
