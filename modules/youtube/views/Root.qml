@@ -7,7 +7,6 @@ FocusScope {
 
     property var navParams: ({})
 
-    // TODO: update id to match your manifest
     property var _moduleInfo: appCore ? appCore.get_module_info("com.240mp.youtube") : ({})
     property string moduleName: _moduleInfo.name || ""
     property string moduleIcon: _moduleInfo.icon || ""
