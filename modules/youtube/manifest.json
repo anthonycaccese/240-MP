@@ -27,6 +27,12 @@
       "default": "Ask"
     },
     {
+      "key": "display_shorts",
+      "label": "Display Shorts",
+      "type": "toggle",
+      "default": "ON"
+    },
+    {
       "key": "delete_watch_later",
       "label": "Delete Watch Later",
       "type": "action",

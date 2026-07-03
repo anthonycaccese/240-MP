@@ -69,6 +69,17 @@ FocusScope {
         wlOverlayVisible = false
     }
 
+    // Hide Shorts from feed/channel lists when the "Display Shorts" toggle is off.
+    // Unset/true/"ON" => show shorts (default); explicit false => hide.
+    function filterShorts(videos) {
+        var raw = appCore.get_setting(moduleRoot.moduleId, "display_shorts")
+        var showShorts = (raw === undefined || raw === null) ? true
+                         : (raw === true || raw === "ON")
+        if (showShorts)
+            return videos
+        return videos.filter(function(v) { return !v.isShort })
+    }
+
     Component.onCompleted: {
         if (mode === "watchlater") {
             items = youtubeBackend.getWatchLater()
@@ -93,7 +104,7 @@ FocusScope {
             if (itemsRoot.mode !== "feed")
                 return
             itemsRoot.isLoading = false
-            itemsRoot.items = videos
+            itemsRoot.items = itemsRoot.filterShorts(videos)
             itemsRoot.restoreListIndex()
         }
 
@@ -101,7 +112,7 @@ FocusScope {
             if (itemsRoot.mode !== "channel" || loadedChannelId !== itemsRoot.channelId)
                 return
             itemsRoot.isLoading = false
-            itemsRoot.items = videos
+            itemsRoot.items = itemsRoot.filterShorts(videos)
             itemsRoot.restoreListIndex()
         }
 

@@ -147,7 +147,7 @@ static bool parseRssFeed(const QByteArray &data, const QString &channelId,
     static const QLatin1String kAtomNs("http://www.w3.org/2005/Atom");
     QXmlStreamReader xml(data);
     bool inEntry = false;
-    QString videoId, title;
+    QString videoId, title, altLink;
     QDateTime published;
     while (!xml.atEnd()) {
         xml.readNext();
@@ -157,6 +157,7 @@ static bool parseRssFeed(const QByteArray &data, const QString &channelId,
                 inEntry = true;
                 videoId.clear();
                 title.clear();
+                altLink.clear();
                 published = QDateTime();
             } else if (!inEntry && name == QLatin1String("title") && channelName->isEmpty()) {
                 *channelName = xml.readElementText();
@@ -168,6 +169,10 @@ static bool parseRssFeed(const QByteArray &data, const QString &channelId,
                 title = xml.readElementText();
             } else if (inEntry && name == QLatin1String("published")) {
                 published = QDateTime::fromString(xml.readElementText(), Qt::ISODate);
+            } else if (inEntry && name == QLatin1String("link")
+                       && xml.attributes().value(QLatin1String("rel")) == QLatin1String("alternate")) {
+                // Shorts expose a /shorts/<id> alternate href; normal uploads use /watch?v=<id>
+                altLink = xml.attributes().value(QLatin1String("href")).toString();
             }
         } else if (xml.isEndElement() && xml.name() == QLatin1String("entry")) {
             inEntry = false;
@@ -182,6 +187,7 @@ static bool parseRssFeed(const QByteArray &data, const QString &channelId,
                                                    : QString();
             v["publishedMs"] = published.isValid() ? published.toMSecsSinceEpoch() : qint64(0);
             v["url"]         = watchUrlFor(videoId);
+            v["isShort"]     = altLink.contains(QLatin1String("/shorts/"));
             videos->append(v);
         }
     }
