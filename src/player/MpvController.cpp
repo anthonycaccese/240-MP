@@ -419,6 +419,7 @@ void MpvController::sendKey(const QString &key) {
 }
 
 
+
 void MpvController::tryConnectIpc() {
     if (m_ipc->state() == QLocalSocket::ConnectedState ||
         m_ipc->state() == QLocalSocket::ConnectingState)
