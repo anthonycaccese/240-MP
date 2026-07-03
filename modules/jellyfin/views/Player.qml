@@ -34,7 +34,8 @@ FocusScope {
     property string carryAudioLang:     ""
     property string carrySubLang:       "__off__"
     // Full stream metadata used to disambiguate when several streams share a language.
-    // The persisted cache stays language-only; these are just runtime carry-over hints.
+    // These are runtime carry-over hints for autoplay; the persisted backend cache
+    // stores the language plus its position within the language group.
     property var carryAudioPrefs: ({ language: "", title: "", displayTitle: "", codec: "", channels: "" })
     property var carrySubPrefs:   ({ language: "__off__", title: "", displayTitle: "", codec: "", forced: false })
 

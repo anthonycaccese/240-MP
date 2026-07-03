@@ -158,15 +158,26 @@ FocusScope {
             if (focusRow < maxRow) focusRow++
         }
     }
+    // Debounce: batch rapid arrow-key changes into a single backend save
+    // to reduce QML→C++ cross-context calls that can crash on Pi.
+    Timer {
+        id: debounceSaveTimer
+        interval: 200
+        repeat: false
+        onTriggered: _saveCurrentLangs()
+    }
+
     Keys.onLeftPressed: {
         if (isLaunching) return
         if (!detail) return
         if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1) {
             audioIdx = (audioIdx - 1 + detail.audioStreams.length) % detail.audioStreams.length
             userChangedTracks = true
+            debounceSaveTimer.restart()
         } else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 0) {
             subtitleIdx = (subtitleIdx - 1 + (detail.subtitleStreams.length + 1)) % (detail.subtitleStreams.length + 1)
             userChangedTracks = true
+            debounceSaveTimer.restart()
         }
     }
     Keys.onRightPressed: {
@@ -175,9 +186,11 @@ FocusScope {
         if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1) {
             audioIdx = (audioIdx + 1) % detail.audioStreams.length
             userChangedTracks = true
+            debounceSaveTimer.restart()
         } else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 0) {
             subtitleIdx = (subtitleIdx + 1) % (detail.subtitleStreams.length + 1)
             userChangedTracks = true
+            debounceSaveTimer.restart()
         }
     }
     Keys.onReturnPressed: {
