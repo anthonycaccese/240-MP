@@ -117,7 +117,7 @@ FocusScope {
             // yt-dlp missing/outdated or an unplayable stream surfaces as mpv exit
             // code 2 before any position event — show the error instead of leaving.
             if (reason === "failed" && !playbackStarted) {
-                playerRoot.errorMessage = "PLAYBACK FAILED\nCHECK THAT YT-DLP IS INSTALLED AND UP TO DATE"
+                playerRoot.errorMessage = "PLAYBACK FAILED\n\nPLEASE CHECK THAT YT-DLP IS INSTALLED AND UP TO DATE"
                 return
             }
             var pos = lastKnownPositionMs || finalPositionMs
@@ -179,14 +179,15 @@ FocusScope {
                 text: errorMessage
                 color: "white"
                 font.family: root.globalFont
+                width: root.sw * 0.5625 //360
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
                 anchors.horizontalCenter: parent.horizontalCenter
-                font.pixelSize: root.sh * 0.05 //24
+                font.pixelSize: root.sh * 0.0375 //18
             }
             Text {
-                text: root.hints.select + ":RETRY " + root.hints.back + ":BACK"
-                color: root.tertiaryColor
+                text: root.hints.back + ":BACK " + root.hints.select + ":RETRY"
+                color: "#919191"
                 font.family: root.globalFont
                 anchors.horizontalCenter: parent.horizontalCenter
                 font.pixelSize: root.sh * 0.0333333 //16
