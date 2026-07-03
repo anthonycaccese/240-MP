@@ -188,14 +188,6 @@ FocusScope {
         outroAutoSkipped = false
         mpvController.clearOsdPrompt()
 
-        // Re-read settings (they could have changed)
-        introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
-        outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
-
-        // Fetch segments for the new episode if skip is enabled
-        if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
-            jellyfinBackend.fetchSegments(detail.itemId)
-
         // Repoint the BACK target so exiting returns to THIS episode's detail
         updateBackItem({
             itemId: detail.itemId,
@@ -326,6 +318,12 @@ FocusScope {
                 pendingNextEpisode = false
                 playerRoot.streamUrl = url
                 doStartPlayback(0)
+                // Fetch segments for intro/outro skip after playback starts, so
+                // the HTTP request doesn't contend with the PlaybackInfo POST.
+                introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
+                outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
+                if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
+                    jellyfinBackend.fetchSegments(playerRoot.itemId)
                 return
             }
             if (pendingRetryTranscode) {
