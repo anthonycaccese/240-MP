@@ -25,6 +25,18 @@
       "type": "list_single",
       "options": ["Ask", "Always"],
       "default": "Ask"
+    },
+    {
+      "key": "delete_watch_later",
+      "label": "Delete Watch Later",
+      "type": "action",
+      "action_slot": "delete_watch_later"
+    },
+    {
+      "key": "delete_history",
+      "label": "Delete History",
+      "type": "action",
+      "action_slot": "delete_history"
     }
   ]
 }

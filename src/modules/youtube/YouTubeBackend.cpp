@@ -15,6 +15,10 @@
 
 static const char *kSubscriptionsFileName = "youtube_subscriptions.txt";
 
+static QString watchUrlFor(const QString &videoId) {
+    return QStringLiteral("https://www.youtube.com/watch?v=") + videoId;
+}
+
 YouTubeBackend::YouTubeBackend(const QString &appRoot, const QString &dataRoot, QObject *parent)
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot)
 {
@@ -124,7 +128,7 @@ void YouTubeBackend::ensureFresh(bool forceRefresh) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-channel fetch: RSS (video list) + InnerTube (durations) in parallel
+// Per-channel fetch: the official RSS feed
 // ---------------------------------------------------------------------------
 
 QNetworkRequest YouTubeBackend::makeRequest(const QUrl &url) const {
@@ -174,100 +178,27 @@ static bool parseRssFeed(const QByteArray &data, const QString &channelId,
             v["title"]       = title;
             v["channelId"]   = channelId;
             v["channelName"] = QString(); // filled in once the feed title is known
-            v["duration"]    = QString();
             v["publishedAt"] = published.isValid() ? published.toUTC().toString(Qt::ISODate)
                                                    : QString();
             v["publishedMs"] = published.isValid() ? published.toMSecsSinceEpoch() : qint64(0);
-            v["url"]         = QStringLiteral("https://www.youtube.com/watch?v=") + videoId;
+            v["url"]         = watchUrlFor(videoId);
             videos->append(v);
         }
     }
     return !(xml.hasError() && videos->isEmpty());
 }
 
-// A duration badge is any thumbnailBadgeViewModel whose text looks like a
-// timestamp ("35:53", "1:02:10") — the pattern check keeps "LIVE"/"SHORTS"
-// style badges out.
-static QString findDurationBadge(const QJsonValue &val) {
-    static const QRegularExpression kTimePattern(QStringLiteral("^\\d+(:\\d{2})+$"));
-    if (val.isObject()) {
-        const QJsonObject obj = val.toObject();
-        if (obj.contains(QLatin1String("thumbnailBadgeViewModel"))) {
-            const QString t = obj.value(QLatin1String("thumbnailBadgeViewModel"))
-                                  .toObject().value(QLatin1String("text")).toString();
-            if (kTimePattern.match(t).hasMatch())
-                return t;
-        }
-        for (auto it = obj.begin(); it != obj.end(); ++it) {
-            const QString r = findDurationBadge(it.value());
-            if (!r.isEmpty())
-                return r;
-        }
-    } else if (val.isArray()) {
-        const QJsonArray arr = val.toArray();
-        for (const QJsonValue &v : arr) {
-            const QString r = findDurationBadge(v);
-            if (!r.isEmpty())
-                return r;
-        }
-    }
-    return {};
-}
-
-// Defensive InnerTube parse: rather than hard-coding the deep renderer path
-// (which YouTube reshuffles), walk the whole response and collect durations
-// from any recognized video object. Two shapes are handled:
-//   - lockupViewModel (current WEB client): contentId + duration badge text
-//   - videoRenderer (legacy): videoId + lengthText
-static void collectDurations(const QJsonValue &val, QHash<QString, QString> *out) {
-    if (val.isObject()) {
-        const QJsonObject obj = val.toObject();
-        if (obj.contains(QLatin1String("lockupViewModel"))) {
-            const QJsonObject lv = obj.value(QLatin1String("lockupViewModel")).toObject();
-            const QString cid = lv.value(QLatin1String("contentId")).toString();
-            if (!cid.isEmpty() && !out->contains(cid)) {
-                const QString d = findDurationBadge(lv.value(QLatin1String("contentImage")));
-                if (!d.isEmpty())
-                    out->insert(cid, d);
-            }
-        }
-        const QString vid = obj.value(QLatin1String("videoId")).toString();
-        if (!vid.isEmpty() && obj.contains(QLatin1String("lengthText"))) {
-            const QJsonObject lt = obj.value(QLatin1String("lengthText")).toObject();
-            QString d = lt.value(QLatin1String("simpleText")).toString();
-            if (d.isEmpty()) {
-                const QJsonArray runs = lt.value(QLatin1String("runs")).toArray();
-                if (!runs.isEmpty())
-                    d = runs.first().toObject().value(QLatin1String("text")).toString();
-            }
-            if (!d.isEmpty() && !out->contains(vid))
-                out->insert(vid, d);
-        }
-        for (auto it = obj.begin(); it != obj.end(); ++it)
-            collectDurations(it.value(), out);
-    } else if (val.isArray()) {
-        const QJsonArray arr = val.toArray();
-        for (const QJsonValue &v : arr)
-            collectDurations(v, out);
-    }
-}
-
 void YouTubeBackend::refreshChannel(const QString &channelId) {
-    ChannelEntry &entry = m_channels[channelId];
-    entry.repliesPending = 2;
-    entry.durationsById.clear();
-
-    // RSS — the authoritative video list
     QUrl rssUrl(QStringLiteral("https://www.youtube.com/feeds/videos.xml"));
     rssUrl.setQuery(QStringLiteral("channel_id=") + channelId);
-    QNetworkReply *rssReply = m_nam.get(makeRequest(rssUrl));
-    connect(rssReply, &QNetworkReply::finished, this, [this, rssReply, channelId]() {
-        rssReply->deleteLater();
+    QNetworkReply *reply = m_nam.get(makeRequest(rssUrl));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, channelId]() {
+        reply->deleteLater();
         ChannelEntry &e = m_channels[channelId];
-        if (rssReply->error() == QNetworkReply::NoError) {
+        if (reply->error() == QNetworkReply::NoError) {
             QString name;
             QVariantList videos;
-            if (parseRssFeed(rssReply->readAll(), channelId, &name, &videos)) {
+            if (parseRssFeed(reply->readAll(), channelId, &name, &videos)) {
                 for (QVariant &v : videos) {
                     QVariantMap m = v.toMap();
                     m["channelName"] = name;
@@ -281,53 +212,11 @@ void YouTubeBackend::refreshChannel(const QString &channelId) {
         }
         // On failure: keep any previously cached videos (stale beats empty);
         // fetchedMs stays old so the next load retries this channel.
-        onChannelReplyDone(channelId);
-    });
-
-    // InnerTube — durations only, best-effort
-    QNetworkRequest itReq =
-        makeRequest(QUrl(QStringLiteral("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false")));
-    itReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    QJsonObject client{{"clientName", "WEB"}, {"clientVersion", "2.20240101.00.00"}};
-    QJsonObject body{{"context", QJsonObject{{"client", client}}},
-                     {"browseId", channelId},
-                     {"params", "EgZ2aWRlb3MYAyAAMAE%3D"}}; // "Videos" tab
-    QNetworkReply *itReply =
-        m_nam.post(itReq, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(itReply, &QNetworkReply::finished, this, [this, itReply, channelId]() {
-        itReply->deleteLater();
-        ChannelEntry &e = m_channels[channelId];
-        if (itReply->error() == QNetworkReply::NoError) {
-            const QJsonDocument doc = QJsonDocument::fromJson(itReply->readAll());
-            if (!doc.isNull())
-                collectDurations(doc.object(), &e.durationsById);
+        if (--m_pendingChannels <= 0) {
+            m_pendingChannels = 0;
+            finishAggregate();
         }
-        onChannelReplyDone(channelId);
     });
-}
-
-void YouTubeBackend::onChannelReplyDone(const QString &channelId) {
-    ChannelEntry &entry = m_channels[channelId];
-    if (--entry.repliesPending > 0)
-        return;
-
-    // Both replies in — join durations onto the video list by videoId
-    if (!entry.durationsById.isEmpty()) {
-        for (QVariant &v : entry.videos) {
-            QVariantMap m = v.toMap();
-            const QString d = entry.durationsById.value(m.value("videoId").toString());
-            if (!d.isEmpty()) {
-                m["duration"] = d;
-                v = m;
-            }
-        }
-    }
-    entry.durationsById.clear();
-
-    if (--m_pendingChannels <= 0) {
-        m_pendingChannels = 0;
-        finishAggregate();
-    }
 }
 
 void YouTubeBackend::finishAggregate() {
@@ -408,7 +297,10 @@ QString YouTubeBackend::ytdlFormatForResolution(const QString &resolution) const
 }
 
 // ---------------------------------------------------------------------------
-// Resume history (youtube_history.json, keyed by videoId)
+// Watch history (youtube_history.json, keyed by videoId)
+// Entry: { pos: <ms>, title, channelName, lastPlayed: <epoch ms> }
+// Legacy pos-only entries are tolerated: they resume fine but are skipped by
+// the History list (nothing to display) and pruned first (lastPlayed 0).
 // ---------------------------------------------------------------------------
 
 QString YouTubeBackend::historyFilePath() const {
@@ -436,16 +328,123 @@ QVariantMap YouTubeBackend::getSavedPosition(const QString &videoId) {
     return val.toMap();
 }
 
-void YouTubeBackend::savePosition(const QString &videoId, int positionMs) {
+void YouTubeBackend::savePosition(const QString &videoId, int positionMs,
+                                  const QString &title, const QString &channelName) {
     QVariantMap history = loadHistory();
     QVariantMap entry;
-    entry["pos"] = positionMs;
+    entry["pos"]         = positionMs;
+    entry["title"]       = title;
+    entry["channelName"] = channelName;
+    entry["lastPlayed"]  = QDateTime::currentMSecsSinceEpoch();
     history[videoId] = entry;
+
+    if (history.size() > kMaxHistoryItems) {
+        QStringList keys = history.keys();
+        std::sort(keys.begin(), keys.end(), [&history](const QString &a, const QString &b) {
+            return history.value(a).toMap().value("lastPlayed").toLongLong()
+                 > history.value(b).toMap().value("lastPlayed").toLongLong();
+        });
+        for (int i = kMaxHistoryItems; i < keys.size(); ++i)
+            history.remove(keys[i]);
+    }
     saveHistory(history);
 }
 
-void YouTubeBackend::clearPosition(const QString &videoId) {
-    QVariantMap history = loadHistory();
-    history.remove(videoId);
-    saveHistory(history);
+QVariantList YouTubeBackend::getHistory() const {
+    const QVariantMap history = loadHistory();
+    QVariantList items;
+    for (auto it = history.begin(); it != history.end(); ++it) {
+        const QVariantMap entry = it.value().toMap();
+        const QString title = entry.value("title").toString();
+        if (title.isEmpty())
+            continue; // legacy resume-only entry — nothing to display
+        QVariantMap v;
+        v["videoId"]     = it.key();
+        v["title"]       = title;
+        v["channelName"] = entry.value("channelName").toString();
+        v["lastPlayed"]  = entry.value("lastPlayed").toLongLong();
+        v["url"]         = watchUrlFor(it.key());
+        items << v;
+    }
+    std::sort(items.begin(), items.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value("lastPlayed").toLongLong()
+             > b.toMap().value("lastPlayed").toLongLong();
+    });
+    return items;
+}
+
+void YouTubeBackend::delete_history() {
+    QFile::remove(historyFilePath());
+}
+
+// ---------------------------------------------------------------------------
+// Watch later (youtube_watch_later.json — JSON array, newest-saved first)
+// Entry: { videoId, title, channelName, addedMs }
+// ---------------------------------------------------------------------------
+
+QString YouTubeBackend::watchLaterFilePath() const {
+    return m_dataRoot + "/youtube_watch_later.json";
+}
+
+QVariantList YouTubeBackend::loadWatchLater() const {
+    QFile file(watchLaterFilePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QJsonDocument::fromJson(file.readAll()).array().toVariantList();
+}
+
+void YouTubeBackend::saveWatchLater(const QVariantList &list) {
+    QFile file(watchLaterFilePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    file.write(QJsonDocument(QJsonArray::fromVariantList(list)).toJson(QJsonDocument::Compact));
+}
+
+QVariantList YouTubeBackend::getWatchLater() const {
+    QVariantList items = loadWatchLater();
+    for (QVariant &v : items) {
+        QVariantMap m = v.toMap();
+        m["url"] = watchUrlFor(m.value("videoId").toString());
+        v = m;
+    }
+    return items;
+}
+
+bool YouTubeBackend::isInWatchLater(const QString &videoId) const {
+    const QVariantList list = loadWatchLater();
+    for (const QVariant &v : list) {
+        if (v.toMap().value("videoId").toString() == videoId)
+            return true;
+    }
+    return false;
+}
+
+void YouTubeBackend::addToWatchLater(const QString &videoId, const QString &title,
+                                     const QString &channelName) {
+    if (videoId.isEmpty() || isInWatchLater(videoId))
+        return;
+    QVariantList list = loadWatchLater();
+    QVariantMap entry;
+    entry["videoId"]     = videoId;
+    entry["title"]       = title;
+    entry["channelName"] = channelName;
+    entry["addedMs"]     = QDateTime::currentMSecsSinceEpoch();
+    list.prepend(entry);
+    saveWatchLater(list);
+}
+
+void YouTubeBackend::removeFromWatchLater(const QString &videoId) {
+    QVariantList list = loadWatchLater();
+    for (int i = list.size() - 1; i >= 0; --i) {
+        if (list[i].toMap().value("videoId").toString() == videoId)
+            list.removeAt(i);
+    }
+    if (list.isEmpty())
+        QFile::remove(watchLaterFilePath());
+    else
+        saveWatchLater(list);
+}
+
+void YouTubeBackend::delete_watch_later() {
+    QFile::remove(watchLaterFilePath());
 }

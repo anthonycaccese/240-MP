@@ -18,16 +18,28 @@ FocusScope {
         }
     }
 
-    property var items: ["Subscriptions", "Channels"]
+    property var items: []
     property bool isLoading: false
     property string errorMessage: ""
 
-    // The subscriptions file is a local read, so the check is synchronous —
-    // isLoading exists only for pattern parity with the other modules.
+    // The subscriptions file and the watch-later/history files are local reads,
+    // so this menu builds synchronously — isLoading exists only for pattern
+    // parity with the other modules.
     Component.onCompleted: {
         var status = youtubeBackend.check_subscriptions()
-        if (!status.ok)
+        if (!status.ok) {
             errorMessage = status.error
+            return
+        }
+        var list = ["Subscriptions", "Channels"]
+        if (youtubeBackend.getWatchLater().length > 0)
+            list.push("Watch Later")
+        if (youtubeBackend.getHistory().length > 0)
+            list.push("History")
+        items = list
+        var restore = navListState.currentIndex !== undefined ? navListState.currentIndex : 0
+        itemList.currentIndex = Math.min(restore, Math.max(0, itemList.count - 1))
+        itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
     }
 
     // ---
@@ -78,12 +90,6 @@ FocusScope {
         clip: true
         focus: true
 
-        Component.onCompleted: {
-            var restore = navListState.currentIndex !== undefined ? navListState.currentIndex : 0
-            currentIndex = Math.min(restore, Math.max(0, count - 1))
-            positionViewAtIndex(currentIndex, ListView.Contain)
-        }
-
         delegate: Item {
             width: itemList.width
             height: root.sh * 0.0583333
@@ -110,12 +116,18 @@ FocusScope {
         }
 
         Keys.onReturnPressed: {
-            if (errorMessage !== "")
+            var selected = itemsRoot.items[itemList.currentIndex]
+            if (!selected)
                 return
-            if (itemList.currentIndex === 0)
-                navigateTo("Subscriptions.qml", { mode: "feed" }, { currentIndex: itemList.currentIndex })
-            else
-                navigateTo("Channels.qml", {}, { currentIndex: itemList.currentIndex })
+            var state = { currentIndex: itemList.currentIndex }
+            if (selected === "Subscriptions")
+                navigateTo("Subscriptions.qml", { mode: "feed" }, state)
+            else if (selected === "Channels")
+                navigateTo("Channels.qml", {}, state)
+            else if (selected === "Watch Later")
+                navigateTo("Subscriptions.qml", { mode: "watchlater" }, state)
+            else if (selected === "History")
+                navigateTo("Subscriptions.qml", { mode: "history" }, state)
         }
     }
 

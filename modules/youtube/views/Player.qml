@@ -17,6 +17,7 @@ FocusScope {
     property int    choiceIndex:      0
     property string errorMessage:     ""
     property var    ytdlArgs:         []
+    property int    lastStartMs:      0   // what the last attempt started from, for retry
 
     // Track last non-null values during playback for robust save on exit
     property int    lastKnownPositionMs: 0
@@ -26,14 +27,18 @@ FocusScope {
 
     function play(startMs) {
         overlayVisible = false
+        lastStartMs = startMs
         mpvController.loadAndPlay(videoUrl, startMs / 1000.0, 0, -2, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
     }
 
     Keys.onPressed: function(event) {
         if (errorMessage !== "") {
-            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back
-                    || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
                 goBack()
+                event.accepted = true
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                errorMessage = ""
+                play(lastStartMs)
                 event.accepted = true
             }
         } else if (overlayVisible) {
@@ -101,10 +106,12 @@ FocusScope {
             }
             var pos = lastKnownPositionMs || finalPositionMs
             var dur = lastKnownDurationMs || finalDurationMs
+            // Completed videos stay in history with pos 0: they list under
+            // History but never trigger the resume prompt.
             if (dur > 0 && pos >= dur * 0.95)
-                youtubeBackend.clearPosition(videoId)
+                youtubeBackend.savePosition(videoId, 0, item.title || "", item.channelName || "")
             else if (pos > 5000)
-                youtubeBackend.savePosition(videoId, pos)
+                youtubeBackend.savePosition(videoId, pos, item.title || "", item.channelName || "")
             goBack()
         }
     }
@@ -162,7 +169,7 @@ FocusScope {
                 font.pixelSize: root.sh * 0.05 //24
             }
             Text {
-                text: root.hints.back + ":BACK"
+                text: root.hints.select + ":RETRY " + root.hints.back + ":BACK"
                 color: root.tertiaryColor
                 font.family: root.globalFont
                 anchors.horizontalCenter: parent.horizontalCenter

@@ -12,12 +12,14 @@
 // Backend for the YouTube module (V1 "feed" approach — no auth).
 //
 // The user lists channel IDs (one per line) in <dataRoot>/youtube_subscriptions.txt.
-// Video lists come from two unauthenticated sources per channel, fetched in parallel:
-//   - the official RSS feed (titles, exact publish dates, channel name — ~15 newest videos)
-//   - an InnerTube browse request (duration strings, joined by videoId; best-effort only —
-//     any InnerTube failure just leaves durations blank, it never fails a load)
-// Results are cached in memory per channel for the session (kCacheTtlMs TTL), so the
-// first entry into Subscriptions or Channels fills the cache for every other view.
+// Video lists come from each channel's official RSS feed (titles, exact publish
+// dates, channel name — ~15 newest videos), fetched unauthenticated. Results are
+// cached in memory per channel for the session (kCacheTtlMs TTL), so the first
+// entry into Subscriptions or Channels fills the cache for every other view.
+//
+// Two user files besides subscriptions:
+//   youtube_history.json     — watch history + resume positions, keyed by videoId
+//   youtube_watch_later.json — ordered saved-video list (newest first)
 class YouTubeBackend : public QObject {
     Q_OBJECT
 public:
@@ -36,10 +38,22 @@ public:
     // to a yt-dlp format string. H.264 is preferred first for RPi hardware decode.
     Q_INVOKABLE QString ytdlFormatForResolution(const QString &resolution) const;
 
-    // Resume history — youtube_history.json, keyed by videoId
-    Q_INVOKABLE QVariantMap getSavedPosition(const QString &videoId);
-    Q_INVOKABLE void savePosition(const QString &videoId, int positionMs);
-    Q_INVOKABLE void clearPosition(const QString &videoId);
+    // Watch history (youtube_history.json). A finished video stays in history
+    // with pos 0 (so it lists under History but never prompts to resume);
+    // entries are pruned to the kMaxHistoryItems most recently played.
+    Q_INVOKABLE QVariantMap  getSavedPosition(const QString &videoId);
+    Q_INVOKABLE void         savePosition(const QString &videoId, int positionMs,
+                                          const QString &title, const QString &channelName);
+    Q_INVOKABLE QVariantList getHistory() const;   // displayable entries, newest first
+    Q_INVOKABLE void         delete_history();     // settings action slot
+
+    // Watch later (youtube_watch_later.json), newest-saved first, manual removal only
+    Q_INVOKABLE QVariantList getWatchLater() const;
+    Q_INVOKABLE bool         isInWatchLater(const QString &videoId) const;
+    Q_INVOKABLE void         addToWatchLater(const QString &videoId, const QString &title,
+                                             const QString &channelName);
+    Q_INVOKABLE void         removeFromWatchLater(const QString &videoId);
+    Q_INVOKABLE void         delete_watch_later(); // settings action slot
 
 signals:
     void subscriptionsFeedLoaded(const QVariant &videos);
@@ -50,23 +64,22 @@ signals:
 private:
     struct ChannelEntry {
         QString      channelId;
-        QString      channelName;          // from the RSS feed <title>
-        QVariantList videos;               // newest first, durations merged in
-        qint64       fetchedMs = 0;        // 0 = never fetched successfully
+        QString      channelName;      // from the RSS feed <title>
+        QVariantList videos;           // newest first
+        qint64       fetchedMs = 0;    // 0 = never fetched successfully
         bool         feedOk    = false;
-        // transient per-refresh state:
-        int          repliesPending = 0;   // 2 = RSS + InnerTube in flight
-        QHash<QString, QString> durationsById;
     };
 
     QString      historyFilePath() const;
     QVariantMap  loadHistory() const;
     void         saveHistory(const QVariantMap &history);
+    QString      watchLaterFilePath() const;
+    QVariantList loadWatchLater() const;
+    void         saveWatchLater(const QVariantList &list);
 
     QStringList  readSubscriptionIds(QString *error = nullptr) const;
     void         ensureFresh(bool forceRefresh);
     void         refreshChannel(const QString &channelId);
-    void         onChannelReplyDone(const QString &channelId);
     void         finishAggregate();
     QVariantList buildFeed() const;
     QVariantList buildChannelList() const;
@@ -86,6 +99,7 @@ private:
     bool    m_emitChannelsWhenDone = false;
     QString m_emitChannelVideosWhenDone;      // channelId, or empty
 
-    static constexpr qint64 kCacheTtlMs   = 15 * 60 * 1000;
-    static constexpr int    kMaxFeedItems = 100;
+    static constexpr qint64 kCacheTtlMs      = 15 * 60 * 1000;
+    static constexpr int    kMaxFeedItems    = 100;
+    static constexpr int    kMaxHistoryItems = 100;
 };
