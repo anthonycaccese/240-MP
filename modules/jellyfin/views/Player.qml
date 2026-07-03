@@ -211,9 +211,7 @@ FocusScope {
         selectedAudioId    = (audioStreams[audioIdx] && audioStreams[audioIdx].id) ? String(audioStreams[audioIdx].id) : ""
         selectedSubtitleId = (subtitleIdx >= 0 && subtitleStreams[subtitleIdx] && subtitleStreams[subtitleIdx].id) ? String(subtitleStreams[subtitleIdx].id) : ""
         captureCarryLanguages()
-        var aTitle = (audioStreams[audioIdx] && (audioStreams[audioIdx].displayTitle || audioStreams[audioIdx].title)) || ""
-        var sTitle = (subtitleIdx >= 0 && subtitleStreams[subtitleIdx] && (subtitleStreams[subtitleIdx].displayTitle || subtitleStreams[subtitleIdx].title)) || ""
-        jellyfinBackend.set_last_track_langs(carryAudioLang, carrySubLang === "__off__" ? "" : carrySubLang, aTitle, sTitle)
+        jellyfinBackend.set_last_track_langs(carryAudioLang, carrySubLang === "__off__" ? "" : carrySubLang)
 
         // Request the new stream URL — get_playback_url() reports the playback
         // Start to the server once PlaybackInfo resolves (correct session/method).

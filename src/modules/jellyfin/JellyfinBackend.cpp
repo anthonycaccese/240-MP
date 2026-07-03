@@ -1450,20 +1450,9 @@ QString JellyfinBackend::get_last_sub_lang() const {
     return m_lastSubLang;
 }
 
-QString JellyfinBackend::get_last_audio_title() const {
-    return m_lastAudioTitle;
-}
-
-QString JellyfinBackend::get_last_sub_title() const {
-    return m_lastSubTitle;
-}
-
-void JellyfinBackend::set_last_track_langs(const QString &audioLang, const QString &subLang,
-                                           const QString &audioTitle, const QString &subTitle) {
+void JellyfinBackend::set_last_track_langs(const QString &audioLang, const QString &subLang) {
     m_lastAudioLang = audioLang;
     m_lastSubLang = subLang;
-    if (!audioTitle.isEmpty()) m_lastAudioTitle = audioTitle;
-    if (!subTitle.isEmpty())   m_lastSubTitle   = subTitle;
 }
 
 void JellyfinBackend::load_server_preferences() {
