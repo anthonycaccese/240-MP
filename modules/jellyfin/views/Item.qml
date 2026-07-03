@@ -175,9 +175,6 @@ FocusScope {
         if (isLaunching) return
         if (focusRow === 0 && detail) {
             isLaunching = true
-            // Save the current track selection before playback starts so it
-            // persists to the next item via load_server_preferences().
-            _saveCurrentLangs()
             // get_playback_url() reports the playback Start to the server once
             // PlaybackInfo resolves (so session id + play method are correct).
             jellyfinBackend.get_playback_url(detail.itemId, detail.mediaSourceId || detail.itemId,
@@ -194,7 +191,7 @@ FocusScope {
     }
 
     // Safety net: save the current selection when the view is destroyed
-    // (navigating back), even if the debounce timer hadn't fired yet.
+    // (navigating back), so the cached language is available for the next item.
     Component.onDestruction: _saveCurrentLangs()
 
     // ------------------------------------------------------------------

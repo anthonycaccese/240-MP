@@ -423,7 +423,7 @@ void MpvController::sendKey(const QString &key) {
 
 void MpvController::showOsdSkipPrompt() {
     sendCommand({"script-message", "skip-overlay-state", "1"});
-    sendCommand({"script-message", "240mp-osd-menu-show"});
+    sendCommand({"keypress", "DOWN"});
 }
 
 void MpvController::clearOsdPrompt() {
