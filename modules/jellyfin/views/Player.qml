@@ -272,14 +272,6 @@ FocusScope {
         outroAutoSkipped = false
         mpvController.clearOsdPrompt()
 
-        // Re-read settings (they could have changed)
-        introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
-        outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
-
-        // Fetch segments for the new episode if skip is enabled
-        if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
-            jellyfinBackend.fetchSegments(detail.itemId)
-
         // Repoint the BACK target so exiting returns to THIS episode's detail
         updateBackItem({
             itemId: detail.itemId,
@@ -295,30 +287,13 @@ FocusScope {
         selectedAudioId    = (audioStreams[audioIdx] && audioStreams[audioIdx].id) ? String(audioStreams[audioIdx].id) : ""
         selectedSubtitleId = (subtitleIdx >= 0 && subtitleStreams[subtitleIdx] && subtitleStreams[subtitleIdx].id) ? String(subtitleStreams[subtitleIdx].id) : ""
         captureCarryLanguages()
-        // Compute same-language index for the cache so menu navigation can
-        // restore the exact track, not just the first stream with that language.
-        var aLangIdx = -1
-        if (carryAudioLang && audioStreams && audioStreams.length > 0) {
-            var found = -1
-            for (var ai2 = 0; ai2 < audioStreams.length; ai2++) {
-                if (audioStreams[ai2].language === carryAudioLang) {
-                    found++
-                    if (ai2 === audioIdx) { aLangIdx = found; break }
-                }
-            }
-        }
-        var sLangIdx = -1
-        if (carrySubLang !== "__off__" && carrySubLang !== "" && subtitleStreams && subtitleStreams.length > 0) {
-            var sfound = -1
-            for (var si2 = 0; si2 < subtitleStreams.length; si2++) {
-                if (subtitleStreams[si2].language === carrySubLang) {
-                    sfound++
-                    if (si2 === subtitleIdx) { sLangIdx = sfound; break }
-                }
-            }
-        }
-        jellyfinBackend.set_last_track_langs(carryAudioLang, carrySubLang === "__off__" ? "" : carrySubLang,
-                                              aLangIdx, sLangIdx)
+        // Cache the selected languages so the detail screen restores them on
+        // return.  The language-group index is omitted here (pass -1) because
+        // autoplay doesn't need exact-track-disambiguation within a language
+        // group — the detail page's applyLanguagePreferences will pick the
+        // first same-language stream, which is correct 99% of the time and
+        // avoids redundant O(n) re-iteration during the autoplay hot path.
+        jellyfinBackend.set_last_track_langs(carryAudioLang, carrySubLang === "__off__" ? "" : carrySubLang, -1, -1)
 
         // Request the new stream URL — get_playback_url() reports the playback
         // Start to the server once PlaybackInfo resolves (correct session/method).
@@ -391,7 +366,7 @@ FocusScope {
             // (subTrack -1 = forced-only, a no-op when nothing soft exists).
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
                                        -1, -1, [], [], false, -1, 0.0, "",
-                                       false, "", false, [], 0.0, false, jfToken)
+                                       false, "", false, [], 0.0, false, [], jfToken)
         } else {
             // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
             // --aid; subtitles come from buildSubArgs (sidecars + --sid).
@@ -399,7 +374,7 @@ FocusScope {
             var sub = buildSubArgs()
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
                                        audioTrack, sub.track, sub.urls, [], false, -1, 0.0, "",
-                                       false, "", false, sub.titles, 0.0, false, jfToken)
+                                       false, "", false, sub.titles, 0.0, false, [], jfToken)
         }
     }
 
@@ -436,6 +411,12 @@ FocusScope {
                 pendingNextEpisode = false
                 playerRoot.streamUrl = url
                 doStartPlayback(0)
+                // Fetch segments for intro/outro skip after playback starts, so
+                // the HTTP request doesn't contend with the PlaybackInfo POST.
+                introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
+                outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
+                if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
+                    jellyfinBackend.fetchSegments(playerRoot.itemId)
                 return
             }
             if (pendingRetryTranscode) {
