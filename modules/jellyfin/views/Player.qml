@@ -33,6 +33,10 @@ FocusScope {
     property bool   pendingRetryTranscode: false
     property string carryAudioLang:     ""
     property string carrySubLang:       "__off__"
+    // Full stream metadata used to disambiguate when several streams share a language.
+    // The persisted cache stays language-only; these are just runtime carry-over hints.
+    property var carryAudioPrefs: ({ language: "", title: "", displayTitle: "", codec: "", channels: "" })
+    property var carrySubPrefs:   ({ language: "__off__", title: "", displayTitle: "", codec: "", forced: false })
 
     property int    audioIdx:    0
     property int    subtitleIdx: -1
@@ -116,27 +120,106 @@ FocusScope {
         captureCarryLanguages()
     }
 
-    // Record the language of the current audio/subtitle selection so the next
-    // episode (which has different per-file stream IDs) can be matched by language.
+    // Record the language and metadata of the current audio/subtitle selection
+    // so the next episode (which has different per-file stream IDs) can be matched
+    // by language, with title/codec/channels used to disambiguate duplicates.
     function captureCarryLanguages() {
         var a = audioStreams[audioIdx]
         carryAudioLang = (a && a.language) ? a.language : ""
+        carryAudioPrefs = a ? {
+            language: a.language || "",
+            title: a.title || "",
+            displayTitle: a.displayTitle || "",
+            codec: a.codec || "",
+            channels: a.channels !== undefined ? a.channels : ""
+        } : { language: "", title: "", displayTitle: "", codec: "", channels: "" }
+
         var s = subtitleStreams[subtitleIdx]
         carrySubLang = (subtitleIdx === -1 || !s) ? "__off__" : (s.language || "")
+        carrySubPrefs = (subtitleIdx === -1 || !s)
+            ? { language: "__off__", title: "", displayTitle: "", codec: "", forced: false }
+            : {
+                language: s.language || "",
+                title: s.title || "",
+                displayTitle: s.displayTitle || "",
+                codec: s.codec || "",
+                forced: s.forced === true
+            }
+    }
+
+    // Score a stream against a previously-selected stream. Returns -1 when the
+    // language doesn't match; higher scores mean a closer match.
+    function streamScore(s, prefs) {
+        if (!s || !prefs) return -1
+        var lang = s.language || ""
+        var prefLang = prefs.language || ""
+        if (lang !== prefLang) return -1
+        var score = 100
+        var st = (s.title || "").toString().toLowerCase()
+        var pt = (prefs.title || "").toString().toLowerCase()
+        if (st && pt && st === pt) score += 100
+        var sd = (s.displayTitle || "").toString().toLowerCase()
+        var pd = (prefs.displayTitle || "").toString().toLowerCase()
+        if (sd && pd && sd === pd) score += 80
+        var sc = (s.codec || "").toString().toLowerCase()
+        var pc = (prefs.codec || "").toString().toLowerCase()
+        if (sc && pc && sc === pc) score += 50
+        if (prefs.channels !== undefined && s.channels !== undefined) {
+            if (String(s.channels).toLowerCase() === String(prefs.channels).toLowerCase())
+                score += 30
+        }
+        if (prefs.forced !== undefined && s.forced === prefs.forced)
+            score += 20
+        return score
+    }
+
+    function bestAudioMatch(streams, prefs) {
+        var best = 0
+        var bestScore = -1
+        for (var i = 0; i < streams.length; i++) {
+            var score = streamScore(streams[i], prefs)
+            if (score > bestScore) {
+                bestScore = score
+                best = i
+            }
+        }
+        return best
+    }
+
+    function bestSubtitleMatch(streams, prefs) {
+        if (!prefs || prefs.language === "__off__" || prefs.language === "") return -1
+        var best = -1
+        var bestScore = -1
+        for (var i = 0; i < streams.length; i++) {
+            var score = streamScore(streams[i], prefs)
+            if (score > bestScore) {
+                bestScore = score
+                best = i
+            }
+        }
+        return best
     }
 
     // Select audioIdx/subtitleIdx on the current stream lists to match the carried
-    // languages. Falls back to the first audio track / subtitles-off when no match.
+    // languages. When several streams share a language, title/codec/channels are
+    // used to pick the closest match; the fallback is the first audio track / off.
     function applyCarryLanguages() {
-        audioIdx = 0
-        for (var i = 0; i < audioStreams.length; i++) {
-            if (carryAudioLang && audioStreams[i].language === carryAudioLang) { audioIdx = i; break }
+        if (audioStreams && audioStreams.length > 0) {
+            if (carryAudioLang && carryAudioPrefs.language)
+                audioIdx = bestAudioMatch(audioStreams, carryAudioPrefs)
+            else
+                audioIdx = 0
+        } else {
+            audioIdx = 0
         }
-        subtitleIdx = -1
-        if (carrySubLang !== "__off__" && carrySubLang !== "") {
-            for (var j = 0; j < subtitleStreams.length; j++) {
-                if (subtitleStreams[j].language === carrySubLang) { subtitleIdx = j; break }
-            }
+
+        if (subtitleStreams && subtitleStreams.length > 0) {
+            if (carrySubLang !== "__off__" && carrySubLang !== "")
+                subtitleIdx = bestSubtitleMatch(subtitleStreams, carrySubPrefs)
+            else
+                subtitleIdx = -1
+        } else {
+            subtitleIdx = -1
         }
     }
 
@@ -186,7 +269,30 @@ FocusScope {
         selectedAudioId    = (audioStreams[audioIdx] && audioStreams[audioIdx].id) ? String(audioStreams[audioIdx].id) : ""
         selectedSubtitleId = (subtitleIdx >= 0 && subtitleStreams[subtitleIdx] && subtitleStreams[subtitleIdx].id) ? String(subtitleStreams[subtitleIdx].id) : ""
         captureCarryLanguages()
-        jellyfinBackend.set_last_track_langs(carryAudioLang, carrySubLang === "__off__" ? "" : carrySubLang)
+        // Compute same-language index for the cache so menu navigation can
+        // restore the exact track, not just the first stream with that language.
+        var aLangIdx = -1
+        if (carryAudioLang && audioStreams && audioStreams.length > 0) {
+            var found = -1
+            for (var ai2 = 0; ai2 < audioStreams.length; ai2++) {
+                if (audioStreams[ai2].language === carryAudioLang) {
+                    found++
+                    if (ai2 === audioIdx) { aLangIdx = found; break }
+                }
+            }
+        }
+        var sLangIdx = -1
+        if (carrySubLang !== "__off__" && carrySubLang !== "" && subtitleStreams && subtitleStreams.length > 0) {
+            var sfound = -1
+            for (var si2 = 0; si2 < subtitleStreams.length; si2++) {
+                if (subtitleStreams[si2].language === carrySubLang) {
+                    sfound++
+                    if (si2 === subtitleIdx) { sLangIdx = sfound; break }
+                }
+            }
+        }
+        jellyfinBackend.set_last_track_langs(carryAudioLang, carrySubLang === "__off__" ? "" : carrySubLang,
+                                              aLangIdx, sLangIdx)
 
         // Request the new stream URL — get_playback_url() reports the playback
         // Start to the server once PlaybackInfo resolves (correct session/method).

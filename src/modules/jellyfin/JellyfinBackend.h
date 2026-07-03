@@ -61,7 +61,10 @@ public:
 
     Q_INVOKABLE QString get_last_audio_lang() const;
     Q_INVOKABLE QString get_last_sub_lang() const;
-    Q_INVOKABLE void set_last_track_langs(const QString &audioLang, const QString &subLang);
+    Q_INVOKABLE int get_last_audio_lang_idx() const;
+    Q_INVOKABLE int get_last_sub_lang_idx() const;
+    Q_INVOKABLE void set_last_track_langs(const QString &audioLang, const QString &subLang,
+                                           int audioLangIdx = -1, int subLangIdx = -1);
 
 signals:
     void authStateChanged();
@@ -114,6 +117,8 @@ private:
     QString m_deviceId;
     QString m_lastAudioLang;
     QString m_lastSubLang;
+    int m_lastAudioLangIdx = -1;
+    int m_lastSubLangIdx = -1;
 
     static QString normalizeServerUrl(const QString &url);
 
