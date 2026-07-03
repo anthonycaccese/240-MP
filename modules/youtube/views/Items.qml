@@ -18,8 +18,17 @@ FocusScope {
         }
     }
 
-    // TEMP data source - remove and refactor based on the requirements
     property var items: ["Subscriptions", "Channels"]
+    property bool isLoading: false
+    property string errorMessage: ""
+
+    // The subscriptions file is a local read, so the check is synchronous —
+    // isLoading exists only for pattern parity with the other modules.
+    Component.onCompleted: {
+        var status = youtubeBackend.check_subscriptions()
+        if (!status.ok)
+            errorMessage = status.error
+    }
 
     // ---
     // UI
@@ -49,6 +58,7 @@ FocusScope {
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.centerIn: parent
+        width: root.sw * 0.76875 //492 — long guidance lines wrap instead of clipping offscreen
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignHCenter
         font.pixelSize: root.sh * 0.05 //24
@@ -58,6 +68,7 @@ FocusScope {
     ListView {
         id: itemList
         model: itemsRoot.items
+        visible: !isLoading && errorMessage === ""
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.25
@@ -99,8 +110,12 @@ FocusScope {
         }
 
         Keys.onReturnPressed: {
-            var selected = itemsRoot.items[itemList.currentIndex]
-            navigateTo("Subscriptions.qml", { item: selected }, { currentIndex: itemList.currentIndex })
+            if (errorMessage !== "")
+                return
+            if (itemList.currentIndex === 0)
+                navigateTo("Subscriptions.qml", { mode: "feed" }, { currentIndex: itemList.currentIndex })
+            else
+                navigateTo("Channels.qml", {}, { currentIndex: itemList.currentIndex })
         }
     }
 

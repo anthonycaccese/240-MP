@@ -7,7 +7,9 @@ FocusScope {
 
     property var navParams: ({})
 
-    property var _moduleInfo: appCore ? appCore.get_module_info("com.240mp.youtube") : ({})
+    property string moduleId: "com.240mp.youtube"
+
+    property var _moduleInfo: appCore ? appCore.get_module_info(moduleId) : ({})
     property string moduleName: _moduleInfo.name || ""
     property string moduleIcon: _moduleInfo.icon || ""
 

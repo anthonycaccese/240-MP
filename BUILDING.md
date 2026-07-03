@@ -25,6 +25,14 @@ brew install mpv
 
 Note: 240-MP uses mpv as an external subprocess for video playback. It does not link against libmpv at build time, so mpv only needs to be on your `PATH` when running the app.
 
+**Install yt-dlp (optional, required only for the YouTube module):**
+
+```bash
+brew install yt-dlp
+```
+
+mpv's ytdl hook uses `yt-dlp` to resolve YouTube URLs at playback time. The YouTube module also expects a `youtube_subscriptions.txt` in the data directory (one channel ID per line, `#` comments allowed) — see [INSTALL.md](INSTALL.md) for details.
+
 **Install SDL2 (required, gamepad input):**
 
 ```bash
@@ -95,6 +103,8 @@ sudo apt-get install -y \
 ```
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
+
+For the YouTube module, additionally install `yt-dlp` (`sudo apt-get install -y yt-dlp`) — mpv's ytdl hook uses it to resolve YouTube URLs at playback time.
 
 ### Get the source
 

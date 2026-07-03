@@ -1,6 +1,8 @@
 import QtQuick
 import Components
 
+// Video list — serves both the aggregated Subscriptions feed (mode "feed")
+// and a single channel's videos (mode "channel", via channelId/channelName).
 FocusScope {
     id: itemsRoot
 
@@ -10,6 +12,14 @@ FocusScope {
     signal navigateTo(string path, var params, var listState)
     signal goBack()
 
+    property string mode: navParams.mode || "feed"
+    property string channelId: navParams.channelId || ""
+    property string channelName: navParams.channelName || ""
+
+    property var items: []
+    property bool isLoading: false
+    property string errorMessage: ""
+
     focus: true
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
@@ -18,8 +28,47 @@ FocusScope {
         }
     }
 
-    // TODO: replace with real data source
-    property var items: ["A SECOND DONKEY KONG 64 RECOMP IS COMING!", "INTERVIEW WITH DENNIS VAN DEN BROEK AKA...", "CHECK OUT THESE 7 INDIE BANGERS", "ANBERNIC RG DS UPDATES: MORE LINUX UPDATES", "CAN YOU KICKFLIP A HARP", "PLEX HARDWARE TRANSCODING ON AMD RYZEN! ZEN 2 THR...", "NEW SWITCH 2 MODEL, MASSIVE PS2 EMULATION ON ANDR...", "Item H"]
+    Component.onCompleted: {
+        isLoading = true
+        errorMessage = ""
+        if (mode === "feed")
+            youtubeBackend.load_subscriptions_feed()
+        else
+            youtubeBackend.load_channel_videos(channelId)
+    }
+
+    Connections {
+        target: youtubeBackend
+
+        function onSubscriptionsFeedLoaded(videos) {
+            if (itemsRoot.mode !== "feed")
+                return
+            itemsRoot.isLoading = false
+            itemsRoot.items = videos
+            if (videos.length > 0) {
+                var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
+                itemList.currentIndex = Math.min(restore, videos.length - 1)
+                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+            }
+        }
+
+        function onChannelVideosLoaded(loadedChannelId, videos) {
+            if (itemsRoot.mode !== "channel" || loadedChannelId !== itemsRoot.channelId)
+                return
+            itemsRoot.isLoading = false
+            itemsRoot.items = videos
+            if (videos.length > 0) {
+                var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
+                itemList.currentIndex = Math.min(restore, videos.length - 1)
+                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+            }
+        }
+
+        function onErrorOccurred(msg) {
+            itemsRoot.isLoading = false
+            itemsRoot.errorMessage = msg
+        }
+    }
 
     // ---
     // UI
@@ -32,10 +81,10 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125
         iconSource: moduleRoot.moduleIcon
         title: moduleRoot.moduleName
-        subtitle: "Subscriptions"
+        subtitle: itemsRoot.mode === "feed" ? "Subscriptions" : itemsRoot.channelName
     }
 
-    // Loading / Error states
+    // Loading / empty / error states
     Text {
         visible: isLoading
         text: "LOADING..."
@@ -54,6 +103,14 @@ FocusScope {
         horizontalAlignment: Text.AlignHCenter
         font.pixelSize: root.sh * 0.05 //24
     }
+    Text {
+        visible: !isLoading && errorMessage === "" && items.length === 0
+        text: "NO VIDEOS FOUND"
+        color: root.tertiaryColor
+        font.family: root.globalFont
+        anchors.centerIn: parent
+        font.pixelSize: root.sh * 0.05 //24
+    }
 
     // List
     ListView {
@@ -68,15 +125,9 @@ FocusScope {
         clip: true
         focus: true
 
-        Component.onCompleted: {
-            var restore = navListState.currentIndex !== undefined ? navListState.currentIndex : 0
-            currentIndex = Math.min(restore, Math.max(0, count - 1))
-            positionViewAtIndex(currentIndex, ListView.Contain)
-        }
-
         delegate: Item {
             width: itemList.width
-            height: root.sh * 0.075 //36 
+            height: root.sh * 0.075 //36
 
             // Full-width background highlight for the active row
             Rectangle {
@@ -95,7 +146,7 @@ FocusScope {
 
                 Text {
                     id: subtitleLabel
-                    text: "RETRO RGB" 
+                    text: modelData.channelName || ""
                     color: itemList.currentIndex === index ? root.surfaceColor : root.secondaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
@@ -104,7 +155,7 @@ FocusScope {
 
                 Text {
                     id: titleLabel
-                    text: modelData 
+                    text: modelData.title || ""
                     color: itemList.currentIndex === index ? root.surfaceColor : root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
@@ -115,8 +166,8 @@ FocusScope {
             // RIGHT SIDE: Duration (only visible when highlighted)
             Text {
                 id: durationLabel
-                visible: itemList.currentIndex === index
-                text: "53:10" 
+                visible: itemList.currentIndex === index && text !== ""
+                text: modelData.duration || ""
                 anchors.right: parent.right
                 anchors.rightMargin: root.sw * 0.015625 //10
                 anchors.verticalCenter: parent.verticalCenter
@@ -129,6 +180,8 @@ FocusScope {
 
         Keys.onReturnPressed: {
             var selected = itemsRoot.items[itemList.currentIndex]
+            if (!selected)
+                return
             navigateTo("Player.qml", { item: selected }, { currentIndex: itemList.currentIndex })
         }
     }
