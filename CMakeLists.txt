@@ -14,23 +14,27 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
 find_package(OpenSSL REQUIRED)
 find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
+option(ENABLE_NFC_READER "Build the optional NFC reader module" OFF)
+
 # PC/SC for NFC reader support (Tested with ACS ACR122U and it uses CCID/PCSC)
 # On macOS: PCSC.framework; on Linux: libpcsclite
-if(APPLE)
-    find_library(PCSC_LIBRARIES PCSC)
-else()
-    find_library(PCSC_LIBRARIES pcsclite)
-    find_path(PCSC_INCLUDE_DIRS PCSC/winscard.h
-        PATHS /usr/include /usr/local/include
-    )
-endif()
-if(NOT PCSC_LIBRARIES)
-    message(FATAL_ERROR "Could not find PC/SC. "
-            "macOS: bundled. Linux: apt install libpcsclite-dev")
-endif()
-if(NOT PCSC_INCLUDE_DIRS AND NOT APPLE)
-    message(FATAL_ERROR "Could not find PC/SC headers. "
-            "Linux: apt install libpcsclite-dev")
+if(ENABLE_NFC_READER)
+    if(APPLE)
+        find_library(PCSC_LIBRARIES PCSC)
+    else()
+        find_library(PCSC_LIBRARIES pcsclite)
+        find_path(PCSC_INCLUDE_DIRS PCSC/winscard.h
+            PATHS /usr/include /usr/local/include
+        )
+    endif()
+    if(NOT PCSC_LIBRARIES)
+        message(FATAL_ERROR "Could not find PC/SC. "
+                "macOS: bundled. Linux: apt install libpcsclite-dev")
+    endif()
+    if(NOT PCSC_INCLUDE_DIRS AND NOT APPLE)
+        message(FATAL_ERROR "Could not find PC/SC headers. "
+                "Linux: apt install libpcsclite-dev")
+    endif()
 endif()
 
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
@@ -64,9 +68,10 @@ add_executable(240mp
     src/modules/plex/PlexBackend.cpp
     src/modules/jellyfin/JellyfinBackend.cpp
     src/modules/ambient_mode/AmbientModeBackend.cpp
-    src/modules/nfc_reader/NfcReaderBackend.cpp
     src/player/MpvController.cpp
     src/input/InputManager.cpp
+    $<$<BOOL:${ENABLE_NFC_READER}>:src/modules/nfc_reader/NfcReaderBackend.h>
+    $<$<BOOL:${ENABLE_NFC_READER}>:src/modules/nfc_reader/NfcReaderBackend.cpp>
     $<$<BOOL:${APPLE}>:src/macos_utils.mm>
 )
 
@@ -79,18 +84,23 @@ target_link_libraries(240mp PRIVATE
     Qt6::Svg
     OpenSSL::Crypto
     SDL2::SDL2
-    ${PCSC_LIBRARIES}
+    $<$<BOOL:${ENABLE_NFC_READER}>:${PCSC_LIBRARIES}>
     $<$<NOT:$<BOOL:${APPLE}>>:${Libdrm_LIBRARIES}>
 )
 
-if(APPLE)
+if(APPLE AND ENABLE_NFC_READER)
     target_link_libraries(240mp PRIVATE "-framework AppKit" ${PCSC_LIBRARIES})
+endif()
+
+if(NOT APPLE AND ENABLE_NFC_READER)
+    target_include_directories(240mp PRIVATE
+        ${PCSC_INCLUDE_DIRS}
+        ${PCSC_INCLUDE_DIRS}/PCSC
+    )
 endif()
 
 if(NOT APPLE)
     target_include_directories(240mp PRIVATE
-        ${PCSC_INCLUDE_DIRS}
-        ${PCSC_INCLUDE_DIRS}/PCSC
         ${Libdrm_INCLUDE_DIRS}
     )
 endif()
@@ -98,6 +108,10 @@ endif()
 target_include_directories(240mp PRIVATE
     src
 )
+
+if(ENABLE_NFC_READER)
+    target_compile_definitions(240mp PRIVATE MP240_ENABLE_NFC_READER=1)
+endif()
 
 # ── macOS bundle metadata ──────────────────────────────────────────────────────
 set_target_properties(240mp PROPERTIES
@@ -139,11 +153,21 @@ if(APPLE)
 
     install(DIRECTORY
         "${CMAKE_SOURCE_DIR}/views"
-        "${CMAKE_SOURCE_DIR}/modules"
         "${CMAKE_SOURCE_DIR}/assets"
         "${CMAKE_SOURCE_DIR}/scripts"
         DESTINATION "240mp.app/Contents/Resources"
         COMPONENT Runtime)
+
+    if(ENABLE_NFC_READER)
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/modules"
+            DESTINATION "240mp.app/Contents/Resources"
+            COMPONENT Runtime)
+    else()
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/modules/"
+            DESTINATION "240mp.app/Contents/Resources/modules"
+            COMPONENT Runtime
+            PATTERN "nfc_reader" EXCLUDE)
+    endif()
 
     # macdeployqt is NOT run here — it requires Qt frameworks to be present and
     # is environment-specific. Run it manually in CI after cmake --install.
@@ -158,11 +182,21 @@ else()
 
     install(DIRECTORY
         "${CMAKE_SOURCE_DIR}/views"
-        "${CMAKE_SOURCE_DIR}/modules"
         "${CMAKE_SOURCE_DIR}/assets"
         "${CMAKE_SOURCE_DIR}/scripts"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp"
         COMPONENT Runtime)
+
+    if(ENABLE_NFC_READER)
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/modules"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp"
+            COMPONENT Runtime)
+    else()
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/modules/"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp/modules"
+            COMPONENT Runtime
+            PATTERN "nfc_reader" EXCLUDE)
+    endif()
 endif()
 
 # ── CPack ──────────────────────────────────────────────────────────────────────

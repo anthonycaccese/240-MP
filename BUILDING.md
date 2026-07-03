@@ -33,6 +33,10 @@ brew install sdl2
 
 SDL2 is a build-time dependency — `InputManager` links against it for USB game controller support (see [Gamepad input](#gamepad-input-inputcfg)).
 
+**Optional NFC Reader build support:**
+
+- No extra package install is needed on macOS. `PCSC.framework` is provided by the OS.
+
 ### Get the source
 
 ```bash
@@ -46,6 +50,12 @@ cd 240-mp
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos . && cmake --build build
+```
+
+To compile the optional NFC Reader module too:
+
+```bash
+cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos -DENABLE_NFC_READER=ON . && cmake --build build
 ```
 
 **For incremental builds:**
@@ -96,6 +106,12 @@ sudo apt-get install -y \
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
 
+If you want to compile the optional NFC Reader module on Raspberry Pi too, also install:
+
+```bash
+sudo apt-get install -y libpcsclite-dev
+```
+
 ### Get the source
 
 ```bash
@@ -109,6 +125,12 @@ cd 240-mp
 
 ```bash
 cmake -B build
+```
+
+To compile the optional NFC Reader module too:
+
+```bash
+cmake -B build -DENABLE_NFC_READER=ON
 ```
 
 **For incremental builds:**
@@ -164,9 +186,9 @@ Controllers can be hotplugged at any time and during playback the same buttons d
 
 **Overriding the mapping**
 
-- Create an `input.cfg` file in the configuration directory. 
-- Add one binding per line, `<input> <action>`; 
-- Use `#` to start a comment, data is case-insensitive and you only need to include the things you want to change (anything not defined will fall back to defaults) 
+- Create an `input.cfg` file in the configuration directory.
+- Add one binding per line, `<input> <action>`;
+- Use `#` to start a comment, data is case-insensitive and you only need to include the things you want to change (anything not defined will fall back to defaults)
 - The file is also live-reloaded while the app runs, so you can tune bindings without restarting.
 
 Inputs use SDL controller names — short (`a`, `b`, `x`, `y`, `back`, `start`, `leftshoulder`, `rightshoulder`, `dpup`, `dpdown`, `dpleft`, `dpright`, ...) or the long `SDL_CONTROLLER_BUTTON_*` forms. Analog axes take a `+`/`-` direction suffix (`lefty-`, `triggerright+`). Actions: `up`, `down`, `left`, `right`, `select`, `back`, `play_pause`, and `none` to unbind a default.

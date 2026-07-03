@@ -68,6 +68,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Loops forever until you stop it
 
 ### NFC Reader Module
+- Optional on both macOS and Raspberry Pi; not built by default
 - Trigger video playback by presenting NFC cards
 - Tested reader support: `ACS ACR122U`
 - Uses a UID-to-video mapping file
@@ -91,6 +92,8 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 #### Notes
 - Mapping values can be absolute paths, relative paths, or direct URLs.
 - Relative paths are resolved from the app/data roots at runtime.
+- Example configure: `cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos -DENABLE_NFC_READER=ON .`
+- Raspberry Pi source builds also need `libpcsclite-dev` when NFC is enabled.
 
 ### Global
 - [Color Schemes](https://github.com/anthonycaccese/240-MP/wiki/Customizations)

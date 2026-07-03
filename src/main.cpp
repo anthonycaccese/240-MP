@@ -15,7 +15,9 @@
 #include "modules/plex/PlexBackend.h"
 #include "modules/jellyfin/JellyfinBackend.h"
 #include "modules/ambient_mode/AmbientModeBackend.h"
+#ifdef MP240_ENABLE_NFC_READER
 #include "modules/nfc_reader/NfcReaderBackend.h"
+#endif
 #include "player/MpvController.h"
 #include "input/InputManager.h"
 #ifdef Q_OS_MAC
@@ -82,7 +84,9 @@ int main(int argc, char *argv[]) {
     PlexBackend         plexBackend(appRoot, dataRoot);
     JellyfinBackend     jellyfinBackend(appRoot, dataRoot);
     AmbientModeBackend  ambientMode(dataRoot);
+#ifdef MP240_ENABLE_NFC_READER
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
+#endif
     MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
 
@@ -99,7 +103,9 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.plex",         "plexBackend",        &plexBackend, ctx);
     appCore.registerModule("com.240mp.jellyfin",     "jellyfinBackend",    &jellyfinBackend, ctx);
     appCore.registerModule("com.240mp.ambient_mode", "ambientModeBackend", &ambientMode, ctx);
+#ifdef MP240_ENABLE_NFC_READER
     appCore.registerModule("com.240mp.nfc_reader",   "nfcReaderBackend",   &nfcReader,   ctx);
+#endif
 
     ctx->setContextProperty("appCore",       &appCore);
     ctx->setContextProperty("mpvController", &mpvController);
