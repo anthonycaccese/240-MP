@@ -68,6 +68,7 @@ FocusScope {
                 choiceIndex = 1
                 event.accepted = true
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                overlayVisible = false
                 play(choiceIndex === 0 ? savedPositionMs : 0)
                 event.accepted = true
             }
