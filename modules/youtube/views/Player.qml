@@ -25,10 +25,26 @@ FocusScope {
 
     focus: true
 
-    function play(startMs) {
+    function doPlay(startMs) {
         overlayVisible = false
         lastStartMs = startMs
         mpvController.loadAndPlay(videoUrl, startMs / 1000.0, 0, -2, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
+    }
+
+    // Starting mpv runs synchronously and, on the Pi, immediately switches VT
+    // (suspending Qt's render thread) before the LOADING frame can paint. Defer
+    // the launch one tick so the loading indicator is rendered first.
+    Timer {
+        id: startTimer
+        interval: 50
+        repeat: false
+        property int pendingStartMs: 0
+        onTriggered: doPlay(pendingStartMs)
+    }
+
+    function play(startMs) {
+        startTimer.pendingStartMs = startMs
+        startTimer.restart()
     }
 
     Keys.onPressed: function(event) {
