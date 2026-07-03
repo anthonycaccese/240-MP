@@ -158,10 +158,8 @@ FocusScope {
         if (!detail) return
         if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1) {
             audioIdx = (audioIdx - 1 + detail.audioStreams.length) % detail.audioStreams.length
-            _saveCurrentLangs()
         } else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 0) {
             subtitleIdx = (subtitleIdx - 1 + (detail.subtitleStreams.length + 1)) % (detail.subtitleStreams.length + 1)
-            _saveCurrentLangs()
         }
     }
     Keys.onRightPressed: {
@@ -169,16 +167,17 @@ FocusScope {
         if (!detail) return
         if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1) {
             audioIdx = (audioIdx + 1) % detail.audioStreams.length
-            _saveCurrentLangs()
         } else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 0) {
             subtitleIdx = (subtitleIdx + 1) % (detail.subtitleStreams.length + 1)
-            _saveCurrentLangs()
         }
     }
     Keys.onReturnPressed: {
         if (isLaunching) return
         if (focusRow === 0 && detail) {
             isLaunching = true
+            // Save the current track selection before playback starts so it
+            // persists to the next item via load_server_preferences().
+            _saveCurrentLangs()
             // get_playback_url() reports the playback Start to the server once
             // PlaybackInfo resolves (so session id + play method are correct).
             jellyfinBackend.get_playback_url(detail.itemId, detail.mediaSourceId || detail.itemId,
@@ -188,10 +187,15 @@ FocusScope {
     }
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+            _saveCurrentLangs()
             goBack()
             event.accepted = true
         }
     }
+
+    // Safety net: save the current selection when the view is destroyed
+    // (navigating back), even if the debounce timer hadn't fired yet.
+    Component.onDestruction: _saveCurrentLangs()
 
     // ------------------------------------------------------------------
     // Language display — uses Jellyfin's own DisplayTitle when available
