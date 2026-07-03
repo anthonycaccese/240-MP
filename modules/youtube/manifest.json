@@ -10,7 +10,7 @@
       "key": "enabled",
       "label": "Enabled",
       "type": "toggle",
-      "default": "ON"
+      "default": "OFF"
     },
     {
       "key": "playback_resolution",
