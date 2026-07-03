@@ -340,8 +340,9 @@ FocusScope {
     // Footer
     Text {
         id: footer
+        visible: !wlOverlayVisible
         text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE "
-              + root.hints.browse + (itemsRoot.mode === "watchlater" ? ":REMOVE " : ":WATCH LATER ")
+              + root.hints.browse + (itemsRoot.mode === "watchlater" ? ":REMOVE " : ":SAVE ")
               + root.hints.select + ":SELECT"
         color: root.tertiaryColor
         font.family: root.globalFont
