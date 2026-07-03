@@ -247,20 +247,12 @@ FocusScope {
 
     function _saveCurrentLangs() {
         if (!detail) return
-        var aStream = (detail.audioStreams && detail.audioStreams[audioIdx]) ? detail.audioStreams[audioIdx] : null
-        var aLang = aStream ? (aStream.language || "") : ""
-        var aTitle = aStream ? (aStream.displayTitle || aStream.title || "") : ""
-        var sLang = ""
-        var sTitle = ""
-        if (subtitleIdx !== 0) {
-            var sStream = (detail.subtitleStreams && detail.subtitleStreams[subtitleIdx - 1])
-                          ? detail.subtitleStreams[subtitleIdx - 1] : null
-            if (sStream) {
-                sLang = sStream.language || ""
-                sTitle = sStream.displayTitle || sStream.title || ""
-            }
-        }
-        jellyfinBackend.set_last_track_langs(aLang, sLang, aTitle, sTitle)
+        var aLang = (detail.audioStreams && detail.audioStreams[audioIdx])
+                    ? (detail.audioStreams[audioIdx].language || "") : ""
+        var sLang = (subtitleIdx === 0) ? ""
+                    : (detail.subtitleStreams && detail.subtitleStreams[subtitleIdx - 1])
+                      ? (detail.subtitleStreams[subtitleIdx - 1].language || "") : ""
+        jellyfinBackend.set_last_track_langs(aLang, sLang)
     }
 
     function applyLanguagePreferences(d) {
@@ -270,28 +262,13 @@ FocusScope {
         // [dev]             " nAudio=" + (d.audioStreams ? d.audioStreams.length : 0) +
         // [dev]             " nSub=" + (d.subtitleStreams ? d.subtitleStreams.length : 0))
 
-        var savedAudioTitle = jellyfinBackend.get_last_audio_title()
-        var savedSubTitle   = jellyfinBackend.get_last_sub_title()
-
-        // Audio: server language preference > saved title match > IsDefault > first stream.
+        // Audio: server language preference > IsDefault > first stream.
         var audioLang = ""
         if (d.audioStreams && d.audioStreams.length > 0) {
             var ai = -1
             if (serverAudioLang) {
-                // Phase 1: match by language
                 for (var i = 0; i < d.audioStreams.length; i++) {
                     if (d.audioStreams[i].language === serverAudioLang) { ai = i; break }
-                }
-                // Phase 2: if we have a saved title, try to refine within same-language tracks
-                if (ai >= 0 && savedAudioTitle) {
-                    var titleMatch = -1
-                    for (var t = 0; t < d.audioStreams.length; t++) {
-                        if (d.audioStreams[t].language === serverAudioLang) {
-                            var tTitle = d.audioStreams[t].displayTitle || d.audioStreams[t].title || ""
-                            if (tTitle === savedAudioTitle) { titleMatch = t; break }
-                        }
-                    }
-                    if (titleMatch >= 0) ai = titleMatch
                 }
             }
             if (ai < 0) {
@@ -304,21 +281,8 @@ FocusScope {
             audioLang = d.audioStreams[ai].language || ""
         }
 
-        // Subtitles: follow the server's SubtitleMode, keyed off the chosen audio language,
-        // with saved title refinement when multiple subs share the same language.
-        var subPick = pickSubtitle(d.subtitleStreams, serverSubLang, serverSubMode, audioLang)
-        if (subPick > 0 && savedSubTitle) {
-            var exactTitleMatch = -1
-            // Search within the same-language subtitle tracks for a title match
-            for (var si = 0; si < d.subtitleStreams.length; si++) {
-                if (d.subtitleStreams[si].language === serverSubLang) {
-                    var siTitle = d.subtitleStreams[si].displayTitle || d.subtitleStreams[si].title || ""
-                    if (siTitle === savedSubTitle) { exactTitleMatch = si + 1; break }
-                }
-            }
-            if (exactTitleMatch >= 0) subPick = exactTitleMatch
-        }
-        detailRoot.subtitleIdx = subPick
+        // Subtitles: follow the server's SubtitleMode, keyed off the chosen audio language.
+        detailRoot.subtitleIdx = pickSubtitle(d.subtitleStreams, serverSubLang, serverSubMode, audioLang)
     }
 
     // ---
