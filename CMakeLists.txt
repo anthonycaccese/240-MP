@@ -68,6 +68,7 @@ add_executable(240mp
     src/modules/plex/PlexBackend.cpp
     src/modules/jellyfin/JellyfinBackend.cpp
     src/modules/ambient_mode/AmbientModeBackend.cpp
+    src/modules/youtube/YouTubeBackend.cpp
     src/player/MpvController.cpp
     src/input/InputManager.cpp
     $<$<BOOL:${ENABLE_NFC_READER}>:src/modules/nfc_reader/NfcReaderBackend.h>

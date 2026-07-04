@@ -1,0 +1,48 @@
+{
+  "id": "com.240mp.youtube",
+  "name": "YouTube",
+  "icon": "assets/images/logo.svg",
+  "version": "1.0",
+  "entry_point_qml": "views/Root.qml",
+
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "playback_resolution",
+      "label": "Playback Resolution",
+      "type": "list_single",
+      "options": ["480p", "720p", "1080p"],
+      "default": "480p"
+    },
+    {
+      "key": "resume_playback",
+      "label": "Resume Playback",
+      "type": "list_single",
+      "options": ["Ask", "Always"],
+      "default": "Ask"
+    },
+    {
+      "key": "display_shorts",
+      "label": "Display Shorts",
+      "type": "toggle",
+      "default": "ON"
+    },
+    {
+      "key": "delete_watch_later",
+      "label": "Delete Watch Later",
+      "type": "action",
+      "action_slot": "delete_watch_later"
+    },
+    {
+      "key": "delete_history",
+      "label": "Delete History",
+      "type": "action",
+      "action_slot": "delete_history"
+    }
+  ]
+}

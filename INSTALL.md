@@ -266,3 +266,4 @@ To update to the latest release on MacOS please follow these steps (your setting
 
 - Remove it just like you would any application on macOS
 - Remove the configuration files in `~/Library/Application Support/240-MP/`
+

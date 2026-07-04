@@ -18,6 +18,7 @@
 #ifdef MP240_ENABLE_NFC_READER
 #include "modules/nfc_reader/NfcReaderBackend.h"
 #endif
+#include "modules/youtube/YouTubeBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
 #ifdef Q_OS_MAC
@@ -87,6 +88,7 @@ int main(int argc, char *argv[]) {
 #ifdef MP240_ENABLE_NFC_READER
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
 #endif
+    YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
 
@@ -106,6 +108,7 @@ int main(int argc, char *argv[]) {
 #ifdef MP240_ENABLE_NFC_READER
     appCore.registerModule("com.240mp.nfc_reader",   "nfcReaderBackend",   &nfcReader,   ctx);
 #endif
+    appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
 
     ctx->setContextProperty("appCore",       &appCore);
     ctx->setContextProperty("mpvController", &mpvController);
