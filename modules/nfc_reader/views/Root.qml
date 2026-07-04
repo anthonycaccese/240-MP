@@ -54,7 +54,7 @@ FocusScope {
 
     Component.onCompleted: {
         nfcReaderBackend.reloadMapping()
-        navigateTo("Reader.qml", {})
+        navigateTo("Items.qml", {})
     }
 
     Connections {
