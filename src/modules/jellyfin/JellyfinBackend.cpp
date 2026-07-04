@@ -1024,14 +1024,14 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
     body["MediaSourceId"]          = mediaSourceId;
     if (audioStreamIndex >= 0)
         body["AudioStreamIndex"]   = audioStreamIndex;
-    if (directPlay) {
-        // Disable server-side subtitle selection so an unsupported subtitle
-        // codec can't force a transcode. The static stream still carries every
-        // embedded subtitle; mpv selects/renders them client-side (--sid).
-        body["SubtitleStreamIndex"] = -1;
-    } else if (subtitleStreamIndex >= 0) {
+    // For direct play the device profile already advertises Embed for every
+    // subtitle format (including PGS/VOBSUB), so the server knows we handle
+    // them client-side and won't force a transcode.  Pass the user's actual
+    // selection (or omit if off) so the static stream includes all tracks.
+    // Hardcoding -1 here caused newer Jellyfin servers to strip sub tracks
+    // from the stream, breaking both --sid for image subs and sidecar URLs.
+    if (subtitleStreamIndex >= 0)
         body["SubtitleStreamIndex"] = subtitleStreamIndex;
-    }
     if (maxBitrate > 0) body["MaxStreamingBitrate"] = maxBitrate;
     if (maxHeight  > 0) body["MaxHeight"]           = maxHeight;
     body["EnableDirectPlay"]       = directPlay;
