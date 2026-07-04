@@ -52,7 +52,7 @@ public:
                                   const QStringList &subTitles = {},
                                   float imageDurationSec = 0.0f,
                                   bool imageContent = false,
-                                  bool ytdl = false);
+                                  bool ytdl = false,
                                   const QStringList &extraArgs = {});
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seekTo(int positionMs);
