@@ -148,7 +148,7 @@ QJsonObject JellyfinBackend::moduleConfig() const {
 }
 
 int JellyfinBackend::videoQualityBitrate() const {
-    QString quality = moduleConfig()["video_quality"].toString("auto");
+    QString quality = moduleConfig()["video_quality"].toString("720p");
     if (quality == QLatin1String("auto"))  return 0; // direct play — no cap
     if (quality == QLatin1String("1080p")) return 10000000;
     if (quality == QLatin1String("720p"))  return 6000000;
@@ -157,7 +157,7 @@ int JellyfinBackend::videoQualityBitrate() const {
 }
 
 int JellyfinBackend::videoQualityMaxHeight() const {
-    QString quality = moduleConfig()["video_quality"].toString("auto");
+    QString quality = moduleConfig()["video_quality"].toString("720p");
     if (quality == QLatin1String("auto"))  return 0; // direct play — no cap
     if (quality == QLatin1String("1080p")) return 1080;
     if (quality == QLatin1String("720p"))  return 720;
@@ -1017,7 +1017,7 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
     // HLS transcode. forceTranscode overrides "auto" for a fallback retry after
     // a direct-play failure (see Player.qml onPlaybackEnded).
     const bool directPlay = !forceTranscode
-                          && (moduleConfig()["video_quality"].toString("auto")
+                          && (moduleConfig()["video_quality"].toString("720p")
                               == QLatin1String("auto"));
     const int maxBitrate = videoQualityBitrate();
     const int maxHeight  = videoQualityMaxHeight();
@@ -1340,7 +1340,11 @@ void JellyfinBackend::update_playback_progress(const QString &itemId, const QStr
 
     QUrl url(m_serverUrl + "/Sessions/Playing/Progress");
     auto *reply = jellyfinPost(url, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError)
+            qWarning("[Jellyfin] progress update failed: %s", qPrintable(reply->errorString()));
+        reply->deleteLater();
+    });
 }
 
 void JellyfinBackend::report_playback_stopped(const QString &itemId, const QString &mediaSourceId,
@@ -1360,6 +1364,8 @@ void JellyfinBackend::report_playback_stopped(const QString &itemId, const QStri
     QUrl url(m_serverUrl + "/Sessions/Playing/Stopped");
     auto *reply = jellyfinPost(url, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError)
+            qWarning("[Jellyfin] report stopped failed: %s", qPrintable(reply->errorString()));
         reply->deleteLater();
         m_currentPlaySessionId.clear();
     });

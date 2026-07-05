@@ -65,6 +65,7 @@ FocusScope {
     Keys.onPressed: function(event) {
         if (overlayVisible) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+                reportStopped(0, 0)
                 goBack()
                 event.accepted = true
             } else if (event.key === Qt.Key_Up) {
@@ -309,7 +310,7 @@ FocusScope {
     // the launch one tick so the loading indicator is rendered first.
     Timer {
         id: startTimer
-        interval: 50
+        interval: 16
         repeat: false
         property int pendingOffset: 0
         onTriggered: doStartPlayback(pendingOffset)
@@ -398,7 +399,14 @@ FocusScope {
 
     Connections {
         target: jellyfinBackend
-        function onErrorOccurred(msg) { console.log("[Jellyfin Player] Backend error: " + msg) }
+        function onErrorOccurred(msg) {
+            console.log("[Jellyfin Player] Backend error: " + msg)
+            if (pendingRetryTranscode) {
+                pendingRetryTranscode = false
+                reportStopped(lastKnownPositionMs, lastKnownDurationMs, true)
+                goBack()
+            }
+        }
 
         function onSegmentsReady(itemId_, segments_) {
             if (itemId_ !== playerRoot.itemId) return
@@ -511,6 +519,8 @@ FocusScope {
                     // Direct play failed (e.g. a codec mpv couldn't handle, or a
                     // network drop). Retry transparently with a transcode, resuming
                     // at the last known position. Mirrors the Plex module.
+                    reportStopped(finalPositionMs, finalDurationMs, true)
+                    stoppedReported = false
                     pendingRetryTranscode = true
                     var aIdx = selectedAudioId ? parseInt(selectedAudioId) : -1
                     var sIdx = selectedSubtitleId ? parseInt(selectedSubtitleId) : -1
@@ -545,24 +555,31 @@ FocusScope {
         repeat:   true
         running:  true
         onTriggered: {
-            if (mpvController.position > 0)
+            var pos = mpvController.position
+            if (pos > 0) {
+                if (pos > playerRoot.lastKnownPositionMs)
+                    playerRoot.lastKnownPositionMs = pos
                 jellyfinBackend.update_playback_progress(itemId, mediaSourceId,
-                                                         msToTicks(mpvController.position), false)
+                                                         msToTicks(pos), false)
+            }
         }
     }
 
     Component.onCompleted: {
         initStreamIndices()
         if (streamUrl === "") return
-        resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        var allConfig = appCore.get_settings()
+        var mc = allConfig && allConfig["modules"]
+            ? allConfig["modules"][moduleRoot.moduleId] || {} : {}
+        resumeSetting = mc["resume_playback"] || "ask"
         // Match ModuleSettings.qml's reading of a toggle: stored as a real bool
         // once the user touches it, but accept the legacy "ON" string too.
-        var autoplayRaw = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode")
+        var autoplayRaw = mc["autoplay_next_episode"]
         autoplayNext = (autoplayRaw === true || autoplayRaw === "ON")
 
         // Hoist skip settings
-        introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
-        outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
+        introSkipSetting = mc["intro_skip"] || "Off"
+        outroSkipSetting = mc["outro_skip"] || "Off"
 
         // Fetch segments if either skip mode is enabled
         if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
@@ -581,7 +598,7 @@ FocusScope {
     // without stopping), report stopped so Jellyfin doesn't show this as
     // still playing. The guard in reportStopped prevents double-reporting.
     Component.onDestruction: {
-        if (lastKnownPositionMs > 0)
+        if (streamUrl !== "")
             reportStopped(lastKnownPositionMs, lastKnownDurationMs)
     }
 

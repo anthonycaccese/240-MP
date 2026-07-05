@@ -132,6 +132,9 @@ private:
     int           m_playlistPos  = -1;
     bool          m_headlessMode = false;
     int           m_previousVt   = -1;
+    bool          m_hasMpvOscScript     = false;
+    bool          m_hasAmbientOscScript = false;
+    bool          m_hasMediaKeysScript  = false;
     int           m_qtDrmFd      = -1;
 #ifdef Q_OS_LINUX
     DrmSavedState m_savedDrm     = {};
