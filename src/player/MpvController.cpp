@@ -67,6 +67,10 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
         f.close();
     }
 
+    m_hasMpvOscScript     = QFile::exists(m_appRoot + "/scripts/mpv-osc.lua");
+    m_hasAmbientOscScript = QFile::exists(m_appRoot + "/scripts/ambient-osc.lua");
+    m_hasMediaKeysScript  = QFile::exists(m_appRoot + "/scripts/media-keys.lua");
+
     m_ipc = new QLocalSocket(this);
     connect(m_ipc, &QLocalSocket::connected, this, [this] {
         m_connectTimer->stop();
@@ -150,9 +154,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         return;
     }
 
-    const QString oscScriptName = (oscMode == "ambient") ? "ambient-osc.lua" : "mpv-osc.lua";
-    const QString oscScript = m_appRoot + "/scripts/" + oscScriptName;
-    const bool hasOscScript = QFile::exists(oscScript);
+    const bool hasOscScript = (oscMode == "ambient") ? m_hasAmbientOscScript : m_hasMpvOscScript;
+    const QString oscScript = m_appRoot + "/scripts/" + ((oscMode == "ambient") ? "ambient-osc.lua" : "mpv-osc.lua");
 
     // Stamp the log file so each session is identifiable when tailing over SSH.
     {
@@ -160,7 +163,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         if (lf.open(QFile::Append | QFile::Text)) {
             QString safeUrl = url;
             safeUrl.replace(QRegularExpression("Api[_-]?Key=[^&\\s]+", QRegularExpression::CaseInsensitiveOption), "ApiKey=REDACTED");
-            safeUrl.replace(QRegularExpression("X-Plex-Token:[^\\s]+"), "X-Plex-Token=REDACTED");
+            safeUrl.replace(QRegularExpression("X-Plex-Token[=:][^&\\s]+"), "X-Plex-Token=REDACTED");
             safeUrl.replace(QRegularExpression("Token=\"[^\"]+\""), "Token=\"REDACTED\"");
             lf.write(QString("\n=== 240-MP session start %1 ===\n    url: %2\n\n")
                          .arg(QDateTime::currentDateTime().toString(Qt::ISODate))
@@ -181,9 +184,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
 
     // Media-key handling + themed volume bar — loaded for every mode so HID
     // media keys work anytime mpv is playing, not just inside a given module.
-    const QString mediaKeysScript = m_appRoot + "/scripts/media-keys.lua";
-    if (QFile::exists(mediaKeysScript))
-        args << QString("--script=%1").arg(mediaKeysScript);
+    if (m_hasMediaKeysScript)
+        args << QString("--script=%1").arg(m_appRoot + "/scripts/media-keys.lua");
 
     // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
     // primary plane between two consecutive same-size/format stills, so a photo
@@ -394,7 +396,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         QString safeCmd = args.join(" ");
         // Redact all token forms in debug output
         safeCmd.replace(QRegularExpression("Api[_-]?Key=[^&\\s]+", QRegularExpression::CaseInsensitiveOption), "ApiKey=REDACTED");
-        safeCmd.replace(QRegularExpression("X-Plex-Token:[^\\s]+"), "X-Plex-Token=REDACTED");
+        safeCmd.replace(QRegularExpression("X-Plex-Token[=:][^&\\s]+"), "X-Plex-Token=REDACTED");
         safeCmd.replace(QRegularExpression("Token=\"[^\"]+\""), "Token=\"REDACTED\"");
         qDebug("[MpvController] desktop launch: mpv %s", qPrintable(safeCmd));
         m_process->start(bin, args);
@@ -541,7 +543,11 @@ void MpvController::doHeadlessRestore(int pos, int dur, const QString &reason) {
 }
 
 void MpvController::sendCommand(const QJsonArray &args) {
-    if (m_ipc->state() != QLocalSocket::ConnectedState) return;
+    if (m_ipc->state() != QLocalSocket::ConnectedState) {
+        qWarning("[MpvController] IPC not connected, dropping: %s",
+                 QJsonDocument(QJsonObject{{"command", args}}).toJson(QJsonDocument::Compact).constData());
+        return;
+    }
     QJsonObject cmd;
     cmd["command"] = args;
     m_ipc->write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + "\n");
