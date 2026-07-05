@@ -18,6 +18,7 @@
 #include "modules/youtube/YouTubeBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
+#include "input/IdleTracker.h"
 #ifdef Q_OS_MAC
 #include "macos_utils.h"
 #endif
@@ -85,6 +86,23 @@ int main(int argc, char *argv[]) {
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
+    IdleTracker         idleTracker(60);   // default threshold, disabled until user opts in
+
+    // Read saved screensaver setting ("OFF" or a number). Defaults to OFF on fresh install.
+    {
+        const QVariant saved = appCore.get_setting("", "screensaver_timeout");
+        const QString val = saved.toString();
+        if (val == QLatin1String("OFF") || val.isEmpty()) {
+            idleTracker.setEnabled(false);
+        } else {
+            bool ok = false;
+            int n = val.toInt(&ok);
+            if (ok && n >= 10) {
+                idleTracker.setEnabled(true);
+                idleTracker.setThreshold(n);
+            }
+        }
+    }
 
     // When the Qt window is inactive (fullscreen mpv has OS focus on macOS),
     // gamepad actions bypass QML and drive mpv directly over IPC.
@@ -101,6 +119,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.ambient_mode", "ambientModeBackend", &ambientMode, ctx);
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
 
+    ctx->setContextProperty("idleTracker",   &idleTracker);
     ctx->setContextProperty("appCore",       &appCore);
     ctx->setContextProperty("mpvController", &mpvController);
     ctx->setContextProperty("inputManager",  &inputManager);

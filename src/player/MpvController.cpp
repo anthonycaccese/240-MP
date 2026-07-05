@@ -185,6 +185,28 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (QFile::exists(mediaKeysScript))
         args << QString("--script=%1").arg(mediaKeysScript);
 
+    // Screen saver Lua script — only loaded when the user has opted in via the
+    // screensaver_timeout setting (any value other than "OFF").
+    // Script-opt is appended to scriptOpts below where it is declared.
+    bool screensaverEnabled = false;
+    int  screensaverTimeout  = 60;
+    if (m_appCore) {
+        const QVariant ssVal = m_appCore->get_setting(QString(), "screensaver_timeout");
+        const QString ssStr = ssVal.toString();
+        if (ssStr != QLatin1String("OFF") && !ssStr.isEmpty()) {
+            const QString ssScript = m_appRoot + "/scripts/screensaver.lua";
+            if (QFile::exists(ssScript)) {
+                args << QString("--script=%1").arg(ssScript);
+                bool ok = false;
+                int n = ssStr.toInt(&ok);
+                if (ok && n >= 10) {
+                    screensaverEnabled = true;
+                    screensaverTimeout = n;
+                }
+            }
+        }
+    }
+
     // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
     // primary plane between two consecutive same-size/format stills, so a photo
     // playlist freezes on the first frame while the clock advances. This script
@@ -226,6 +248,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
+    if (screensaverEnabled)
+        scriptOpts << QString("screensaver_timeout=%1").arg(screensaverTimeout);
 
     // Hand the OSC a map of external sub-file URL -> friendly track name so it can show
     // the real subtitle name. mpv otherwise titles an external sub from its URL basename,
