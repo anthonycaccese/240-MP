@@ -32,6 +32,8 @@ FocusScope {
             return
         }
         var list = ["Subscriptions", "Channels"]
+        if (youtubeBackend.check_playlists().ok)
+            list.push("Playlists")
         if (youtubeBackend.getWatchLater().length > 0)
             list.push("Watch Later")
         if (youtubeBackend.getHistory().length > 0)
@@ -124,6 +126,8 @@ FocusScope {
                 navigateTo("Subscriptions.qml", { mode: "feed" }, state)
             else if (selected === "Channels")
                 navigateTo("Channels.qml", {}, state)
+            else if (selected === "Playlists")
+                navigateTo("Playlists.qml", {}, state)
             else if (selected === "Watch Later")
                 navigateTo("Subscriptions.qml", { mode: "watchlater" }, state)
             else if (selected === "History")
