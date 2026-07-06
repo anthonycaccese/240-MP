@@ -88,12 +88,13 @@ Window {
             if (key === "color_scheme") {
                 root.currentTheme = value
             } else if (key === "screensaver_timeout") {
-                if (value === "OFF") {
+                var sec = parseInt(value)
+                if (sec > 0) {
+                    idleTracker.threshold = sec
+                    idleTracker.enabled = true
+                } else {  // "OFF"
                     idleTracker.enabled = false
                     if (screenSaverActive) screenSaverActive = false
-                } else {
-                    idleTracker.enabled = true
-                    idleTracker.threshold = parseInt(value)
                 }
             }
         }
@@ -127,15 +128,13 @@ Window {
         }
         root.currentTheme = savedTheme
 
-        // Screensaver: apply saved setting (C++ default is enabled=OFF).
-        if (idleTracker) {
-            var ssVal = cfg.app && cfg.app.screensaver_timeout
-            if (ssVal && ssVal !== "OFF") {
-                idleTracker.enabled = true
-                idleTracker.threshold = parseInt(ssVal)
-            } else {
-                idleTracker.enabled = false
-            }
+        // Screensaver: the tracker starts disabled; this is the single place the
+        // saved setting is applied (live changes land in onAppSettingChanged above,
+        // mirroring color_scheme). parseInt("OFF") is NaN, so OFF stays disabled.
+        var ssSec = parseInt(cfg.app && cfg.app.screensaver_timeout)
+        if (ssSec > 0) {
+            idleTracker.threshold = ssSec
+            idleTracker.enabled = true
         }
 
         // Break declarative bindings on macOS so the C++ NSWindow override
@@ -179,7 +178,7 @@ Window {
     Connections {
         target: mpvController
         function onPositionChanged(ms) {
-            if (ms > 0 && mpvController.position > 0 && !idleTracker.mpvActive) {
+            if (ms > 0 && !idleTracker.mpvActive) {
                 idleTracker.mpvActive = true
                 idleTracker.resetActivity()
             }
@@ -286,7 +285,6 @@ Window {
 
             property real vx: 0
             property real vy: 0
-            property color flashColor: root.accentColor
 
             // Physics tick at ~60 fps while the overlay is visible
             Timer {
@@ -300,38 +298,32 @@ Window {
                     if (bounceLogo.x + bounceLogo.width > screenSaverOverlay.width) {
                         bounceLogo.x = screenSaverOverlay.width - bounceLogo.width
                         bounceLogo.vx = -Math.abs(bounceLogo.vx)
-                        bounceLogo.flashColor = root.accentColor
                     } else if (bounceLogo.x < 0) {
                         bounceLogo.x = 0
                         bounceLogo.vx = Math.abs(bounceLogo.vx)
-                        bounceLogo.flashColor = root.accentColor
                     }
 
                     if (bounceLogo.y + bounceLogo.height > screenSaverOverlay.height) {
                         bounceLogo.y = screenSaverOverlay.height - bounceLogo.height
                         bounceLogo.vy = -Math.abs(bounceLogo.vy)
-                        bounceLogo.flashColor = root.accentColor
                     } else if (bounceLogo.y < 0) {
                         bounceLogo.y = 0
                         bounceLogo.vy = Math.abs(bounceLogo.vy)
-                        bounceLogo.flashColor = root.accentColor
                     }
                 }
-            }
-
-            // Subtle colour flash on each bounce
-            ColorAnimation on flashColor {
-                from: root.accentColor
-                to: root.primaryColor
-                duration: 300
-                running: screenSaverActive
             }
         }
 
         // Capture any keypress to dismiss — consumes the event so the
         // underlying view never sees it, preventing accidental navigation.
+        // Ctrl+Q still quits (moduleLoader's handler is a sibling, so it
+        // can't see keys focused here — handle the chord directly).
         Keys.onPressed: (event) => {
             event.accepted = true
+            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Q) {
+                Qt.quit()
+                return
+            }
             screenSaverActive = false
             moduleLoader.forceActiveFocus()
         }

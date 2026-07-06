@@ -186,24 +186,15 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--script=%1").arg(mediaKeysScript);
 
     // Screen saver Lua script — only loaded when the user has opted in via the
-    // screensaver_timeout setting (any value other than "OFF").
-    // Script-opt is appended to scriptOpts below where it is declared.
-    bool screensaverEnabled = false;
-    int  screensaverTimeout  = 60;
+    // screensaver_timeout setting (a positive number of seconds; "OFF" parses
+    // to 0 and disables). The timeout reaches the script via scriptOpts below.
+    int screensaverTimeout = 0;
     if (m_appCore) {
-        const QVariant ssVal = m_appCore->get_setting(QString(), "screensaver_timeout");
-        const QString ssStr = ssVal.toString();
-        if (ssStr != QLatin1String("OFF") && !ssStr.isEmpty()) {
-            const QString ssScript = m_appRoot + "/scripts/screensaver.lua";
-            if (QFile::exists(ssScript)) {
-                args << QString("--script=%1").arg(ssScript);
-                bool ok = false;
-                int n = ssStr.toInt(&ok);
-                if (ok && n >= 10) {
-                    screensaverEnabled = true;
-                    screensaverTimeout = n;
-                }
-            }
+        const int n = m_appCore->get_setting(QString(), "screensaver_timeout").toString().toInt();
+        const QString ssScript = m_appRoot + "/scripts/screensaver.lua";
+        if (n > 0 && QFile::exists(ssScript)) {
+            screensaverTimeout = n;
+            args << QString("--script=%1").arg(ssScript);
         }
     }
 
@@ -248,7 +239,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
-    if (screensaverEnabled)
+    if (screensaverTimeout > 0)
         scriptOpts << QString("screensaver_timeout=%1").arg(screensaverTimeout);
 
     // Hand the OSC a map of external sub-file URL -> friendly track name so it can show

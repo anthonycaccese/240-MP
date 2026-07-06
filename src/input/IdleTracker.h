@@ -1,7 +1,6 @@
 #pragma once
 #include <QObject>
 #include <QTimer>
-#include <QElapsedTimer>
 
 // Tracks global input inactivity and emits signals when idle for a configurable
 // number of seconds. Used by the screen saver overlay in Main.qml.
@@ -62,6 +61,6 @@ private:
     int    m_threshold;
     int    m_idleSeconds = 0;
     bool   m_active      = false;
-    bool   m_enabled     = true;
+    bool   m_enabled     = false;   // off until Main.qml applies the saved setting
     bool   m_mpvActive   = false;
 };

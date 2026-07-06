@@ -46,7 +46,7 @@ void IdleTracker::setMpvActive(bool active)
     m_mpvActive = active;
     emit mpvActiveChanged();
 
-    // If activation was blocked by mpv and mpv just ended, deactive immediately
+    // If activation was blocked by mpv and mpv just ended, deactivate immediately
     // so the screen saver doesn't flash on the menu after playback.
     if (!m_mpvActive && m_active) {
         m_active = false;

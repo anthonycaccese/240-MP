@@ -86,23 +86,7 @@ int main(int argc, char *argv[]) {
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
-    IdleTracker         idleTracker(60);   // default threshold, disabled until user opts in
-
-    // Read saved screensaver setting ("OFF" or a number). Defaults to OFF on fresh install.
-    {
-        const QVariant saved = appCore.get_setting("", "screensaver_timeout");
-        const QString val = saved.toString();
-        if (val == QLatin1String("OFF") || val.isEmpty()) {
-            idleTracker.setEnabled(false);
-        } else {
-            bool ok = false;
-            int n = val.toInt(&ok);
-            if (ok && n >= 10) {
-                idleTracker.setEnabled(true);
-                idleTracker.setThreshold(n);
-            }
-        }
-    }
+    IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
 
     // When the Qt window is inactive (fullscreen mpv has OS focus on macOS),
     // gamepad actions bypass QML and drive mpv directly over IPC.

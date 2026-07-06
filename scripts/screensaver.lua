@@ -3,25 +3,24 @@
 --
 -- Loaded by --script= only when screensaver_timeout != "OFF".
 -- Uses the same ASS-overlay technique as media-keys.lua's volume bar.
--- On any key the overlay is dismissed AND the key falls through to its default
--- handler, so a single SPACE press both dismisses the screen saver AND unpauses.
+-- Dismiss keys are consumed, matching the app-shell overlay: the first press
+-- only wakes the screen saver, the next press acts normally.
 
-local options = require("mp.options")
-local assdraw  = require("mp.assdraw")
-local o = {
-    timeout = 60,
-    speed   = 2,
-}
-options.read_options(o, "screensaver")
+local assdraw = require("mp.assdraw")
+
+-- Raw script-opts key (same convention as mpv-osc.lua's transcode-offset);
+-- mp.options.read_options would instead expect a "screensaver-" prefix.
+local timeout_sec = tonumber(mp.get_opt("screensaver_timeout") or "60") or 60
+local SPEED = 2
 
 -- ─── state ───────────────────────────────────────────────────────────────────
 local ss_active   = false
 local paused_sec  = 0
-local timeout_sec = o.timeout
 local x, y   = 20, 20
-local vx, vy = o.speed, o.speed
-local TEXT_W  = 148
-local TEXT_H  = 38
+local vx, vy = SPEED, SPEED
+-- Bounce box for "240-MP" at \fs108 (overlay units == OSD pixels)
+local TEXT_W  = 400
+local TEXT_H  = 120
 
 -- ─── forward declarations ─────────────────────────────────────────────────────
 local activate, dismiss, anim_timer
@@ -54,7 +53,7 @@ end
 -- ─── key bindings ─────────────────────────────────────────────────────────────
 local DISMISS_KEYS = {
     "SPACE", "ENTER", "KP_ENTER", "ESC",
-    "LEFT", "RIGHT", "UP", "DOWN", "PGUP",
+    "LEFT", "RIGHT", "UP", "DOWN", "PGUP", "PGDWN",
     "HOME", "END",
     "MBTN_LEFT", "MBTN_RIGHT",
 }
@@ -69,8 +68,8 @@ activate = function()
 
     x = math.floor(math.random() * math.max(1, math.floor(ww / 2)))
     y = math.floor(math.random() * math.max(1, math.floor(wh / 2)))
-    vx = o.speed
-    vy = o.speed
+    vx = SPEED
+    vy = SPEED
 
     for _, k in ipairs(DISMISS_KEYS) do
         mp.add_forced_key_binding(k, "ss-dismiss-" .. k, dismiss)
