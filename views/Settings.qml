@@ -114,8 +114,6 @@ FocusScope {
 
         // SCREEN SAVER section — single control: OFF disables, a number sets the
         // timeout for both menu idle and playback pause (handled inside mpv).
-        items.push({ type: "section", label: "Screen Saver" })
-
         items.push({
             type: "list_single",
             key: "screensaver_timeout",
