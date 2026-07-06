@@ -75,6 +75,7 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
         sendCommand({"observe_property", 1, "time-pos"});
         sendCommand({"observe_property", 2, "duration"});
         sendCommand({"observe_property", 3, "playlist-pos"});
+        sendCommand({"observe_property", 4, "pause"});
     });
     connect(m_ipc, &QLocalSocket::readyRead, this, &MpvController::onIpcReadyRead);
 
@@ -84,10 +85,14 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
 
     // Watchdog: fires every 10 s; logs a warning if no IPC time-pos event has
     // arrived for 30 s while connected — strong indicator of a playback freeze.
+    // Exempt while paused: time-pos is legitimately silent then (a long pause is
+    // a normal state now that the screen saver runs over it), and the unpause
+    // property-change event refreshes m_lastIpcEventMs so the 30 s window
+    // restarts fresh on resume.
     m_watchdogTimer = new QTimer(this);
     m_watchdogTimer->setInterval(10000);
     connect(m_watchdogTimer, &QTimer::timeout, this, [this] {
-        if (m_ipc->state() != QLocalSocket::ConnectedState) return;
+        if (m_ipc->state() != QLocalSocket::ConnectedState || m_paused) return;
         qint64 silenceMs = QDateTime::currentMSecsSinceEpoch() - m_lastIpcEventMs;
         if (silenceMs > 30000) {
             qWarning("[MpvController] WATCHDOG: no IPC time-pos event for %lld s — possible freeze",
@@ -127,6 +132,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     m_position    = 0;
     m_duration    = 0;
     m_playlistPos = -1;
+    m_paused      = false;
     m_lastEndFileReason.clear();
 
 #ifdef Q_OS_MACOS
@@ -462,6 +468,10 @@ void MpvController::onIpcReadyRead() {
         const QString     name = obj["name"].toString();
         const QJsonValue  data = obj["data"];
         if (data.isNull() || data.isUndefined()) continue; // property unavailable during shutdown
+        if (name == "pause") {
+            m_paused = data.toBool();
+            continue;
+        }
         const double val = data.toDouble();
         if (name == "time-pos") {
             m_position = int(val * 1000.0);

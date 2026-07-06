@@ -116,6 +116,7 @@ private:
     QTimer       *m_connectTimer   = nullptr;
     QTimer       *m_watchdogTimer  = nullptr;
     qint64        m_lastIpcEventMs = 0;
+    bool          m_paused         = false;  // mirrors mpv's pause property (watchdog exemption)
     QString       m_appRoot;
     QString       m_socketPath;
     QString       m_inputConfPath;
