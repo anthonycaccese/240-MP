@@ -74,6 +74,7 @@ QVariantMap YouTubeBackend::check_subscriptions() {
     QVariantMap result;
     result["ok"]           = error.isEmpty();
     result["error"]        = error;
+    result["fileExists"]   = QFile::exists(m_dataRoot + "/" + kSubscriptionsFileName);
     result["channelCount"] = ids.size();
     return result;
 }
@@ -357,6 +358,7 @@ QVariantMap YouTubeBackend::check_playlists() {
     QVariantMap result;
     result["ok"]            = error.isEmpty();
     result["error"]         = error;
+    result["fileExists"]    = QFile::exists(m_dataRoot + "/" + kPlaylistsFileName);
     result["playlistCount"] = refs.size();
     return result;
 }

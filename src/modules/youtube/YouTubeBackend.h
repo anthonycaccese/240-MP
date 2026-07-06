@@ -32,7 +32,7 @@ public:
                             QObject *parent = nullptr);
 
     // Synchronous subscriptions-file check for the menu view:
-    // { ok: bool, error: QString, channelCount: int }
+    // { ok: bool, error: QString, fileExists: bool, channelCount: int }
     Q_INVOKABLE QVariantMap check_subscriptions();
 
     Q_INVOKABLE void load_subscriptions_feed(bool forceRefresh = false);
@@ -40,7 +40,7 @@ public:
     Q_INVOKABLE void load_channel_videos(const QString &channelId, bool forceRefresh = false);
 
     // Synchronous playlists-file check, mirroring check_subscriptions():
-    // { ok: bool, error: QString, playlistCount: int }
+    // { ok: bool, error: QString, fileExists: bool, playlistCount: int }
     Q_INVOKABLE QVariantMap check_playlists();
 
     Q_INVOKABLE void load_playlists(bool forceRefresh = false);
