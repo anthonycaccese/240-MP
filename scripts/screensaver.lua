@@ -1,4 +1,4 @@
--- Screen saver for 240-MP: bounces "240-MP" text across a solid black
+-- Screen saver for 240-MP: bounces the 240-MP logo across a solid black
 -- background when the video has been paused longer than the configured timeout.
 --
 -- Loaded by --script= only when screensaver_timeout != "OFF".
@@ -13,14 +13,47 @@ local assdraw = require("mp.assdraw")
 local timeout_sec = tonumber(mp.get_opt("screensaver_timeout") or "60") or 60
 local SPEED = 2
 
+-- ─── logo ─────────────────────────────────────────────────────────────────────
+-- Vector copy of assets/images/logo.svg (44x24 units, straight segments only,
+-- filled white) so the mpv screen saver bounces the same mark as the QML one.
+-- Subpath windings alternate, so the mask cutout and the shape inside it render
+-- as hole / fill under both the even-odd and nonzero fill rules.
+local LOGO_UNITS_W, LOGO_UNITS_H = 44, 24
+local LOGO_SUBPATHS = {
+    { 44,0, 44,24, 0,24, 0,0 },
+    { 8,15.5, 8,17.5, 10,17.5, 10,19.5, 34,19.5, 34,17.5, 36,17.5, 36,15.5,
+      38,15.5, 38,8.5, 36,8.5, 36,6.5, 34,6.5, 34,4.5, 28,4.5, 28,6.5,
+      26,6.5, 26,8.5, 24,8.5, 24,15.5, 26,15.5, 26,17.5, 18,17.5, 18,15.5,
+      20,15.5, 20,8.5, 18,8.5, 18,6.5, 16,6.5, 16,4.5, 10,4.5, 10,6.5,
+      8,6.5, 8,8.5, 6,8.5, 6,15.5 },
+    { 27,13.535, 26,13.535, 26,10.035, 27,10.035, 27,9.035, 28,9.035,
+      28,8.035, 29,8.035, 29,7.035, 33,7.035, 33,8.035, 34,8.035,
+      34,9.035, 35,9.035, 35,10.035, 36,10.035, 36,13.535, 35,13.535,
+      35,14.536, 34,14.536, 34,15.535, 33,15.535, 33,16.535, 29,16.535,
+      29,15.535, 28,15.535, 28,14.536, 27,14.536 },
+}
+
+-- Build the ASS drawing string at a pixel scale, origin 0,0 (\pos moves it)
+local function logo_drawing(scale)
+    local parts = {}
+    for _, sp in ipairs(LOGO_SUBPATHS) do
+        for i = 1, #sp, 2 do
+            parts[#parts + 1] = string.format("%s%.1f %.1f",
+                i == 1 and "m " or "l ", sp[i] * scale, sp[i + 1] * scale)
+        end
+    end
+    return table.concat(parts, " ")
+end
+
 -- ─── state ───────────────────────────────────────────────────────────────────
 local ss_active   = false
 local paused_sec  = 0
 local x, y   = 20, 20
 local vx, vy = SPEED, SPEED
--- Bounce box for "240-MP" at \fs108 (overlay units == OSD pixels)
-local TEXT_W  = 400
-local TEXT_H  = 120
+-- Set at activation: logo sized to 5% of OSD width (matching the QML overlay's
+-- sourceSize of root.sw * 0.05), drawing pre-scaled to pixels.
+local logo_w, logo_h = 0, 0
+local logo_path = ""
 
 -- ─── forward declarations ─────────────────────────────────────────────────────
 local activate, dismiss, anim_timer
@@ -38,11 +71,11 @@ local function draw_frame(w, h, tx, ty)
         "{\\bord0\\shad0\\1c&H000000&\\1a&H00&\\p1}m 0 0 l %d 0 l %d %d l 0 %d{\\p0}",
         w, w, h, h
     ))
-    -- Bouncing text on top
+    -- Bouncing logo on top
     a:new_event()
     a:append(string.format(
-        "{\\an7\\pos(%d,%d)\\fs108\\b1\\c&HFFFFFF&}240-MP{\\b0}",
-        math.floor(tx), math.floor(ty)
+        "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c&HFFFFFF&\\p1}%s{\\p0}",
+        math.floor(tx), math.floor(ty), logo_path
     ))
     overlay.res_x = w
     overlay.res_y = h
@@ -66,8 +99,13 @@ activate = function()
     if ww == 0 then ww = 640 end
     if wh == 0 then wh = 480 end
 
-    x = math.floor(math.random() * math.max(1, math.floor(ww / 2)))
-    y = math.floor(math.random() * math.max(1, math.floor(wh / 2)))
+    local scale = (ww * 0.1) / LOGO_UNITS_W
+    logo_w = LOGO_UNITS_W * scale
+    logo_h = LOGO_UNITS_H * scale
+    logo_path = logo_drawing(scale)
+
+    x = math.floor(math.random() * math.max(1, ww - logo_w))
+    y = math.floor(math.random() * math.max(1, wh - logo_h))
     vx = SPEED
     vy = SPEED
 
@@ -116,16 +154,16 @@ anim_timer = mp.add_periodic_timer(0.016, function()
     x = x + vx
     y = y + vy
 
-    if x + TEXT_W > ww then
-        x = ww - TEXT_W
+    if x + logo_w > ww then
+        x = ww - logo_w
         vx = -math.abs(vx)
     elseif x < 0 then
         x = 0
         vx = math.abs(vx)
     end
 
-    if y + TEXT_H > wh then
-        y = wh - TEXT_H
+    if y + logo_h > wh then
+        y = wh - logo_h
         vy = -math.abs(vy)
     elseif y < 0 then
         y = 0
