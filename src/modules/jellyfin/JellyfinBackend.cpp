@@ -1162,7 +1162,19 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
         m_currentPlaySessionId = playSessionId;
         m_currentPlayMethod    = QStringLiteral("Transcode");
 
-        QString fullUrl = m_serverUrl + transcodeUrl;
+        // Build the full URL. When the user selected OFF, strip any
+        // SubtitleStreamIndex and SubtitleMethod the server may have added
+        // from default metadata.
+        QUrl parsedUrl(m_serverUrl + transcodeUrl);
+        {
+            QUrlQuery q(parsedUrl);
+            if (subtitleStreamIndex < 0) {
+                q.removeAllQueryItems("SubtitleStreamIndex");
+                q.removeAllQueryItems("SubtitleMethod");
+            }
+            parsedUrl.setQuery(q);
+        }
+        QString fullUrl = parsedUrl.toString();
 
         // Pin the URL's PlaySessionId to the one we report with (they should
         // already match; this guarantees it even if the server differs).

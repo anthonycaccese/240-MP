@@ -347,7 +347,7 @@ FocusScope {
         }
         var subTrack
         if (subtitleIdx < 0)
-            subTrack = -1                 // off → forced subs only (matches Plex)
+            subTrack = -2                 // off → --sid=no
         else if (selectedSubUrl)
             subTrack = 0                  // selected sidecar is the first loaded sub-file
         else
@@ -363,9 +363,9 @@ FocusScope {
         if (isTranscoding) {
             // HLS manifest bakes in the selected audio, and the chosen subtitle is
             // burned into the video — so there's no soft sub track for mpv to pick
-            // (subTrack -1 = forced-only, a no-op when nothing soft exists).
+            // (subTrack -2 = --sid=no, a no-op when nothing soft exists).
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                       -1, -1, [], [], false, -1, 0.0, "")
+                                       -1, -2, [], [], false, -1, 0.0, "")
         } else {
             // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
             // --aid; subtitles come from buildSubArgs (sidecars + --sid).
