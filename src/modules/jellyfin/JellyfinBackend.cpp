@@ -1172,6 +1172,12 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
         {
             QUrlQuery q(parsedUrl);
             q.removeAllQueryItems("api_key");
+            // When the user selected OFF, strip any SubtitleStreamIndex and
+            // SubtitleMethod the server may have added from default metadata.
+            if (subtitleStreamIndex < 0) {
+                q.removeAllQueryItems("SubtitleStreamIndex");
+                q.removeAllQueryItems("SubtitleMethod");
+            }
             parsedUrl.setQuery(q);
         }
         QString fullUrl = parsedUrl.toString();
