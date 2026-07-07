@@ -209,9 +209,9 @@ At this point you can type `240mp` at any time to start up the app.  And if you 
 
 ### Update
 
-**From within the app (recommended):** go to `Settings → Software Update`, check for updates, download, and choose Apply & Restart — no SSH or keyboard needed. Your settings are retained.
+**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Restart. Your settings will be retained.
 
-> Installs made before in-app updates existed need to re-run the install script **once** (steps below) to pick up the new launcher; the Software Update screen will tell you if that's the case.
+> Installs made before in-app updates were possible need to re-run the install script **once** (just follow the steps below).  Doing that will pick up the new launcher.  There is a check on the Update screen that will let you know if that's the case for you.
 
 **Via the install script** (also works any time; your settings will be retained):
 
@@ -221,7 +221,7 @@ At this point you can type `240mp` at any time to start up the app.  And if you 
     bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/install.sh)
     ```
 3) When it asks to "`Install systemd autostart service? [y/N]`"
-    - If you already have autostart set up please answer `Y` (it keeps the app files owned by the service user, which in-app updates rely on)
+    - If you already have autostart set up please answer `Y` (that's needed to keep the app files owned by the service user, which in-app updates rely on)
     - If you don't have autostart installed and want to keep it that way just answer `N`
     - And if you want to turn on autostart please answer `Y`
 4) Once that completes just run `sudo reboot` and when your pi restarts you'll be on the latest version
@@ -262,14 +262,13 @@ If you don't have a Raspberry Pi and would like to try 240-MP, I also provide a 
 
 ### Update
 
-**From within the app (recommended):** go to `Settings → Software Update`, check for updates, download, and choose Apply & Relaunch — the app swaps itself in `/Applications` and reopens on the new version. Your settings are retained.
+**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Relaunch — the app will swap itself in `/Applications` and reopen on the new version. Your settings will be retained.
 
-Or manually (your settings will be retained):
+Or manually:
 1. Download the DMG archive from the latest release
-2. Mount it and move the 240mp.app into your Applications folder to overwrite your existing version. *Your existing configuration settings will be retained and it's safe to overwrite*
+2. Mount it and move the 240mp.app into your Applications folder to overwrite your existing version. *Your existing settings will be retained and it's safe to overwrite*
 
 ### Uninstall
 
 - Remove it just like you would any application on macOS
 - Remove the configuration files in `~/Library/Application Support/240-MP/`
-
