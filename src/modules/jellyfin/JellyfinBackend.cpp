@@ -1485,6 +1485,13 @@ void JellyfinBackend::probeCapabilities() {
     // First probe: use a null GUID — if the MediaSegments route exists
     // (plugin installed), the server returns a non-404 HTTP response.
     // If the route doesn't exist, ASP.NET returns 404.
+    //
+    // The non-404 on capable servers is because Jellyfin's GetItemById
+    // throws on an empty GUID (→ 400/500) before its item-not-found 404
+    // path is reached. If a future Jellyfin returns plain 404 for the
+    // empty GUID, this probe reports "no capability" and the skip settings
+    // stay hidden; switch to a /System/Info/Public version check (the
+    // MediaSegments API is core since 10.10) if that ever happens.
     QUrl url(m_serverUrl + "/MediaSegments/00000000-0000-0000-0000-000000000000");
     auto *reply = jellyfinGet(url);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -1521,16 +1528,22 @@ void JellyfinBackend::fetchSegments(const QString &itemId) {
         reply->deleteLater();
 
         // One-shot capability probe on first call (fallback if
-        // probeCapabilities failed or was never called)
+        // probeCapabilities failed or was never called). Like
+        // probeCapabilities, only latch on a definitive HTTP response —
+        // a transient network error (status 0) must not permanently mark
+        // the server as lacking the capability.
         if (!m_capabilitiesProbed) {
-            m_capabilitiesProbed = true;
-            m_hasCapability = (reply->error() == QNetworkReply::NoError);
-            if (m_hasCapability) {
-                emit dynamicOptionsReady("_capabilities",
-                    QVariantList{QString("mediasegments")});
-            } else {
-                emit dynamicOptionsReady("_capabilities", QVariantList{});
-                return;  // no segments to process, server doesn't support it
+            int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status >= 200) {
+                m_capabilitiesProbed = true;
+                m_hasCapability = (status != 404);
+                if (m_hasCapability) {
+                    emit dynamicOptionsReady("_capabilities",
+                        QVariantList{QString("mediasegments")});
+                } else {
+                    emit dynamicOptionsReady("_capabilities", QVariantList{});
+                    return;  // no segments to process, server doesn't support it
+                }
             }
         }
 

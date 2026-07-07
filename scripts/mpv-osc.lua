@@ -372,4 +372,7 @@ mp.add_key_binding("BS",  "bg-bs",  function() mp.command("quit") end)
 
 mp.register_script_message("skip-overlay-state", function(state)
     skip_active = (state == "1")
+    -- Land focus on SKIP (first button) so ENTER skips immediately —
+    -- focus_btn otherwise persists from the last menu interaction.
+    if skip_active then focus_btn = 1 end
 end)
