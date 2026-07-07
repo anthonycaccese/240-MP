@@ -49,9 +49,9 @@ FocusScope {
         case "upToDate":        return "You're up to date"
         case "updateAvailable": return "Update available"
         case "downloading":     return "Downloading... " + Math.round((updateManager ? updateManager.downloadProgress : 0) * 100) + "%"
-        case "readyToApply":    return latestVersion + " downloaded and ready to install"
+        case "readyToApply":    return latestVersion + " ready to install"
         case "error":           return errorMessage
-        default:                return "Check GitHub for a newer version"
+        default:                return "Press " + root.hints.select + " to check for latest"
         }
     }
 
@@ -95,9 +95,9 @@ FocusScope {
 
     // Header
     AppBar {
-        iconSource: "../../assets/images/settings.svg"
-        title: "Software Update"
-        subtitle: root.appVersion
+        iconSource: "../../assets/images/update.svg"
+        title: "Update"
+        //subtitle: root.appVersion
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.125 //60
@@ -153,7 +153,7 @@ FocusScope {
             Text {
                 width: parent.width
                 text: updateRoot.statusText
-                color: updateRoot.updState === "error" ? root.accentColor : root.primaryColor
+                color: root.accentColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
                 wrapMode: Text.WordWrap
@@ -167,6 +167,7 @@ FocusScope {
                 text: updateRoot.hintText
                 color: root.secondaryColor
                 font.family: root.globalFont
+                font.capitalization: Font.AllUppercase
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 font.pixelSize: root.sh * 0.0291667 //14
             }
@@ -193,7 +194,7 @@ FocusScope {
             Rectangle {
                 visible: updateRoot.releaseNotes !== ""
                 width: parent.width
-                height: root.sh * 0.3 //144
+                height: root.sh * 0.3291667 //158
                 property color baseColor: root.primaryColor
                 color: Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
 
