@@ -228,7 +228,10 @@ FocusScope {
     function reportStopped(finalPositionMs, finalDurationMs, failed) {
         if (stoppedReported) return
         stoppedReported = true
-        var pos = lastKnownPositionMs || finalPositionMs
+        // Fall back to viewOffset when playback never reported a position
+        // (canceled resume overlay, back during LOADING): Stopped with
+        // PositionTicks=0 would wipe the server-side resume point.
+        var pos = lastKnownPositionMs || finalPositionMs || viewOffset
         jellyfinBackend.report_playback_stopped(itemId, mediaSourceId, msToTicks(pos), failed || false)
     }
 

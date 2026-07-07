@@ -24,7 +24,7 @@
       "type": "list_single",
       "options_source": "dynamic",
       "options_slot": "getVideoQualities",
-      "default": "720p",
+      "default": "auto",
       "requires_auth": true
     },
     {

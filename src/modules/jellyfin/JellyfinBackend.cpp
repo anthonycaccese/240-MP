@@ -148,7 +148,7 @@ QJsonObject JellyfinBackend::moduleConfig() const {
 }
 
 int JellyfinBackend::videoQualityBitrate() const {
-    QString quality = moduleConfig()["video_quality"].toString("720p");
+    QString quality = moduleConfig()["video_quality"].toString("auto");
     if (quality == QLatin1String("auto"))  return 0; // direct play — no cap
     if (quality == QLatin1String("1080p")) return 10000000;
     if (quality == QLatin1String("720p"))  return 6000000;
@@ -157,7 +157,7 @@ int JellyfinBackend::videoQualityBitrate() const {
 }
 
 int JellyfinBackend::videoQualityMaxHeight() const {
-    QString quality = moduleConfig()["video_quality"].toString("720p");
+    QString quality = moduleConfig()["video_quality"].toString("auto");
     if (quality == QLatin1String("auto"))  return 0; // direct play — no cap
     if (quality == QLatin1String("1080p")) return 1080;
     if (quality == QLatin1String("720p"))  return 720;
@@ -1013,7 +1013,7 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
     // HLS transcode. forceTranscode overrides "auto" for a fallback retry after
     // a direct-play failure (see Player.qml onPlaybackEnded).
     const bool directPlay = !forceTranscode
-                          && (moduleConfig()["video_quality"].toString("720p")
+                          && (moduleConfig()["video_quality"].toString("auto")
                               == QLatin1String("auto"));
     const int maxBitrate = videoQualityBitrate();
     const int maxHeight  = videoQualityMaxHeight();
@@ -1065,6 +1065,7 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
         addEmbed("ass");
         addEmbed("ssa");
         addEmbed("vtt");
+        addEmbed("webvtt");
         addEmbed("mov_text");
         addEmbed("pgssub");
         addEmbed("dvbsub");
@@ -1094,14 +1095,15 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
     profile["SubtitleProfiles"] = subtitleProfiles;
     QJsonArray directPlayProfiles;
     if (directPlay) {
-        // mpv plays virtually anything — advertise broad support so the server
-        // direct-plays compatible files instead of transcoding. An empty array
-        // (transcode mode) tells the server nothing can be direct-played.
+        // mpv plays virtually anything, so advertise a match-all profile —
+        // omitted Container/VideoCodec/AudioCodec fields match every value in
+        // Jellyfin's profile matcher. A codec whitelist here silently forced
+        // transcodes on exact-name misses (pcm_s16le vs pcm, webvtt vs vtt, …).
+        // If mpv truly can't play a file, the transcode retry in Player.qml
+        // onPlaybackEnded is the safety net. An empty array (transcode mode)
+        // tells the server nothing can be direct-played.
         QJsonObject dp;
-        dp["Type"]       = QStringLiteral("Video");
-        dp["Container"]  = QStringLiteral("mp4,mkv,webm,avi,mov,m4v,ts,mpegts,flv,wmv,3gp,mpg,mpeg,ogv,m2ts");
-        dp["VideoCodec"] = QStringLiteral("h264,hevc,h265,mpeg4,mpeg2video,vc1,vp8,vp9,av1");
-        dp["AudioCodec"] = QStringLiteral("aac,ac3,eac3,mp3,mp2,dts,flac,vorbis,opus,pcm,truehd,alac");
+        dp["Type"] = QStringLiteral("Video");
         directPlayProfiles.append(dp);
     }
     profile["DirectPlayProfiles"] = directPlayProfiles;
@@ -1154,6 +1156,22 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
 
         // Transcode path — used for the bitrate tiers, and as a graceful
         // fallback when the server reports the source can't be direct-played.
+        if (directPlay) {
+            // TranscodeReasons is an array of strings on older servers, a
+            // comma-joined flags string on 10.9+.
+            const QJsonValue tr = source["TranscodeReasons"];
+            QString reasons = tr.toString();
+            if (tr.isArray()) {
+                QStringList list;
+                for (const QJsonValue &r : tr.toArray())
+                    list << r.toString();
+                reasons = list.join(", ");
+            }
+            qWarning("[Jellyfin] direct play denied (SupportsDirectPlay=%d SupportsDirectStream=%d): %s",
+                     source["SupportsDirectPlay"].toBool(),
+                     source["SupportsDirectStream"].toBool(),
+                     reasons.isEmpty() ? "no TranscodeReasons given" : qPrintable(reasons));
+        }
         QString transcodeUrl = source["TranscodingUrl"].toString();
         if (transcodeUrl.isEmpty()) {
             emit errorOccurred("NO TRANSCODE URL");
@@ -1371,11 +1389,16 @@ void JellyfinBackend::report_playback_stopped(const QString &itemId, const QStri
 
     QUrl url(m_serverUrl + "/Sessions/Playing/Stopped");
     auto *reply = jellyfinPost(url, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    // Only clear the session id if it's still the one we reported on — the
+    // transcode retry in Player.qml starts a new session right after reporting
+    // the failed one stopped, and this reply may land after that.
+    const QString reportedSessionId = m_currentPlaySessionId;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, reportedSessionId]() {
         if (reply->error() != QNetworkReply::NoError)
             qWarning("[Jellyfin] report stopped failed: %s", qPrintable(reply->errorString()));
         reply->deleteLater();
-        m_currentPlaySessionId.clear();
+        if (m_currentPlaySessionId == reportedSessionId)
+            m_currentPlaySessionId.clear();
     });
 }
 
