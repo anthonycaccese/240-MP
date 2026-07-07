@@ -48,7 +48,8 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR};${SDL2_PREFIX}" \
-            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install"
+            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install" \
+            -DAPP_VERSION="${{ github.ref_name }}"
 
       - name: Build
         run: cmake --build build --parallel
@@ -159,7 +160,8 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install/usr/local"
+            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install/usr/local" \
+            -DAPP_VERSION="${{ github.ref_name }}"
 
       - name: Build
         run: cmake --build build --parallel
@@ -198,6 +200,15 @@ jobs:
         with:
           path: artifacts
 
+      # Basenames only ("<sha256>  <file>") so clients can `sha256sum -c` a
+      # single line next to the downloaded asset. The in-app updater and the
+      # RPi launcher's staged-update apply both verify against this file.
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum dmg-arm64/*.dmg tarball-linux-arm64/*.tar.gz \
+            | sed 's|  .*/|  |' > SHA256SUMS
+
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
@@ -208,6 +219,7 @@ jobs:
           files: |
             artifacts/dmg-arm64/*.dmg
             artifacts/tarball-linux-arm64/*.tar.gz
+            artifacts/SHA256SUMS
             scripts/install.sh
           body: |
             ### Downloads:

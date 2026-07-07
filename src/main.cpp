@@ -19,6 +19,7 @@
 #include "player/MpvController.h"
 #include "input/InputManager.h"
 #include "input/IdleTracker.h"
+#include "update/UpdateManager.h"
 #ifdef Q_OS_MAC
 #include "macos_utils.h"
 #endif
@@ -53,7 +54,7 @@ static QString resolveDataRoot() {
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("240-MP");
-    app.setApplicationVersion("2026.07.04");
+    app.setApplicationVersion(QStringLiteral(APP_VERSION));
 
     // Hide cursor — 240-MP is keyboard-only so the cursor serves no purpose.
     // On Linux, only hide on headless EGLFS (not desktop X11/Wayland sessions).
@@ -87,6 +88,7 @@ int main(int argc, char *argv[]) {
     MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
+    UpdateManager       updateManager(appRoot, dataRoot);
 
     // When the Qt window is inactive (fullscreen mpv has OS focus on macOS),
     // gamepad actions bypass QML and drive mpv directly over IPC.
@@ -107,6 +109,7 @@ int main(int argc, char *argv[]) {
     ctx->setContextProperty("appCore",       &appCore);
     ctx->setContextProperty("mpvController", &mpvController);
     ctx->setContextProperty("inputManager",  &inputManager);
+    ctx->setContextProperty("updateManager", &updateManager);
 #ifdef Q_OS_MAC
     // QVariant(0), not literal 0 — a bare 0 is a null pointer constant and
     // resolves to the QObject* overload, handing QML null instead of an int.

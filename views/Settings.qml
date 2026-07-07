@@ -142,6 +142,13 @@ FocusScope {
 
         // SYSTEM section
         items.push({ type: "section", label: "System" })
+        items.push({
+            type: "submenu",
+            key: "software_update",
+            label: "Software Update",
+            description: "Check for and install new versions of 240-MP",
+            moduleId: ""
+        })
         items.push({ type: "quit", label: "Quit 240-MP" })
 
         settingsItems = items
@@ -247,7 +254,10 @@ FocusScope {
         Keys.onReturnPressed: {
             var row = settingsItems[currentIndex]
             if (row && row.type === "submenu") {
-                settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
+                if (row.key === "software_update")
+                    settingsRoot.navigateTo("views/Update.qml", {}, { currentIndex: settingsList.currentIndex })
+                else
+                    settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
             } else if (row && row.type === "quit") {
                 settingsRoot.quitChoiceIndex = 0
                 settingsRoot.quitOverlayVisible = true

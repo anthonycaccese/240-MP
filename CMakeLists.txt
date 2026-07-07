@@ -8,6 +8,10 @@ set(CMAKE_AUTOMOC ON)
 # Strip qDebug(...) calls in Release builds to reduce CPU/disk noise on Pi
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DQT_NO_DEBUG_OUTPUT")
 
+# Release version string. CI passes the git tag (-DAPP_VERSION=vX.Y.Z); local
+# builds report "dev", which disables the in-app self-update download path.
+set(APP_VERSION "dev" CACHE STRING "Release version (CI passes the git tag)")
+
 include(GNUInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
@@ -36,8 +40,11 @@ add_executable(240mp
     src/player/MpvController.cpp
     src/input/InputManager.cpp
     src/input/IdleTracker.cpp
+    src/update/UpdateManager.cpp
     $<$<BOOL:${APPLE}>:src/macos_utils.mm>
 )
+
+target_compile_definitions(240mp PRIVATE APP_VERSION="${APP_VERSION}")
 
 target_link_libraries(240mp PRIVATE
     Qt6::Core

@@ -57,6 +57,18 @@ echo 'KERNEL=="tty0", GROUP="tty", MODE="0620"' \
 sudo udevadm control --reload-rules
 sudo udevadm trigger /dev/tty0
 
+# ── Choose install owner ──────────────────────────────────────────────────────
+# Asked up front so the extract step can hand /opt/240mp to the user the app
+# will run as — the launcher applies in-app staged updates there without root.
+echo ""
+read -r -p "Install systemd autostart service? [y/N] " AUTOSTART_REPLY
+SERVICE_USER=""
+if [[ "${AUTOSTART_REPLY}" =~ ^[Yy]$ ]]; then
+    read -r -p "Run service as user [default: pi]: " SERVICE_USER
+    SERVICE_USER="${SERVICE_USER:-pi}"
+fi
+OWNER_USER="${SERVICE_USER:-$USER}"
+
 # ── Download tarball ───────────────────────────────────────────────────────────
 echo "Downloading ${TARBALL}..."
 TMP_DIR=$(mktemp -d)
@@ -73,12 +85,64 @@ sudo tar -xzf "${TMP_DIR}/${TARBALL}" \
     --strip-components=3 \
     -C "${INSTALL_DIR}"
 
+# Owned by the running user so the launcher can swap in staged in-app updates.
+sudo chown -R "${OWNER_USER}:" "${INSTALL_DIR}"
+
 # ── Create launcher ────────────────────────────────────────────────────────────
 echo "Creating launcher at ${LAUNCHER}..."
 sudo tee "${LAUNCHER}" > /dev/null << 'LAUNCHER_SCRIPT'
 #!/usr/bin/env bash
-# 240-MP launcher — auto-detects display platform
+# 240-MP launcher — applies staged in-app updates, then auto-detects the
+# display platform and execs the binary.
 INSTALL_DIR="/opt/240mp"
+
+# Tells the app this launcher knows how to apply staged updates; the in-app
+# updater refuses to stage anything without it (older installs must re-run
+# this installer once to pick up the launcher/240mp-stop contract).
+export MP240_LAUNCHER_API=1
+
+# ── Apply a staged in-app update ───────────────────────────────────────────────
+# The app downloads the release tarball to DATA_ROOT/updates and writes
+# staged.sha256 ("<sha256>  <tarball>", coreutils format). Applied here, before
+# exec, so it works identically for manual runs, desktop sessions, and the
+# autostart service (which relaunches through this script on exit code 11 —
+# see 240mp-stop). Mirror any DATA_ROOT override into the app's environment
+# (e.g. the systemd unit) or this block won't find the staging directory.
+UPDATES_DIR="${DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/240-MP}/updates"
+
+# Crash recovery: a previous apply died between the child renames below.
+if [ ! -x "$INSTALL_DIR/bin/240mp" ] && [ -x "$INSTALL_DIR/.new/bin/240mp" ]; then
+    for d in "$INSTALL_DIR"/.new/*; do mv -f "$d" "$INSTALL_DIR/"; done
+    rm -rf "$INSTALL_DIR/.new" "$INSTALL_DIR/.old"
+fi
+
+if [ -f "$UPDATES_DIR/staged.sha256" ] && [ -w "$INSTALL_DIR" ]; then
+    if ( cd "$UPDATES_DIR" && sha256sum -c --status staged.sha256 ); then
+        STAGED_TARBALL=$(awk '{print $2}' "$UPDATES_DIR/staged.sha256")
+        rm -rf "$INSTALL_DIR/.new" "$INSTALL_DIR/.old"
+        mkdir -p "$INSTALL_DIR/.new" "$INSTALL_DIR/.old"
+        # Extract fully, then swap top-level dirs (bin, share) via rename —
+        # shrinks the power-loss window from the whole extraction to two mv's,
+        # and drops files that no longer exist in the new release.
+        if tar -xzf "$UPDATES_DIR/$STAGED_TARBALL" --strip-components=3 -C "$INSTALL_DIR/.new" \
+           && [ -x "$INSTALL_DIR/.new/bin/240mp" ]; then
+            for d in "$INSTALL_DIR"/.new/*; do
+                name=$(basename "$d")
+                [ -e "$INSTALL_DIR/$name" ] && mv "$INSTALL_DIR/$name" "$INSTALL_DIR/.old/$name"
+                mv "$d" "$INSTALL_DIR/$name"
+            done
+            rm -rf "$INSTALL_DIR/.new" "$INSTALL_DIR/.old"
+            rm -f "$UPDATES_DIR/$STAGED_TARBALL" "$UPDATES_DIR/staged.sha256" "$UPDATES_DIR/staged.json"
+        else
+            # Bad extract: keep the old tree; .failed stops a retry every boot.
+            rm -rf "$INSTALL_DIR/.new" "$INSTALL_DIR/.old"
+            mv -f "$UPDATES_DIR/staged.sha256" "$UPDATES_DIR/staged.sha256.failed" 2>/dev/null
+        fi
+    else
+        # Corrupt/partial stage — discard; the app re-offers the update.
+        rm -f "$UPDATES_DIR/staged.sha256" "$UPDATES_DIR/staged.json"
+    fi
+fi
 
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
     QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
@@ -126,12 +190,7 @@ LAUNCHER_SCRIPT
 sudo chmod +x "${LAUNCHER}"
 
 # ── Optional: systemd autostart ───────────────────────────────────────────────
-echo ""
-read -r -p "Install systemd autostart service? [y/N] " REPLY
-if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
-    read -r -p "Run service as user [default: pi]: " SERVICE_USER
-    SERVICE_USER="${SERVICE_USER:-pi}"
-
+if [[ "${AUTOSTART_REPLY}" =~ ^[Yy]$ ]]; then
     sudo tee "${SYSTEMD_SERVICE}" > /dev/null << UNIT
 [Unit]
 Description=240-MP Media Player
@@ -164,11 +223,16 @@ UNIT
     # before; exit 10 means the user chose "Exit to Terminal", so instead spawn a
     # login shell on tty1 (see views/Settings.qml). RestartPreventExitStatus=10
     # keeps Restart=on-failure from relaunching the app over that shell.
+    # Exit 11 is "Apply & Restart" from the in-app updater (views/Update.qml):
+    # do nothing here — it's a failure status, so Restart=on-failure relaunches
+    # through the launcher, which applies the staged update before exec.
     sudo tee /usr/local/bin/240mp-stop > /dev/null << 'STOP_HELPER'
 #!/usr/bin/env bash
 # Called by 240mp.service ExecStopPost. systemd sets $EXIT_STATUS to the app's exit code.
 if [ "${EXIT_STATUS:-}" = "10" ]; then
     systemctl start 240mp-terminal.service
+elif [ "${EXIT_STATUS:-}" = "11" ]; then
+    :   # in-app update restart — Restart=on-failure brings the app back up
 else
     systemctl poweroff
 fi
