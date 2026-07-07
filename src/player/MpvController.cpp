@@ -155,9 +155,13 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     const bool hasOscScript = QFile::exists(oscScript);
 
     // Stamp the log file so each session is identifiable when tailing over SSH.
+    // Owner-only perms: mpv logs its command line (incl. auth headers) at verbose
+    // level into --log-file, and it truncates rather than recreates the file — so
+    // permissions set here survive the mpv session.
     {
         QFile lf(m_logFilePath);
         if (lf.open(QFile::Append | QFile::Text)) {
+            lf.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
             QString safeUrl = url;
             safeUrl.replace(QRegularExpression("Api[_-]?Key=[^&\\s]+", QRegularExpression::CaseInsensitiveOption), "ApiKey=REDACTED");
             safeUrl.replace(QRegularExpression("X-Plex-Token:[^\\s]+"), "X-Plex-Token=REDACTED");
@@ -240,6 +244,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         }
         QFile sf(m_subInfoPath);
         if (!info.isEmpty() && sf.open(QFile::WriteOnly | QFile::Truncate)) {
+            sf.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
             sf.write(QJsonDocument(info).toJson(QJsonDocument::Compact));
             sf.close();
             // Path is comma- and space-free, so it is safe in the script-opts list.

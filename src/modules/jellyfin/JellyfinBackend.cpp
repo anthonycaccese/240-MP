@@ -570,32 +570,6 @@ QVariantMap JellyfinBackend::formatItem(const QJsonObject &item) const {
     return map;
 }
 
-// ---------------------------------------------------------------------------
-// URL helpers
-// ---------------------------------------------------------------------------
-
-QString JellyfinBackend::buildImageUrl(const QString &itemId, const QString &imageType,
-                                       const QString &imageTag, int width, int height) const {
-    if (m_serverUrl.isEmpty() || m_accessToken.isEmpty())
-        return QString();
-
-    QUrlQuery q;
-    if (!imageTag.isEmpty())
-        q.addQueryItem("tag", imageTag);
-    if (width > 0)
-        q.addQueryItem("fillWidth", QString::number(width));
-    if (height > 0)
-        q.addQueryItem("fillHeight", QString::number(height));
-
-    QString url = m_serverUrl + "/Items/" + itemId + "/Images/" + imageType;
-    if (!q.isEmpty())
-        url += "?" + q.toString(QUrl::FullyEncoded);
-    return url;
-}
-
-QString JellyfinBackend::image_url(const QString &itemId, const QString &imageType, int width, int height) {
-    return buildImageUrl(itemId, imageType, QString(), width, height);
-}
 
 // ---------------------------------------------------------------------------
 // Browse
@@ -1169,7 +1143,12 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
         QUrl parsedUrl(m_serverUrl + transcodeUrl);
         {
             QUrlQuery q(parsedUrl);
-            q.removeAllQueryItems("api_key");
+            const auto items = q.queryItems();
+            for (const auto &kv : items) {
+                if (kv.first.compare(QLatin1String("api_key"), Qt::CaseInsensitive) == 0 ||
+                    kv.first.compare(QLatin1String("apikey"),  Qt::CaseInsensitive) == 0)
+                    q.removeAllQueryItems(kv.first);
+            }
             parsedUrl.setQuery(q);
         }
         QString fullUrl = parsedUrl.toString();

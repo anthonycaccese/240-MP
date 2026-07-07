@@ -50,7 +50,6 @@ public:
     Q_INVOKABLE void report_playback_start(const QString &itemId, const QString &mediaSourceId, const QString &audioStreamId, const QString &subtitleStreamId, qint64 startPositionTicks = 0);
 
     // URL helpers for QML
-    Q_INVOKABLE QString image_url(const QString &itemId, const QString &imageType, int width, int height);
     Q_INVOKABLE QString get_access_token() const { return m_accessToken; }
 
     // Settings
@@ -120,7 +119,6 @@ private:
     void probeHasItems(const QUrl &url, std::function<void(bool)> cb);
 
     QVariantMap formatItem(const QJsonObject &item) const;
-    QString buildImageUrl(const QString &itemId, const QString &imageType, const QString &imageTag, int width, int height) const;
 
     void ignoreSslErrors(QNetworkReply *reply) const;
 
