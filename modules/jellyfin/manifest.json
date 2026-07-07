@@ -44,6 +44,26 @@
       "requires_auth": true
     },
     {
+      "key": "intro_skip",
+      "label": "Intro Skip",
+      "type": "list_single",
+      "options": ["Off", "Auto", "Button"],
+      "default": "Off",
+      "requires_auth": true,
+      "requires_capability": "mediasegments",
+      "description": "Requires the Jellyfin Intro Skipper plugin on your server"
+    },
+    {
+      "key": "outro_skip",
+      "label": "Credit Skip",
+      "type": "list_single",
+      "options": ["Off", "Auto", "Button"],
+      "default": "Off",
+      "requires_auth": true,
+      "requires_capability": "mediasegments",
+      "description": "Requires the Jellyfin Intro Skipper plugin on your server"
+    },
+    {
       "key": "logout",
       "label": "Sign out",
       "type": "action",

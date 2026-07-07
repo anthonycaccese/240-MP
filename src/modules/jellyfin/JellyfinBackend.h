@@ -49,8 +49,12 @@ public:
     Q_INVOKABLE void report_playback_stopped(const QString &itemId, const QString &mediaSourceId, qint64 positionTicks, bool failed = false);
     Q_INVOKABLE void report_playback_start(const QString &itemId, const QString &mediaSourceId, const QString &audioStreamId, const QString &subtitleStreamId, qint64 startPositionTicks = 0);
 
+    // Intro/outro skip — MediaSegments API
+    Q_INVOKABLE void fetchSegments(const QString &itemId);
+    Q_INVOKABLE void probeCapabilities();
+
     // URL helpers for QML
-    Q_INVOKABLE QString image_url(const QString &itemId, const QString &imageType, int width, int height);
+    Q_INVOKABLE QString get_access_token() const { return m_accessToken; }
 
     // Settings
     Q_INVOKABLE QString get_auth_state();
@@ -82,6 +86,7 @@ signals:
     void seriesNextUpReady(const QVariantMap &detail);
     void streamUrlReady(const QString &url);
     void dynamicOptionsReady(const QString &key, const QVariant &options);
+    void segmentsReady(const QString &itemId, const QVariantList &segments);
     void errorOccurred(const QString &message);
     void logoutComplete();
     void authRevoked();
@@ -119,6 +124,8 @@ private:
     QString m_lastSubLang;
     int m_lastAudioLangIdx = -1;
     int m_lastSubLangIdx = -1;
+    bool m_capabilitiesProbed = false;
+    bool m_hasCapability = false;
 
     static QString normalizeServerUrl(const QString &url);
 
@@ -130,7 +137,6 @@ private:
     void probeHasItems(const QUrl &url, std::function<void(bool)> cb);
 
     QVariantMap formatItem(const QJsonObject &item) const;
-    QString buildImageUrl(const QString &itemId, const QString &imageType, const QString &imageTag, int width, int height) const;
 
     void ignoreSslErrors(QNetworkReply *reply) const;
 

@@ -35,6 +35,7 @@ add_executable(240mp
     src/modules/youtube/YouTubeBackend.cpp
     src/player/MpvController.cpp
     src/input/InputManager.cpp
+    src/input/IdleTracker.cpp
     $<$<BOOL:${APPLE}>:src/macos_utils.mm>
 )
 

@@ -18,6 +18,7 @@
 #include "modules/youtube/YouTubeBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
+#include "input/IdleTracker.h"
 #ifdef Q_OS_MAC
 #include "macos_utils.h"
 #endif
@@ -85,6 +86,7 @@ int main(int argc, char *argv[]) {
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
+    IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
 
     // When the Qt window is inactive (fullscreen mpv has OS focus on macOS),
     // gamepad actions bypass QML and drive mpv directly over IPC.
@@ -101,6 +103,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.ambient_mode", "ambientModeBackend", &ambientMode, ctx);
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
 
+    ctx->setContextProperty("idleTracker",   &idleTracker);
     ctx->setContextProperty("appCore",       &appCore);
     ctx->setContextProperty("mpvController", &mpvController);
     ctx->setContextProperty("inputManager",  &inputManager);

@@ -112,6 +112,18 @@ FocusScope {
             moduleId: ""
         })
 
+        // SCREEN SAVER section — single control: OFF disables, a number sets the
+        // timeout for both menu idle and playback pause (handled inside mpv).
+        items.push({
+            type: "list_single",
+            key: "screensaver_timeout",
+            label: "Screen Saver",
+            options: ["OFF", "30", "60", "120"],
+            value: appSettings["screensaver_timeout"] || "OFF",
+            description: "Prevent CRT burn-in after seconds of inactivity or pause",
+            moduleId: ""
+        })
+
         // MODULES section — only show modules with has_settings
         var hasModuleSettings = false
         for (var i = 0; i < installedModules.length; i++) {

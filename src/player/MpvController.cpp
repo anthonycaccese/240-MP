@@ -79,6 +79,7 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
         sendCommand({"observe_property", 1, "time-pos"});
         sendCommand({"observe_property", 2, "duration"});
         sendCommand({"observe_property", 3, "playlist-pos"});
+        sendCommand({"observe_property", 4, "pause"});
     });
     connect(m_ipc, &QLocalSocket::readyRead, this, &MpvController::onIpcReadyRead);
 
@@ -88,10 +89,14 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
 
     // Watchdog: fires every 10 s; logs a warning if no IPC time-pos event has
     // arrived for 30 s while connected — strong indicator of a playback freeze.
+    // Exempt while paused: time-pos is legitimately silent then (a long pause is
+    // a normal state now that the screen saver runs over it), and the unpause
+    // property-change event refreshes m_lastIpcEventMs so the 30 s window
+    // restarts fresh on resume.
     m_watchdogTimer = new QTimer(this);
     m_watchdogTimer->setInterval(10000);
     connect(m_watchdogTimer, &QTimer::timeout, this, [this] {
-        if (m_ipc->state() != QLocalSocket::ConnectedState) return;
+        if (m_ipc->state() != QLocalSocket::ConnectedState || m_paused) return;
         qint64 silenceMs = QDateTime::currentMSecsSinceEpoch() - m_lastIpcEventMs;
         if (silenceMs > 30000) {
             qWarning("[MpvController] WATCHDOG: no IPC time-pos event for %lld s — possible freeze",
@@ -115,7 +120,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  const QString &plexToken, bool muteAudio,
                                  const QString &oscMode, bool shuffle,
                                  const QStringList &subTitles, float imageDurationSec,
-                                 bool imageContent, const QStringList &extraArgs) {
+                                 bool imageContent, const QStringList &extraArgs, const QString &jellyfinToken) {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -131,6 +136,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     m_position    = 0;
     m_duration    = 0;
     m_playlistPos = -1;
+    m_paused      = false;
     m_lastEndFileReason.clear();
 
 #ifdef Q_OS_MACOS
@@ -158,9 +164,13 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     const QString oscScript = m_appRoot + "/scripts/" + ((oscMode == "ambient") ? "ambient-osc.lua" : "mpv-osc.lua");
 
     // Stamp the log file so each session is identifiable when tailing over SSH.
+    // Owner-only perms: mpv logs its command line (incl. auth headers) at verbose
+    // level into --log-file, and it truncates rather than recreates the file — so
+    // permissions set here survive the mpv session.
     {
         QFile lf(m_logFilePath);
         if (lf.open(QFile::Append | QFile::Text)) {
+            lf.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
             QString safeUrl = url;
             safeUrl.replace(QRegularExpression("Api[_-]?Key=[^&\\s]+", QRegularExpression::CaseInsensitiveOption), "ApiKey=REDACTED");
             safeUrl.replace(QRegularExpression("X-Plex-Token[=:][^&\\s]+"), "X-Plex-Token=REDACTED");
@@ -186,6 +196,19 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // media keys work anytime mpv is playing, not just inside a given module.
     if (m_hasMediaKeysScript)
         args << QString("--script=%1").arg(m_appRoot + "/scripts/media-keys.lua");
+
+    // Screen saver Lua script — only loaded when the user has opted in via the
+    // screensaver_timeout setting (a positive number of seconds; "OFF" parses
+    // to 0 and disables). The timeout reaches the script via scriptOpts below.
+    int screensaverTimeout = 0;
+    if (m_appCore) {
+        const int n = m_appCore->get_setting(QString(), "screensaver_timeout").toString().toInt();
+        const QString ssScript = m_appRoot + "/scripts/screensaver.lua";
+        if (n > 0 && QFile::exists(ssScript)) {
+            screensaverTimeout = n;
+            args << QString("--script=%1").arg(ssScript);
+        }
+    }
 
     // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
     // primary plane between two consecutive same-size/format stills, so a photo
@@ -228,11 +251,13 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
+    if (screensaverTimeout > 0)
+        scriptOpts << QString("screensaver_timeout=%1").arg(screensaverTimeout);
 
     // Hand the OSC a map of external sub-file URL -> friendly track name so it can show
-    // the real subtitle name. mpv otherwise titles an external sub from its URL basename,
-    // which for Jellyfin sidecars is an opaque "Stream.srt?api_key=...". Purely cosmetic —
-    // it does not affect which sub mpv loads or selects.
+    // the real subtitle name. mpv otherwise titles an external sub from its URL basename
+    // (e.g. "Stream.srt" for Jellyfin sidecars). Purely cosmetic — it does not affect
+    // which sub mpv loads or selects.
     QFile::remove(m_subInfoPath);
     if (!subTitles.isEmpty() && subTitles.size() == subFiles.size()) {
         QJsonObject info;
@@ -242,6 +267,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         }
         QFile sf(m_subInfoPath);
         if (!info.isEmpty() && sf.open(QFile::WriteOnly | QFile::Truncate)) {
+            sf.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
             sf.write(QJsonDocument(info).toJson(QJsonDocument::Compact));
             sf.close();
             // Path is comma- and space-free, so it is safe in the script-opts list.
@@ -275,6 +301,9 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     args << extraArgs;
     if (!plexToken.isEmpty()) {
         args << QString("--http-header-fields=X-Plex-Token:%1").arg(plexToken);
+    }
+    if (!jellyfinToken.isEmpty()) {
+        args << QString("--http-header-fields=Authorization:MediaBrowser Token=\"%1\"").arg(jellyfinToken);
     }
 
     // plex.direct certs are Let's Encrypt-signed but ffmpeg's bundled CA bundle
@@ -420,7 +449,14 @@ void MpvController::sendKey(const QString &key) {
     sendCommand({"keypress", key});
 }
 
+void MpvController::showOsdSkipPrompt() {
+    sendCommand({"script-message", "skip-overlay-state", "1"});
+    sendCommand({"keypress", "DOWN"});
+}
 
+void MpvController::clearOsdPrompt() {
+    sendCommand({"script-message", "skip-overlay-state", "0"});
+}
 
 void MpvController::tryConnectIpc() {
     if (m_ipc->state() == QLocalSocket::ConnectedState ||
@@ -441,8 +477,16 @@ void MpvController::onIpcReadyRead() {
             // mpv reports why playback ended: "eof" (played to the end),
             // "quit"/"stop" (user exited), "error", etc. Remember the last one
             // so onProcessFinished can distinguish a natural finish from a quit.
-            if (event == "end-file")
+            if (event == "end-file") {
                 m_lastEndFileReason = obj["reason"].toString();
+            } else if (event == "client-message") {
+                const QJsonArray args = obj["args"].toArray();
+                if (args.size() > 0) {
+                    const QString msg = args[0].toString();
+                    if (msg == "skip-segment")
+                        emit skipRequested();
+                }
+            }
             continue;
         }
 
@@ -451,6 +495,10 @@ void MpvController::onIpcReadyRead() {
         const QString     name = obj["name"].toString();
         const QJsonValue  data = obj["data"];
         if (data.isNull() || data.isUndefined()) continue; // property unavailable during shutdown
+        if (name == "pause") {
+            m_paused = data.toBool();
+            continue;
+        }
         const double val = data.toDouble();
         if (name == "time-pos") {
             m_position = int(val * 1000.0);

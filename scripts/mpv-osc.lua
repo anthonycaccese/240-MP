@@ -22,6 +22,7 @@ local focus_row = 0  -- 0: Seek Bar, 1: Buttons
 local focus_btn = 1  -- index into visible left buttons + STOP; varies with track availability
 local update_timer = nil
 local idle_timer = nil
+local skip_active = false
 
 local SEEK_SECONDS = 10
 local MENU_TIMEOUT = 5
@@ -91,9 +92,13 @@ local function has_playlist()
 end
 
 local function build_left_btns(has_sub, has_pl, bar_w)
-    local btns = {
-        {label="AUDIO", width=math.floor(bar_w * 0.109375), action=btn_actions[1]},
-    }
+    local btns = {}
+    if skip_active then
+        btns[#btns + 1] = {label="SKIP", width=math.floor(bar_w * 0.090625), action=function()
+            mp.commandv("script-message", "skip-segment")
+        end}
+    end
+    btns[#btns + 1] = {label="AUDIO", width=math.floor(bar_w * 0.109375), action=btn_actions[1]}
     if has_sub then
         table.insert(btns, {label="SUBTITLE", width=math.floor(bar_w * 0.15625), action=btn_actions[2]})
     end
@@ -364,3 +369,10 @@ mp.add_forced_key_binding("DOWN", "open_menu_down", toggle_menu)
 -- closes those forced bindings are removed and these become active again.
 mp.add_key_binding("ESC", "bg-esc", function() mp.command("quit") end)
 mp.add_key_binding("BS",  "bg-bs",  function() mp.command("quit") end)
+
+mp.register_script_message("skip-overlay-state", function(state)
+    skip_active = (state == "1")
+    -- Land focus on SKIP (first button) so ENTER skips immediately —
+    -- focus_btn otherwise persists from the last menu interaction.
+    if skip_active then focus_btn = 1 end
+end)
