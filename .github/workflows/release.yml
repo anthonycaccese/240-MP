@@ -12,7 +12,11 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────────
   build-macos-arm64:
     name: macOS arm64
-    runs-on: macos-latest
+    # Pinned: macos-latest now resolves to the macOS 26 image, whose SDK dropped
+    # the AGL framework that Qt 6.7 still links ("ld: framework 'AGL' not
+    # found"). Unpin only after bumping Qt to a release that supports the new
+    # SDK (6.9.3+).
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -141,6 +145,10 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          # The runner image ships Microsoft apt repos (azure-cli, prod) that
+          # intermittently serve broken signatures and fail `apt-get update`.
+          # This build doesn't need them, so drop them first.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/azure-cli.*
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
