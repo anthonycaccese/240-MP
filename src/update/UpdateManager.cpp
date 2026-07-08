@@ -87,7 +87,7 @@ void UpdateManager::evaluateApplyCapability() {
     } else {
         m_canApply = false;
         m_applyHint = QStringLiteral("This copy of 240-MP is not in /Applications — "
-                                     "the downloaded disk image will open for manual install.");
+                                     "240-MP will quit and open the disk image for manual install.");
     }
 #else
     // The launcher exports MP240_LAUNCHER_API when it knows how to apply staged
@@ -330,6 +330,11 @@ void UpdateManager::finishDownload() {
     setState(QStringLiteral("readyToApply"));
 }
 
+// Download-time marker only. The launcher-facing staged.sha256 is deliberately
+// NOT written here — the launcher applies any stage that file blesses, so it is
+// only created at the commitment point in applyLinux(). Until then a downloaded
+// update is inert: backing out and rebooting runs the old version, and the page
+// just re-offers Install.
 void UpdateManager::writeStagedMarkers(const QString &sha256Hex) {
     QJsonObject staged{
         {QStringLiteral("version"), m_latestVersion},
@@ -340,13 +345,6 @@ void UpdateManager::writeStagedMarkers(const QString &sha256Hex) {
     QFile json(stagedJsonPath());
     if (json.open(QIODevice::WriteOnly | QIODevice::Truncate))
         json.write(QJsonDocument(staged).toJson());
-
-#ifndef Q_OS_MAC
-    // coreutils format so the launcher can `sha256sum -c` it before swapping.
-    QFile sums(stagedSha256Path());
-    if (sums.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        sums.write(QStringLiteral("%1  %2\n").arg(sha256Hex, m_assetName).toUtf8());
-#endif
 }
 
 void UpdateManager::clearStagingFiles() {
@@ -380,9 +378,33 @@ void UpdateManager::applyAndRestart() {
 }
 
 void UpdateManager::applyLinux() {
-    // The stage is already on disk; the launcher does the actual swap on its
-    // next run. Under autostart, exit 11 makes systemd relaunch immediately;
-    // a manual session just quits and the update applies on the next launch.
+    // Commitment point: writing staged.sha256 (coreutils format, verified by
+    // the launcher with `sha256sum -c`) is what arms the stage — the launcher
+    // swaps it in on its next run. The sha comes from staged.json so this works
+    // both right after a download and after an app restart. Under autostart,
+    // exit 11 makes systemd relaunch immediately; a manual session just quits
+    // and the update applies on the next launch.
+    QFile marker(stagedJsonPath());
+    if (!marker.open(QIODevice::ReadOnly)) {
+        setState(QStringLiteral("error"), QStringLiteral("Staged update is missing — please download again."));
+        return;
+    }
+    const QJsonObject staged = QJsonDocument::fromJson(marker.readAll()).object();
+    const QString sha256 = staged.value(QStringLiteral("sha256")).toString();
+    const QString asset  = staged.value(QStringLiteral("asset")).toString();
+    if (sha256.isEmpty() || asset.isEmpty()) {
+        clearStagingFiles();
+        setState(QStringLiteral("error"), QStringLiteral("Staged update is invalid — please download again."));
+        return;
+    }
+    QFile sums(stagedSha256Path());
+    if (!sums.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        setState(QStringLiteral("error"), QStringLiteral("Could not write to the updates folder."));
+        return;
+    }
+    sums.write(QStringLiteral("%1  %2\n").arg(sha256, asset).toUtf8());
+    sums.close();
+
     if (qEnvironmentVariableIsSet("MP240_AUTOSTART"))
         QTimer::singleShot(0, qApp, []() { QCoreApplication::exit(kExitCodeUpdateRestart); });
     else
@@ -393,8 +415,12 @@ void UpdateManager::applyMacos() {
 #ifdef Q_OS_MAC
     const QString dmgPath = updatesDir() + QStringLiteral("/") + m_assetName;
     if (!m_canApply) {
-        // Manual fallback: hand the DMG to Finder, keep running.
+        // Manual fallback: hand the DMG to Finder and quit — the fullscreen
+        // window otherwise sits over/behind Finder looking frozen. The user
+        // drags the app into place and reopens it; the stage is cleaned up by
+        // startup reconciliation once the running version matches.
         QProcess::startDetached(QStringLiteral("/usr/bin/open"), {dmgPath});
+        QTimer::singleShot(200, qApp, &QCoreApplication::quit);
         return;
     }
 

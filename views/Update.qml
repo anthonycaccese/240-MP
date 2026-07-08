@@ -66,13 +66,15 @@ FocusScope {
 
     readonly property string applyActionLabel: {
         if (Qt.platform.os === "osx")
-            return canApply ? "Apply & Relaunch" : "Open Disk Image"
+            return canApply ? "Apply & Relaunch" : "Quit & Open Disk Image"
         return updateRoot.autostartSession ? "Apply & Restart" : "Quit & Apply on Next Launch"
     }
+    // No "Cancel": Back/Escape dismisses the overlay instead. A downloaded
+    // update stays inert until Apply is chosen (that's when the launcher-facing
+    // marker is written), so backing out truly means "not now".
     readonly property var confirmOptions: [
         { label: updateRoot.applyActionLabel, action: "apply" },
-        { label: "Discard Update",            action: "discard" },
-        { label: "Cancel",                    action: "cancel" }
+        { label: "Discard Update",            action: "discard" }
     ]
 
     function primaryAction() {

@@ -9,11 +9,12 @@ class QNetworkReply;
 
 // In-app self-update: checks GitHub Releases for a newer version, downloads the
 // platform asset into DATA_ROOT/updates, and applies it.
-//   - Linux (RPi): stages the tarball + a staged.sha256 marker; the launcher
-//     (/usr/local/bin/240mp, written by scripts/install.sh) verifies and swaps
-//     it into /opt/240mp before the next exec. Under the autostart service,
-//     "Apply & Restart" exits with code 11 so systemd relaunches immediately
-//     (see 240mp-stop); otherwise the update applies on the next manual launch.
+//   - Linux (RPi): download stages the tarball; choosing Apply writes the
+//     staged.sha256 marker that arms it — the launcher (/usr/local/bin/240mp,
+//     written by scripts/install.sh) verifies and swaps an armed stage into
+//     /opt/240mp before the next exec. Under the autostart service, "Apply &
+//     Restart" exits with code 11 so systemd relaunches immediately (see
+//     240mp-stop); otherwise the update applies on the next manual launch.
 //   - macOS: spawns a detached helper script that waits for the app to quit,
 //     mounts the DMG, swaps /Applications/240mp.app, and relaunches.
 class UpdateManager : public QObject {

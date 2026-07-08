@@ -100,9 +100,17 @@ jobs:
 
       - name: Create DMG
         run: |
+          # Standard installer layout: the app plus an /Applications symlink so
+          # users drag one onto the other inside the DMG window. Also avoids a
+          # Finder quirk where dragging from a bare single-app image to
+          # /Applications could produce an alias instead of a copy.
+          STAGE="${RUNNER_TEMP}/dmg-stage"
+          mkdir -p "$STAGE"
+          ditto "${GITHUB_WORKSPACE}/install/240mp.app" "$STAGE/240mp.app"
+          ln -s /Applications "$STAGE/Applications"
           hdiutil create \
             -volname "240-MP" \
-            -srcfolder "${GITHUB_WORKSPACE}/install" \
+            -srcfolder "$STAGE" \
             -ov -format UDZO \
             "240-MP-${{ github.ref_name }}-macOS-arm64.dmg"
 
