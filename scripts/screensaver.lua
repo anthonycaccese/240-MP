@@ -84,11 +84,19 @@ local function draw_frame(w, h, tx, ty)
 end
 
 -- ─── key bindings ─────────────────────────────────────────────────────────────
+-- Any key a user would press while interacting with mpv playback should wake
+-- the screen saver, matching the menu-side overlay's "any key dismisses"
+-- behavior (Main.qml). Includes both navigation keys and the HID media-key
+-- names media-keys.lua binds (PLAYPAUSE etc.) — otherwise e.g. a hardware
+-- Play press falls straight through to media-keys.lua and resumes playback
+-- behind the still-active screen saver.
 local DISMISS_KEYS = {
     "SPACE", "ENTER", "KP_ENTER", "ESC",
     "LEFT", "RIGHT", "UP", "DOWN", "PGUP", "PGDWN",
     "HOME", "END",
     "MBTN_LEFT", "MBTN_RIGHT",
+    "PLAYPAUSE", "STOP", "FORWARD", "REWIND", "NEXT", "PREV",
+    "VOLUME_UP", "VOLUME_DOWN", "MUTE",
 }
 
 activate = function()
