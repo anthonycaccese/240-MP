@@ -31,7 +31,7 @@ Note: 240-MP uses mpv as an external subprocess for video playback. It does not 
 brew install yt-dlp
 ```
 
-mpv's ytdl hook uses `yt-dlp` to resolve YouTube URLs at playback time. The YouTube module also expects a `youtube_subscriptions.txt` in the data directory (one channel ID per line, `#` comments allowed) — see [INSTALL.md](INSTALL.md) for details.
+mpv's ytdl hook uses `yt-dlp` to resolve YouTube URLs at playback time. The YouTube module also expects at least one of two files in the data directory (`#` comments allowed in both; each file only gates its own menu entries): `youtube_subscriptions.txt` (one channel ID per line — enables Subscriptions/Channels; see [INSTALL.md](INSTALL.md)) and/or `youtube_playlists.txt` (one playlist URL or ID per line, optional `My Name | <url>` display-name prefix — enables Playlists; contents are fetched by running `yt-dlp` directly).
 
 **Install SDL2 (required, gamepad input):**
 

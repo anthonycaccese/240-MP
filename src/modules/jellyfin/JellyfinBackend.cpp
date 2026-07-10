@@ -260,6 +260,7 @@ void JellyfinBackend::check_auth() {
             return;
         }
         emit authStateChanged();
+        probeCapabilities();
     });
 }
 
@@ -468,6 +469,7 @@ void JellyfinBackend::quick_connect_authenticate(const QString &secret) {
         cfg["modules"] = modules;
         saveConfig(cfg);
 
+        probeCapabilities();
         emit authStateChanged();
     });
 }
@@ -534,8 +536,7 @@ QVariantMap JellyfinBackend::formatItem(const QJsonObject &item) const {
                                   : "vtt";
                 subUrl = m_serverUrl + "/Videos/" + item["Id"].toString() + "/"
                        + mediaSource["Id"].toString() + "/Subtitles/"
-                       + QString::number(idx) + "/Stream." + ext
-                       + "?api_key=" + m_accessToken;
+                       + QString::number(idx) + "/Stream." + ext;
             }
             ss["subUrl"] = subUrl;
             subtitleStreams.append(ss);
@@ -571,29 +572,6 @@ QVariantMap JellyfinBackend::formatItem(const QJsonObject &item) const {
     return map;
 }
 
-// ---------------------------------------------------------------------------
-// URL helpers
-// ---------------------------------------------------------------------------
-
-QString JellyfinBackend::buildImageUrl(const QString &itemId, const QString &imageType,
-                                       const QString &imageTag, int width, int height) const {
-    if (m_serverUrl.isEmpty() || m_accessToken.isEmpty())
-        return QString();
-
-    QString url = m_serverUrl + "/Items/" + itemId + "/Images/" + imageType
-                + "?api_key=" + m_accessToken;
-    if (!imageTag.isEmpty())
-        url += "&tag=" + imageTag;
-    if (width > 0)
-        url += "&fillWidth=" + QString::number(width);
-    if (height > 0)
-        url += "&fillHeight=" + QString::number(height);
-    return url;
-}
-
-QString JellyfinBackend::image_url(const QString &itemId, const QString &imageType, int width, int height) {
-    return buildImageUrl(itemId, imageType, QString(), width, height);
-}
 
 // ---------------------------------------------------------------------------
 // Browse
@@ -1024,14 +1002,14 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
     body["MediaSourceId"]          = mediaSourceId;
     if (audioStreamIndex >= 0)
         body["AudioStreamIndex"]   = audioStreamIndex;
-    if (directPlay) {
-        // Disable server-side subtitle selection so an unsupported subtitle
-        // codec can't force a transcode. The static stream still carries every
-        // embedded subtitle; mpv selects/renders them client-side (--sid).
-        body["SubtitleStreamIndex"] = -1;
-    } else if (subtitleStreamIndex >= 0) {
+    // For direct play the device profile already advertises Embed for every
+    // subtitle format (including PGS/VOBSUB), so the server knows we handle
+    // them client-side and won't force a transcode.  Pass the user's actual
+    // selection (or omit if off) so the static stream includes all tracks.
+    // Hardcoding -1 here caused newer Jellyfin servers to strip sub tracks
+    // from the stream, breaking both --sid for image subs and sidecar URLs.
+    if (subtitleStreamIndex >= 0)
         body["SubtitleStreamIndex"] = subtitleStreamIndex;
-    }
     if (maxBitrate > 0) body["MaxStreamingBitrate"] = maxBitrate;
     if (maxHeight  > 0) body["MaxHeight"]           = maxHeight;
     body["EnableDirectPlay"]       = directPlay;
@@ -1065,6 +1043,7 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
         addEmbed("ass");
         addEmbed("ssa");
         addEmbed("vtt");
+        addEmbed("webvtt");
         addEmbed("mov_text");
         addEmbed("pgssub");
         addEmbed("dvbsub");
@@ -1094,14 +1073,15 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
     profile["SubtitleProfiles"] = subtitleProfiles;
     QJsonArray directPlayProfiles;
     if (directPlay) {
-        // mpv plays virtually anything — advertise broad support so the server
-        // direct-plays compatible files instead of transcoding. An empty array
-        // (transcode mode) tells the server nothing can be direct-played.
+        // mpv plays virtually anything, so advertise a match-all profile —
+        // omitted Container/VideoCodec/AudioCodec fields match every value in
+        // Jellyfin's profile matcher. A codec whitelist here silently forced
+        // transcodes on exact-name misses (pcm_s16le vs pcm, webvtt vs vtt, …).
+        // If mpv truly can't play a file, the transcode retry in Player.qml
+        // onPlaybackEnded is the safety net. An empty array (transcode mode)
+        // tells the server nothing can be direct-played.
         QJsonObject dp;
-        dp["Type"]       = QStringLiteral("Video");
-        dp["Container"]  = QStringLiteral("mp4,mkv,webm,avi,mov,m4v,ts,mpegts,flv,wmv,3gp,mpg,mpeg,ogv,m2ts");
-        dp["VideoCodec"] = QStringLiteral("h264,hevc,h265,mpeg4,mpeg2video,vc1,vp8,vp9,av1");
-        dp["AudioCodec"] = QStringLiteral("aac,ac3,eac3,mp3,mp2,dts,flac,vorbis,opus,pcm,truehd,alac");
+        dp["Type"] = QStringLiteral("Video");
         directPlayProfiles.append(dp);
     }
     profile["DirectPlayProfiles"] = directPlayProfiles;
@@ -1139,8 +1119,7 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
             const QString srcId = source["Id"].toString(mediaSourceId);
             QString directUrl = m_serverUrl + "/Videos/" + itemId + "/stream"
                               + "?static=true"
-                              + "&mediaSourceId=" + srcId
-                              + "&api_key=" + m_accessToken;
+                              + "&mediaSourceId=" + srcId;
             if (!playSessionId.isEmpty())
                 directUrl += "&PlaySessionId=" + playSessionId;
             m_currentPlaySessionId = playSessionId;
@@ -1154,6 +1133,22 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
 
         // Transcode path — used for the bitrate tiers, and as a graceful
         // fallback when the server reports the source can't be direct-played.
+        if (directPlay) {
+            // TranscodeReasons is an array of strings on older servers, a
+            // comma-joined flags string on 10.9+.
+            const QJsonValue tr = source["TranscodeReasons"];
+            QString reasons = tr.toString();
+            if (tr.isArray()) {
+                QStringList list;
+                for (const QJsonValue &r : tr.toArray())
+                    list << r.toString();
+                reasons = list.join(", ");
+            }
+            qWarning("[Jellyfin] direct play denied (SupportsDirectPlay=%d SupportsDirectStream=%d): %s",
+                     source["SupportsDirectPlay"].toBool(),
+                     source["SupportsDirectStream"].toBool(),
+                     reasons.isEmpty() ? "no TranscodeReasons given" : qPrintable(reasons));
+        }
         QString transcodeUrl = source["TranscodingUrl"].toString();
         if (transcodeUrl.isEmpty()) {
             emit errorOccurred("NO TRANSCODE URL");
@@ -1162,21 +1157,33 @@ void JellyfinBackend::get_playback_url(const QString &itemId, const QString &med
         m_currentPlaySessionId = playSessionId;
         m_currentPlayMethod    = QStringLiteral("Transcode");
 
-        QString fullUrl = m_serverUrl + transcodeUrl;
+        // Build the full URL, then strip any api_key from the server-generated
+        // TranscodingUrl — the Authorization header (passed via --http-header-fields
+        // to mpv) covers authentication. When the user selected OFF, also strip
+        // any SubtitleStreamIndex and SubtitleMethod the server may have added
+        // from default metadata.
+        QUrl parsedUrl(m_serverUrl + transcodeUrl);
+        {
+            QUrlQuery q(parsedUrl);
+            const auto items = q.queryItems();
+            for (const auto &kv : items) {
+                if (kv.first.compare(QLatin1String("api_key"), Qt::CaseInsensitive) == 0 ||
+                    kv.first.compare(QLatin1String("apikey"),  Qt::CaseInsensitive) == 0)
+                    q.removeAllQueryItems(kv.first);
+            }
+            if (subtitleStreamIndex < 0) {
+                q.removeAllQueryItems("SubtitleStreamIndex");
+                q.removeAllQueryItems("SubtitleMethod");
+            }
+            parsedUrl.setQuery(q);
+        }
+        QString fullUrl = parsedUrl.toString();
 
         // Pin the URL's PlaySessionId to the one we report with (they should
         // already match; this guarantees it even if the server differs).
         if (!playSessionId.isEmpty())
             fullUrl.replace(QRegularExpression("PlaySessionId=[^&]+"),
                             "PlaySessionId=" + playSessionId);
-
-        // Append api_key only if not already present
-        if (fullUrl.indexOf("apikey=", 0, Qt::CaseInsensitive) < 0)
-            fullUrl += (fullUrl.contains('?') ? "&" : "?") + QString("api_key=") + m_accessToken;
-
-        // Subtitle delivery (soft HLS for text, burn-in for image) is decided by
-        // the DeviceProfile and already baked into TranscodingUrl — no manual
-        // SubtitleStreamIndex/SubtitleMethod override here.
 
         // Enforce max height from quality setting — the server's TranscodingUrl may
         // include a VideoBitrate cap (from our PlaybackInfo POST) but omit MaxHeight,
@@ -1336,7 +1343,11 @@ void JellyfinBackend::update_playback_progress(const QString &itemId, const QStr
 
     QUrl url(m_serverUrl + "/Sessions/Playing/Progress");
     auto *reply = jellyfinPost(url, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError)
+            qWarning("[Jellyfin] progress update failed: %s", qPrintable(reply->errorString()));
+        reply->deleteLater();
+    });
 }
 
 void JellyfinBackend::report_playback_stopped(const QString &itemId, const QString &mediaSourceId,
@@ -1355,9 +1366,16 @@ void JellyfinBackend::report_playback_stopped(const QString &itemId, const QStri
 
     QUrl url(m_serverUrl + "/Sessions/Playing/Stopped");
     auto *reply = jellyfinPost(url, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    // Only clear the session id if it's still the one we reported on — the
+    // transcode retry in Player.qml starts a new session right after reporting
+    // the failed one stopped, and this reply may land after that.
+    const QString reportedSessionId = m_currentPlaySessionId;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, reportedSessionId]() {
+        if (reply->error() != QNetworkReply::NoError)
+            qWarning("[Jellyfin] report stopped failed: %s", qPrintable(reply->errorString()));
         reply->deleteLater();
-        m_currentPlaySessionId.clear();
+        if (m_currentPlaySessionId == reportedSessionId)
+            m_currentPlaySessionId.clear();
     });
 }
 
@@ -1370,6 +1388,11 @@ void JellyfinBackend::getLibraries() {
         emit dynamicOptionsReady("libraries", QVariantList());
         return;
     }
+
+    // Re-emit cached capabilities so ModuleSettings.qml can filter settings
+    // correctly on every pageload (the signal may have been missed if
+    // ModuleSettings.qml was destroyed/recreated after the initial probe).
+    probeCapabilities();
 
     QUrl url(m_serverUrl + "/Users/" + m_userId + "/Views");
     auto *reply = jellyfinGet(url);
@@ -1433,9 +1456,33 @@ void JellyfinBackend::onSettingChanged(const QString &moduleId, const QString &k
     }
 }
 
+QString JellyfinBackend::get_last_audio_lang() const {
+    return m_lastAudioLang;
+}
+
+QString JellyfinBackend::get_last_sub_lang() const {
+    return m_lastSubLang;
+}
+
+int JellyfinBackend::get_last_audio_lang_idx() const {
+    return m_lastAudioLangIdx;
+}
+
+int JellyfinBackend::get_last_sub_lang_idx() const {
+    return m_lastSubLangIdx;
+}
+
+void JellyfinBackend::set_last_track_langs(const QString &audioLang, const QString &subLang,
+                                           int audioLangIdx, int subLangIdx) {
+    m_lastAudioLang = audioLang;
+    m_lastSubLang = subLang;
+    m_lastAudioLangIdx = audioLangIdx;
+    m_lastSubLangIdx = subLangIdx;
+}
+
 void JellyfinBackend::load_server_preferences() {
     if (!has_auth()) {
-        emit serverLanguagePreferencesReady(QString(), QString(), QString());
+        emit serverLanguagePreferencesReady(m_lastAudioLang, m_lastSubLang, QString());
         return;
     }
 
@@ -1444,18 +1491,118 @@ void JellyfinBackend::load_server_preferences() {
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit serverLanguagePreferencesReady(QString(), QString(), QString());
+            emit serverLanguagePreferencesReady(m_lastAudioLang, m_lastSubLang, QString());
             return;
         }
         QJsonObject userData = QJsonDocument::fromJson(reply->readAll()).object();
         QJsonObject config = userData["Configuration"].toObject();
-        QString audioLang = config["AudioLanguagePreference"].toString();
-        QString subLang   = config["SubtitleLanguagePreference"].toString();
-        // SubtitleMode drives the preselect rule (Default/Smart/Always/OnlyForced/None);
-        // Jellyfin's default when the field is absent is "Default".
+        QString audioLang = !m_lastAudioLang.isEmpty() ? m_lastAudioLang : config["AudioLanguagePreference"].toString();
+        QString subLang   = !m_lastSubLang.isEmpty()   ? m_lastSubLang   : config["SubtitleLanguagePreference"].toString();
         QString subMode   = config["SubtitleMode"].toString();
-        // [dev] qDebug("[JellyfinBackend] Server prefs: audio=%s sub=%s mode=%s",
-        // [dev]        qPrintable(audioLang), qPrintable(subLang), qPrintable(subMode));
         emit serverLanguagePreferencesReady(audioLang, subLang, subMode);
+    });
+}
+
+void JellyfinBackend::probeCapabilities() {
+    if (!has_auth()) return;
+
+    // Already probed: re-emit cached state. This is important because
+    // ModuleSettings.qml is destroyed/recreated on navigation and the
+    // one-shot dynamicOptionsReady signal may have been missed.
+    if (m_capabilitiesProbed) {
+        if (m_hasCapability)
+            emit dynamicOptionsReady("_capabilities",
+                QVariantList{QString("mediasegments")});
+        else
+            emit dynamicOptionsReady("_capabilities", QVariantList{});
+        return;
+    }
+
+    // First probe: use a null GUID — if the MediaSegments route exists
+    // (plugin installed), the server returns a non-404 HTTP response.
+    // If the route doesn't exist, ASP.NET returns 404.
+    //
+    // The non-404 on capable servers is because Jellyfin's GetItemById
+    // throws on an empty GUID (→ 400/500) before its item-not-found 404
+    // path is reached. If a future Jellyfin returns plain 404 for the
+    // empty GUID, this probe reports "no capability" and the skip settings
+    // stay hidden; switch to a /System/Info/Public version check (the
+    // MediaSegments API is core since 10.10) if that ever happens.
+    QUrl url(m_serverUrl + "/MediaSegments/00000000-0000-0000-0000-000000000000");
+    auto *reply = jellyfinGet(url);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        // fetchSegments may have handled the probe while we were waiting
+        if (m_capabilitiesProbed) {
+            // fetchSegments already emitted — sync our cached flag
+            // m_hasCapability was already set by fetchSegments
+            return;
+        }
+
+        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status >= 200) {
+            // Got a definitive HTTP response from the server
+            m_capabilitiesProbed = true;
+            m_hasCapability = (status != 404);
+            if (m_hasCapability) {
+                emit dynamicOptionsReady("_capabilities",
+                    QVariantList{QString("mediasegments")});
+            } else {
+                emit dynamicOptionsReady("_capabilities", QVariantList{});
+            }
+        }
+        // Network error (status == 0): leave m_capabilitiesProbed false so
+        // fetchSegments can retry with a real item ID
+    });
+}
+
+void JellyfinBackend::fetchSegments(const QString &itemId) {
+    QUrl url(m_serverUrl + "/MediaSegments/" + itemId);
+    auto *reply = jellyfinGet(url);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
+        reply->deleteLater();
+
+        // One-shot capability probe on first call (fallback if
+        // probeCapabilities failed or was never called). Like
+        // probeCapabilities, only latch on a definitive HTTP response —
+        // a transient network error (status 0) must not permanently mark
+        // the server as lacking the capability.
+        if (!m_capabilitiesProbed) {
+            int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status >= 200) {
+                m_capabilitiesProbed = true;
+                m_hasCapability = (status != 404);
+                if (m_hasCapability) {
+                    emit dynamicOptionsReady("_capabilities",
+                        QVariantList{QString("mediasegments")});
+                } else {
+                    emit dynamicOptionsReady("_capabilities", QVariantList{});
+                    return;  // no segments to process, server doesn't support it
+                }
+            }
+        }
+
+        // Parse segments from the response
+        if (reply->error() != QNetworkReply::NoError) return;
+
+        QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+        QJsonArray items = root["Items"].toArray();
+
+        QVariantList segments;
+        for (const QJsonValue &val : items) {
+            QJsonObject item = val.toObject();
+            QString type = item["Type"].toString();
+            // Only include Intro and Outro segments
+            if (type != "Intro" && type != "Outro") continue;
+
+            QVariantMap seg;
+            seg["type"]    = type;                                  // "Intro" or "Outro"
+            seg["startMs"] = item["StartTicks"].toDouble() / 10000.0;  // ticks → ms
+            seg["endMs"]   = item["EndTicks"].toDouble()   / 10000.0;
+            segments.append(seg);
+        }
+
+        emit segmentsReady(itemId, segments);
     });
 }

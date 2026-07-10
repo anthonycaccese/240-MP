@@ -22,16 +22,33 @@ FocusScope {
     property bool isLoading: false
     property string errorMessage: ""
 
-    // The subscriptions file and the watch-later/history files are local reads,
-    // so this menu builds synchronously — isLoading exists only for pattern
-    // parity with the other modules.
+    // The subscriptions/playlists files and the watch-later/history files are
+    // local reads, so this menu builds synchronously — isLoading exists only
+    // for pattern parity with the other modules.
+    //
+    // The module loads when either youtube_subscriptions.txt or
+    // youtube_playlists.txt is usable; each file only gates its own entries.
     Component.onCompleted: {
-        var status = youtubeBackend.check_subscriptions()
-        if (!status.ok) {
-            errorMessage = status.error
+        var subsStatus = youtubeBackend.check_subscriptions()
+        var plStatus = youtubeBackend.check_playlists()
+        if (!subsStatus.ok && !plStatus.ok) {
+            // A file that exists but failed its check has the more actionable
+            // error; with no files at all, point at both options.
+            if (subsStatus.fileExists)
+                errorMessage = subsStatus.error
+            else if (plStatus.fileExists)
+                errorMessage = plStatus.error
+            else
+                errorMessage = "REQUIRED FILES NOT FOUND\n\n"
+                             + "ADD YOUTUBE_SUBSCRIPTIONS.TXT OR YOUTUBE_PLAYLISTS.TXT\n\n"
+                             + "PLEASE SEE THE WIKI FOR DETAILS"
             return
         }
-        var list = ["Subscriptions", "Channels"]
+        var list = []
+        if (subsStatus.ok)
+            list.push("Subscriptions", "Channels")
+        if (plStatus.ok)
+            list.push("Playlists")
         if (youtubeBackend.getWatchLater().length > 0)
             list.push("Watch Later")
         if (youtubeBackend.getHistory().length > 0)
@@ -67,7 +84,7 @@ FocusScope {
     Text {
         visible: !isLoading && errorMessage !== ""
         text: errorMessage
-        color: root.tertiaryColor
+        color: root.secondaryColor
         font.family: root.globalFont
         anchors.centerIn: parent
         width: root.sw * 0.76875 //492 — long guidance lines wrap instead of clipping offscreen
@@ -124,6 +141,8 @@ FocusScope {
                 navigateTo("Subscriptions.qml", { mode: "feed" }, state)
             else if (selected === "Channels")
                 navigateTo("Channels.qml", {}, state)
+            else if (selected === "Playlists")
+                navigateTo("Playlists.qml", {}, state)
             else if (selected === "Watch Later")
                 navigateTo("Subscriptions.qml", { mode: "watchlater" }, state)
             else if (selected === "History")

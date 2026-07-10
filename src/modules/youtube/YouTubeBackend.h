@@ -17,7 +17,12 @@
 // cached in memory per channel for the session (kCacheTtlMs TTL), so the first
 // entry into Subscriptions or Channels fills the cache for every other view.
 //
-// Two user files besides subscriptions:
+// Playlists come from <dataRoot>/youtube_playlists.txt (one playlist URL or ID
+// per line, optional "My Name | <url>" display-name prefix). RSS feeds for
+// playlists stop at 15 entries, so playlist contents are fetched by spawning
+// yt-dlp --flat-playlist instead (async QProcess, same session cache TTL).
+//
+// Two user files besides subscriptions/playlists:
 //   youtube_history.json     — watch history + resume positions, keyed by videoId
 //   youtube_watch_later.json — ordered saved-video list (newest first)
 class YouTubeBackend : public QObject {
@@ -27,12 +32,19 @@ public:
                             QObject *parent = nullptr);
 
     // Synchronous subscriptions-file check for the menu view:
-    // { ok: bool, error: QString, channelCount: int }
+    // { ok: bool, error: QString, fileExists: bool, channelCount: int }
     Q_INVOKABLE QVariantMap check_subscriptions();
 
     Q_INVOKABLE void load_subscriptions_feed(bool forceRefresh = false);
     Q_INVOKABLE void load_channels(bool forceRefresh = false);
     Q_INVOKABLE void load_channel_videos(const QString &channelId, bool forceRefresh = false);
+
+    // Synchronous playlists-file check, mirroring check_subscriptions():
+    // { ok: bool, error: QString, fileExists: bool, playlistCount: int }
+    Q_INVOKABLE QVariantMap check_playlists();
+
+    Q_INVOKABLE void load_playlists(bool forceRefresh = false);
+    Q_INVOKABLE void load_playlist_videos(const QString &playlistId, bool forceRefresh = false);
 
     // Maps the playback_resolution setting ("480p"/"720p"/"1080p", unknown → 480p)
     // to a yt-dlp format string. H.264 is preferred first for RPi hardware decode.
@@ -59,6 +71,8 @@ signals:
     void subscriptionsFeedLoaded(const QVariant &videos);
     void channelsLoaded(const QVariant &channels);
     void channelVideosLoaded(const QString &channelId, const QVariant &videos);
+    void playlistsLoaded(const QVariant &playlists);
+    void playlistVideosLoaded(const QString &playlistId, const QVariant &videos);
     void errorOccurred(const QString &message);
 
 private:
@@ -68,6 +82,20 @@ private:
         QVariantList videos;           // newest first
         qint64       fetchedMs = 0;    // 0 = never fetched successfully
         bool         feedOk    = false;
+    };
+
+    struct PlaylistEntry {
+        QString      playlistId;
+        QString      fileName;         // optional "Name |" override from the file
+        QString      fetchedTitle;     // playlist_title reported by yt-dlp
+        QVariantList videos;           // playlist order
+        qint64       fetchedMs = 0;
+        bool         fetchOk   = false;
+    };
+
+    struct PlaylistFileRef {
+        QString id;
+        QString name;                  // empty when the line had no "Name |" prefix
     };
 
     QString      historyFilePath() const;
@@ -85,6 +113,12 @@ private:
     QVariantList buildChannelList() const;
     QNetworkRequest makeRequest(const QUrl &url) const;
 
+    QList<PlaylistFileRef> readPlaylistEntries(QString *error = nullptr) const;
+    void         ensurePlaylistsFresh(bool forceRefresh);
+    void         spawnNextPlaylistFetch();
+    void         finishPlaylistAggregate();
+    QVariantList buildPlaylistList() const;
+
     QString m_appRoot;
     QString m_dataRoot;
     QNetworkAccessManager m_nam;
@@ -99,7 +133,21 @@ private:
     bool    m_emitChannelsWhenDone = false;
     QString m_emitChannelVideosWhenDone;      // channelId, or empty
 
+    // Playlist mirror of the channel cache/refresh state, fed by yt-dlp
+    // subprocesses instead of RSS requests.
+    QHash<QString, PlaylistEntry> m_playlists;
+    QStringList m_playlistOrder;              // playlist IDs in file order (deduped)
+    QStringList m_playlistFetchQueue;         // stale IDs waiting for a process slot
+    int m_pendingPlaylists       = 0;
+    int m_activePlaylistFetches  = 0;
+
+    bool    m_emitPlaylistsWhenDone = false;
+    QString m_emitPlaylistVideosWhenDone;     // playlistId, or empty
+
     static constexpr qint64 kCacheTtlMs      = 15 * 60 * 1000;
     static constexpr int    kMaxFeedItems    = 100;
     static constexpr int    kMaxHistoryItems = 100;
+    static constexpr int    kMaxPlaylistItems = 500;             // caps infinite Mix/Radio lists
+    static constexpr int    kMaxConcurrentPlaylistFetches = 2;   // yt-dlp is heavy on the Pi
+    static constexpr int    kPlaylistFetchTimeoutMs = 60000;
 };

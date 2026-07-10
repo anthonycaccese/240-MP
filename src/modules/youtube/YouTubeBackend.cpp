@@ -7,13 +7,17 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QProcess>
 #include <QRegularExpression>
+#include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
 #include <QXmlStreamReader>
 
 #include <algorithm>
 
 static const char *kSubscriptionsFileName = "youtube_subscriptions.txt";
+static const char *kPlaylistsFileName     = "youtube_playlists.txt";
 
 static QString watchUrlFor(const QString &videoId) {
     return QStringLiteral("https://www.youtube.com/watch?v=") + videoId;
@@ -70,6 +74,7 @@ QVariantMap YouTubeBackend::check_subscriptions() {
     QVariantMap result;
     result["ok"]           = error.isEmpty();
     result["error"]        = error;
+    result["fileExists"]   = QFile::exists(m_dataRoot + "/" + kSubscriptionsFileName);
     result["channelCount"] = ids.size();
     return result;
 }
@@ -283,6 +288,285 @@ QVariantList YouTubeBackend::buildChannelList() const {
                                 Qt::CaseInsensitive) < 0;
     });
     return channels;
+}
+
+// ---------------------------------------------------------------------------
+// Playlists file (youtube_playlists.txt)
+// Line format: [My Display Name | ] <playlist URL or bare playlist ID>
+// ---------------------------------------------------------------------------
+
+// "list=" query param when present, bare token otherwise. A URL without a
+// list= param isn't a playlist link — rejected so it can't be fed to yt-dlp
+// as something else entirely.
+static QString playlistIdFromToken(QString token) {
+    const int listPos = token.indexOf(QLatin1String("list="));
+    if (listPos >= 0) {
+        token = token.mid(listPos + 5);
+        const int end = token.indexOf(QRegularExpression(QStringLiteral("[&#?/]")));
+        if (end >= 0)
+            token = token.left(end);
+        return token;
+    }
+    if (token.contains(QLatin1String("://")))
+        return {};
+    return token;
+}
+
+QList<YouTubeBackend::PlaylistFileRef> YouTubeBackend::readPlaylistEntries(QString *error) const {
+    const QString path = m_dataRoot + "/" + kPlaylistsFileName;
+    if (!QFile::exists(path)) {
+        if (error)
+            *error = QStringLiteral("NO PLAYLISTS FILE FOUND\n"
+                                    "CREATE YOUTUBE_PLAYLISTS.TXT IN THE DATA DIRECTORY\n"
+                                    "WITH ONE PLAYLIST URL PER LINE");
+        return {};
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (error)
+            *error = QStringLiteral("COULD NOT READ YOUTUBE_PLAYLISTS.TXT");
+        return {};
+    }
+    QList<PlaylistFileRef> refs;
+    QStringList seen;
+    while (!f.atEnd()) {
+        const QString line = QString::fromUtf8(f.readLine()).trimmed();
+        if (line.isEmpty() || line.startsWith('#'))
+            continue;
+        // Split the optional display-name prefix at the last '|' (URLs never
+        // contain one, display names conceivably could).
+        QString name, token = line;
+        const int bar = line.lastIndexOf('|');
+        if (bar >= 0) {
+            name  = line.left(bar).trimmed();
+            token = line.mid(bar + 1).trimmed();
+        }
+        const QString id = playlistIdFromToken(token);
+        if (id.isEmpty() || seen.contains(id))
+            continue;
+        seen << id;
+        refs.append({id, name});
+    }
+    if (refs.isEmpty() && error)
+        *error = QStringLiteral("NO PLAYLISTS FOUND IN YOUTUBE_PLAYLISTS.TXT");
+    return refs;
+}
+
+QVariantMap YouTubeBackend::check_playlists() {
+    QString error;
+    const QList<PlaylistFileRef> refs = readPlaylistEntries(&error);
+    QVariantMap result;
+    result["ok"]            = error.isEmpty();
+    result["error"]         = error;
+    result["fileExists"]    = QFile::exists(m_dataRoot + "/" + kPlaylistsFileName);
+    result["playlistCount"] = refs.size();
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Playlist loaders — yt-dlp --flat-playlist subprocesses feeding the same
+// cache/queue shape as the RSS channel path. yt-dlp is used (rather than the
+// playlist RSS feed) because the feed stops at 15 entries.
+// ---------------------------------------------------------------------------
+
+void YouTubeBackend::load_playlists(bool forceRefresh) {
+    m_emitPlaylistsWhenDone = true;
+    ensurePlaylistsFresh(forceRefresh);
+}
+
+void YouTubeBackend::load_playlist_videos(const QString &playlistId, bool forceRefresh) {
+    m_emitPlaylistVideosWhenDone = playlistId;
+    ensurePlaylistsFresh(forceRefresh);
+}
+
+// mpv resolves yt-dlp itself at playback time; this is for the app's own
+// browse-time subprocesses.
+static QString ytDlpExecutable() {
+#ifdef Q_OS_MACOS
+    // .app bundles launched via double-click get a minimal PATH that excludes
+    // Homebrew. Prepend known install locations so findExecutable works.
+    const QStringList extraPaths = { "/opt/homebrew/bin", "/usr/local/bin" };
+    const QStringList currentPath = qEnvironmentVariable("PATH").split(":");
+    for (const QString &p : extraPaths) {
+        if (!currentPath.contains(p))
+            qputenv("PATH", (p + ":" + qEnvironmentVariable("PATH")).toUtf8());
+    }
+#endif
+    return QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
+}
+
+void YouTubeBackend::ensurePlaylistsFresh(bool forceRefresh) {
+    if (m_pendingPlaylists > 0)
+        return; // refresh already in flight — the emit flags queue on it
+
+    QString error;
+    const QList<PlaylistFileRef> refs = readPlaylistEntries(&error);
+    if (refs.isEmpty()) {
+        m_emitPlaylistsWhenDone = false;
+        m_emitPlaylistVideosWhenDone.clear();
+        emit errorOccurred(error);
+        return;
+    }
+    m_playlistOrder.clear();
+    for (const PlaylistFileRef &ref : refs) {
+        m_playlistOrder << ref.id;
+        PlaylistEntry &entry = m_playlists[ref.id];
+        entry.playlistId = ref.id;
+        entry.fileName   = ref.name; // re-read every refresh so file edits apply
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QStringList stale;
+    for (const QString &id : m_playlistOrder) {
+        const PlaylistEntry &entry = m_playlists.value(id);
+        if (forceRefresh || !entry.fetchOk || now - entry.fetchedMs > kCacheTtlMs)
+            stale << id;
+    }
+
+    if (stale.isEmpty()) {
+        finishPlaylistAggregate(); // everything fresh — serve from cache
+        return;
+    }
+    if (ytDlpExecutable().isEmpty()) {
+        // Nothing can be fetched; report against whatever the cache holds.
+        finishPlaylistAggregate();
+        return;
+    }
+    m_pendingPlaylists   = stale.size();
+    m_playlistFetchQueue = stale;
+    spawnNextPlaylistFetch();
+}
+
+void YouTubeBackend::spawnNextPlaylistFetch() {
+    const QString bin = ytDlpExecutable();
+    while (m_activePlaylistFetches < kMaxConcurrentPlaylistFetches
+           && !m_playlistFetchQueue.isEmpty()) {
+        const QString playlistId = m_playlistFetchQueue.takeFirst();
+        ++m_activePlaylistFetches;
+
+        auto *proc = new QProcess(this);
+        const QStringList args{
+            QStringLiteral("--flat-playlist"),
+            QStringLiteral("-I"), QStringLiteral("1:%1").arg(kMaxPlaylistItems),
+            QStringLiteral("--no-warnings"),
+            // One JSON object per entry — robust against '|' etc. in titles
+            QStringLiteral("--print"),
+            QStringLiteral("%(.{id,title,channel,uploader,playlist_title})j"),
+            QStringLiteral("--"),
+            QStringLiteral("https://www.youtube.com/playlist?list=") + playlistId,
+        };
+
+        auto finish = [this, proc, playlistId]() {
+            proc->deleteLater();
+            QString      title;
+            QVariantList videos;
+            const QList<QByteArray> lines = proc->readAllStandardOutput().split('\n');
+            for (const QByteArray &line : lines) {
+                const QJsonObject obj = QJsonDocument::fromJson(line.trimmed()).object();
+                if (obj.isEmpty())
+                    continue;
+                if (title.isEmpty())
+                    title = obj.value(QLatin1String("playlist_title")).toString();
+                const QString videoId    = obj.value(QLatin1String("id")).toString();
+                const QString videoTitle = obj.value(QLatin1String("title")).toString();
+                if (videoId.isEmpty())
+                    continue;
+                // Tombstones YouTube leaves in place of removed entries
+                if (videoTitle == QLatin1String("[Private video]")
+                    || videoTitle == QLatin1String("[Deleted video]"))
+                    continue;
+                QString channel = obj.value(QLatin1String("channel")).toString();
+                if (channel.isEmpty())
+                    channel = obj.value(QLatin1String("uploader")).toString();
+                QVariantMap v;
+                v["videoId"]     = videoId;
+                v["title"]       = videoTitle;
+                v["channelId"]   = QString();
+                v["channelName"] = channel;
+                // Flat entries carry no publish date; playlist order stands in
+                v["publishedAt"] = QString();
+                v["publishedMs"] = qint64(0);
+                v["url"]         = watchUrlFor(videoId);
+                v["isShort"]     = false; // not detectable from flat entries
+                videos.append(v);
+            }
+            // Non-zero exit with parsed entries still counts (partial page
+            // failures on huge lists) — same "partial parses kept" stance as RSS.
+            const bool ok = proc->exitStatus() == QProcess::NormalExit
+                            && (proc->exitCode() == 0 || !videos.isEmpty());
+            if (ok) {
+                PlaylistEntry &entry = m_playlists[playlistId];
+                entry.fetchedTitle = title;
+                entry.videos       = videos;
+                entry.fetchOk      = true;
+                entry.fetchedMs    = QDateTime::currentMSecsSinceEpoch();
+            }
+            // On failure: keep any previously cached videos (stale beats empty)
+
+            --m_activePlaylistFetches;
+            if (--m_pendingPlaylists <= 0) {
+                m_pendingPlaylists      = 0;
+                m_activePlaylistFetches = 0;
+                m_playlistFetchQueue.clear();
+                finishPlaylistAggregate();
+            } else {
+                spawnNextPlaylistFetch();
+            }
+        };
+        connect(proc, &QProcess::finished, this, finish);
+        // finished() is never emitted when the binary fails to launch
+        connect(proc, &QProcess::errorOccurred, this,
+                [finish](QProcess::ProcessError processError) {
+                    if (processError == QProcess::FailedToStart)
+                        finish();
+                });
+        QTimer::singleShot(kPlaylistFetchTimeoutMs, proc, [proc]() { proc->kill(); });
+        proc->start(bin, args);
+    }
+}
+
+void YouTubeBackend::finishPlaylistAggregate() {
+    const bool    listWanted   = m_emitPlaylistsWhenDone;
+    const QString videosWanted = m_emitPlaylistVideosWhenDone;
+    m_emitPlaylistsWhenDone = false;
+    m_emitPlaylistVideosWhenDone.clear();
+
+    bool anyOk = false;
+    for (const QString &id : m_playlistOrder)
+        anyOk = anyOk || m_playlists.value(id).fetchOk;
+    if (!anyOk) {
+        emit errorOccurred(QStringLiteral("COULD NOT LOAD PLAYLISTS\n"
+                                          "CHECK YOUR NETWORK CONNECTION AND THAT\n"
+                                          "YT-DLP IS INSTALLED AND UP TO DATE"));
+        return;
+    }
+
+    if (listWanted)
+        emit playlistsLoaded(buildPlaylistList());
+    if (!videosWanted.isEmpty()) {
+        const PlaylistEntry entry = m_playlists.value(videosWanted);
+        if (entry.fetchOk)
+            emit playlistVideosLoaded(videosWanted, entry.videos);
+        else
+            emit errorOccurred(QStringLiteral("COULD NOT LOAD PLAYLIST"));
+    }
+}
+
+QVariantList YouTubeBackend::buildPlaylistList() const {
+    QVariantList playlists;
+    for (const QString &id : m_playlistOrder) {
+        const PlaylistEntry entry = m_playlists.value(id);
+        QVariantMap p;
+        p["playlistId"] = id;
+        // File-name override wins; fall back to the raw ID so a playlist whose
+        // fetch failed is still visible (same choice as buildChannelList)
+        p["title"]      = !entry.fileName.isEmpty()     ? entry.fileName
+                        : !entry.fetchedTitle.isEmpty() ? entry.fetchedTitle
+                                                        : id;
+        p["videoCount"] = entry.videos.size();
+        playlists << p;
+    }
+    return playlists; // file order — the user's own curation is the sort
 }
 
 // ---------------------------------------------------------------------------

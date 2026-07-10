@@ -49,8 +49,12 @@ public:
     Q_INVOKABLE void report_playback_stopped(const QString &itemId, const QString &mediaSourceId, qint64 positionTicks, bool failed = false);
     Q_INVOKABLE void report_playback_start(const QString &itemId, const QString &mediaSourceId, const QString &audioStreamId, const QString &subtitleStreamId, qint64 startPositionTicks = 0);
 
+    // Intro/outro skip — MediaSegments API
+    Q_INVOKABLE void fetchSegments(const QString &itemId);
+    Q_INVOKABLE void probeCapabilities();
+
     // URL helpers for QML
-    Q_INVOKABLE QString image_url(const QString &itemId, const QString &imageType, int width, int height);
+    Q_INVOKABLE QString get_access_token() const { return m_accessToken; }
 
     // Settings
     Q_INVOKABLE QString get_auth_state();
@@ -58,6 +62,13 @@ public:
     Q_INVOKABLE void getVideoQualities();
     Q_INVOKABLE void get_resume_playback_options();
     Q_INVOKABLE void load_server_preferences();
+
+    Q_INVOKABLE QString get_last_audio_lang() const;
+    Q_INVOKABLE QString get_last_sub_lang() const;
+    Q_INVOKABLE int get_last_audio_lang_idx() const;
+    Q_INVOKABLE int get_last_sub_lang_idx() const;
+    Q_INVOKABLE void set_last_track_langs(const QString &audioLang, const QString &subLang,
+                                           int audioLangIdx = -1, int subLangIdx = -1);
 
 signals:
     void authStateChanged();
@@ -75,6 +86,7 @@ signals:
     void seriesNextUpReady(const QVariantMap &detail);
     void streamUrlReady(const QString &url);
     void dynamicOptionsReady(const QString &key, const QVariant &options);
+    void segmentsReady(const QString &itemId, const QVariantList &segments);
     void errorOccurred(const QString &message);
     void logoutComplete();
     void authRevoked();
@@ -108,6 +120,12 @@ private:
     QString m_currentPlaySessionId;
     QString m_currentPlayMethod; // "DirectPlay" or "Transcode" — for /Sessions reporting
     QString m_deviceId;
+    QString m_lastAudioLang;
+    QString m_lastSubLang;
+    int m_lastAudioLangIdx = -1;
+    int m_lastSubLangIdx = -1;
+    bool m_capabilitiesProbed = false;
+    bool m_hasCapability = false;
 
     static QString normalizeServerUrl(const QString &url);
 
@@ -119,7 +137,6 @@ private:
     void probeHasItems(const QUrl &url, std::function<void(bool)> cb);
 
     QVariantMap formatItem(const QJsonObject &item) const;
-    QString buildImageUrl(const QString &itemId, const QString &imageType, const QString &imageTag, int width, int height) const;
 
     void ignoreSslErrors(QNetworkReply *reply) const;
 

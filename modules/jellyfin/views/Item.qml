@@ -67,6 +67,9 @@ FocusScope {
 
     // Persisted selection so onItemLoaded doesn't wipe it
     property bool hasRestoredState: false
+    // Set true when the user manually changes a track via arrow keys, so the
+    // async onServerLanguagePreferencesReady doesn't override their choice.
+    property bool userChangedTracks: false
 
     // Server-side language preferences — fetched on first load as fallback
     property string serverAudioLang: ""
@@ -89,14 +92,16 @@ FocusScope {
                 detailRoot.audioIdx = 0
                 detailRoot.subtitleIdx = 0
             }
+            detailRoot.userChangedTracks = false
         }
 
         function onServerLanguagePreferencesReady(audioLang, subLang, subMode) {
             serverAudioLang = audioLang
             serverSubLang   = subLang
             serverSubMode   = subMode
-            // Re-apply preferences now that we have server data
-            if (detailRoot.detail && !hasRestoredState) {
+            // Only apply server prefs if the user hasn't manually changed a track
+            // (otherwise the async response would override their arrow-key choice).
+            if (detailRoot.detail && !hasRestoredState && !detailRoot.userChangedTracks) {
                 detailRoot.applyLanguagePreferences(detailRoot.detail)
             }
         }
@@ -153,13 +158,26 @@ FocusScope {
             if (focusRow < maxRow) focusRow++
         }
     }
+    // Debounce: batch rapid arrow-key changes into a single backend save
+    // to reduce QML→C++ cross-context calls that can crash on Pi.
+    Timer {
+        id: debounceSaveTimer
+        interval: 200
+        repeat: false
+        onTriggered: _saveCurrentLangs()
+    }
+
     Keys.onLeftPressed: {
         if (isLaunching) return
         if (!detail) return
         if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1) {
             audioIdx = (audioIdx - 1 + detail.audioStreams.length) % detail.audioStreams.length
+            userChangedTracks = true
+            debounceSaveTimer.restart()
         } else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 0) {
             subtitleIdx = (subtitleIdx - 1 + (detail.subtitleStreams.length + 1)) % (detail.subtitleStreams.length + 1)
+            userChangedTracks = true
+            debounceSaveTimer.restart()
         }
     }
     Keys.onRightPressed: {
@@ -167,14 +185,21 @@ FocusScope {
         if (!detail) return
         if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1) {
             audioIdx = (audioIdx + 1) % detail.audioStreams.length
+            userChangedTracks = true
+            debounceSaveTimer.restart()
         } else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 0) {
             subtitleIdx = (subtitleIdx + 1) % (detail.subtitleStreams.length + 1)
+            userChangedTracks = true
+            debounceSaveTimer.restart()
         }
     }
     Keys.onReturnPressed: {
         if (isLaunching) return
         if (focusRow === 0 && detail) {
             isLaunching = true
+            // Save the current track selection before playback starts so it
+            // persists to the next item via load_server_preferences().
+            _saveCurrentLangs()
             // get_playback_url() reports the playback Start to the server once
             // PlaybackInfo resolves (so session id + play method are correct).
             jellyfinBackend.get_playback_url(detail.itemId, detail.mediaSourceId || detail.itemId,
@@ -184,10 +209,15 @@ FocusScope {
     }
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+            _saveCurrentLangs()
             goBack()
             event.accepted = true
         }
     }
+
+    // Safety net: save the current selection when the view is destroyed
+    // (navigating back), so the cached language is available for the next item.
+    Component.onDestruction: _saveCurrentLangs()
 
     // ------------------------------------------------------------------
     // Language display — uses Jellyfin's own DisplayTitle when available
@@ -241,6 +271,44 @@ FocusScope {
         return idx
     }
 
+    function _saveCurrentLangs() {
+        if (!detail) return
+        // Audio: save language and the position of this stream within
+        // streams of the same language, so we can pick the exact track
+        // when multiple share a language (e.g. English main + commentary).
+        var aStream = (detail.audioStreams && detail.audioStreams[audioIdx])
+                      ? detail.audioStreams[audioIdx] : null
+        var aLang = aStream ? (aStream.language || "") : ""
+        var aLangIdx = -1
+        if (aLang && detail.audioStreams) {
+            for (var ai = 0; ai < detail.audioStreams.length; ai++) {
+                if (detail.audioStreams[ai].language === aLang) {
+                    aLangIdx++
+                    if (ai === audioIdx) break
+                }
+            }
+        }
+        // Subtitle: same approach. subtitleIdx === 0 means Off.
+        var sLang = ""
+        var sLangIdx = -1
+        if (subtitleIdx !== 0) {
+            var sStream = (detail.subtitleStreams && detail.subtitleStreams[subtitleIdx - 1])
+                          ? detail.subtitleStreams[subtitleIdx - 1] : null
+            if (sStream) {
+                sLang = sStream.language || ""
+                if (sLang && detail.subtitleStreams) {
+                    for (var si = 0; si < detail.subtitleStreams.length; si++) {
+                        if (detail.subtitleStreams[si].language === sLang) {
+                            sLangIdx++
+                            if (si === subtitleIdx - 1) break
+                        }
+                    }
+                }
+            }
+        }
+        jellyfinBackend.set_last_track_langs(aLang, sLang, aLangIdx, sLangIdx)
+    }
+
     function applyLanguagePreferences(d) {
         if (!d) return
         // [dev] console.log("[Item] applyPrefs serverAudio=" + serverAudioLang + " serverSub=" + serverSubLang +
@@ -248,13 +316,26 @@ FocusScope {
         // [dev]             " nAudio=" + (d.audioStreams ? d.audioStreams.length : 0) +
         // [dev]             " nSub=" + (d.subtitleStreams ? d.subtitleStreams.length : 0))
 
-        // Audio: server language preference > IsDefault > first stream.
+        var savedAudioLangIdx = jellyfinBackend.get_last_audio_lang_idx()
+        var savedSubLangIdx   = jellyfinBackend.get_last_sub_lang_idx()
+
+        // Audio: server language preference > same-language index match > IsDefault > first.
         var audioLang = ""
         if (d.audioStreams && d.audioStreams.length > 0) {
             var ai = -1
             if (serverAudioLang) {
+                // Collect all streams with the target language
+                var candidates = []
                 for (var i = 0; i < d.audioStreams.length; i++) {
-                    if (d.audioStreams[i].language === serverAudioLang) { ai = i; break }
+                    if (d.audioStreams[i].language === serverAudioLang)
+                        candidates.push(i)
+                }
+                if (candidates.length > 0) {
+                    // Use saved language-group index when valid
+                    if (savedAudioLangIdx >= 0 && savedAudioLangIdx < candidates.length)
+                        ai = candidates[savedAudioLangIdx]
+                    else
+                        ai = candidates[0] // fall back to first
                 }
             }
             if (ai < 0) {
@@ -267,8 +348,21 @@ FocusScope {
             audioLang = d.audioStreams[ai].language || ""
         }
 
-        // Subtitles: follow the server's SubtitleMode, keyed off the chosen audio language.
-        detailRoot.subtitleIdx = pickSubtitle(d.subtitleStreams, serverSubLang, serverSubMode, audioLang)
+        // Subtitles: follow the server's SubtitleMode, keyed off the chosen audio,
+        // with saved language-group index to pick the exact track.
+        var subPick = pickSubtitle(d.subtitleStreams, serverSubLang, serverSubMode, audioLang)
+        if (subPick > 0 && serverSubLang) {
+            var subCandidates = []
+            for (var si = 0; si < d.subtitleStreams.length; si++) {
+                if (d.subtitleStreams[si].language === serverSubLang)
+                    subCandidates.push(si)
+            }
+            if (subCandidates.length > 0) {
+                if (savedSubLangIdx >= 0 && savedSubLangIdx < subCandidates.length)
+                    subPick = subCandidates[savedSubLangIdx] + 1
+            }
+        }
+        detailRoot.subtitleIdx = subPick
     }
 
     // ---

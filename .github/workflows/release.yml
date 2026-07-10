@@ -12,7 +12,11 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────────
   build-macos-arm64:
     name: macOS arm64
-    runs-on: macos-latest
+    # Pinned: macos-latest now resolves to the macOS 26 image, whose SDK dropped
+    # the AGL framework that Qt 6.7 still links ("ld: framework 'AGL' not
+    # found"). Unpin only after bumping Qt to a release that supports the new
+    # SDK (6.9.3+).
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -48,7 +52,8 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR};${SDL2_PREFIX}" \
-            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install"
+            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install" \
+            -DAPP_VERSION="${{ github.ref_name }}"
 
       - name: Build
         run: cmake --build build --parallel
@@ -95,9 +100,17 @@ jobs:
 
       - name: Create DMG
         run: |
+          # Standard installer layout: the app plus an /Applications symlink so
+          # users drag one onto the other inside the DMG window. Also avoids a
+          # Finder quirk where dragging from a bare single-app image to
+          # /Applications could produce an alias instead of a copy.
+          STAGE="${RUNNER_TEMP}/dmg-stage"
+          mkdir -p "$STAGE"
+          ditto "${GITHUB_WORKSPACE}/install/240mp.app" "$STAGE/240mp.app"
+          ln -s /Applications "$STAGE/Applications"
           hdiutil create \
             -volname "240-MP" \
-            -srcfolder "${GITHUB_WORKSPACE}/install" \
+            -srcfolder "$STAGE" \
             -ov -format UDZO \
             "240-MP-${{ github.ref_name }}-macOS-arm64.dmg"
 
@@ -140,6 +153,10 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          # The runner image ships Microsoft apt repos (azure-cli, prod) that
+          # intermittently serve broken signatures and fail `apt-get update`.
+          # This build doesn't need them, so drop them first.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/azure-cli.*
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
@@ -159,7 +176,8 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install/usr/local"
+            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/install/usr/local" \
+            -DAPP_VERSION="${{ github.ref_name }}"
 
       - name: Build
         run: cmake --build build --parallel
@@ -198,6 +216,15 @@ jobs:
         with:
           path: artifacts
 
+      # Basenames only ("<sha256>  <file>") so clients can `sha256sum -c` a
+      # single line next to the downloaded asset. The in-app updater and the
+      # RPi launcher's staged-update apply both verify against this file.
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum dmg-arm64/*.dmg tarball-linux-arm64/*.tar.gz \
+            | sed 's|  .*/|  |' > SHA256SUMS
+
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
@@ -208,6 +235,7 @@ jobs:
           files: |
             artifacts/dmg-arm64/*.dmg
             artifacts/tarball-linux-arm64/*.tar.gz
+            artifacts/SHA256SUMS
             scripts/install.sh
           body: |
             ### Downloads:

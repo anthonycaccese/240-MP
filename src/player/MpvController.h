@@ -52,11 +52,13 @@ public:
                                   const QStringList &subTitles = {},
                                   float imageDurationSec = 0.0f,
                                   bool imageContent = false,
-                                  bool ytdl = false,
-                                  const QStringList &extraArgs = {});
+                                  const QStringList &extraArgs = {},
+                                  const QString &jellyfinToken = {});
     Q_INVOKABLE void stop();
     Q_INVOKABLE void seekTo(int positionMs);
     Q_INVOKABLE void sendKey(const QString &key);
+    Q_INVOKABLE void showOsdSkipPrompt();
+    Q_INVOKABLE void clearOsdPrompt();
 
     // True only on devices whose smooth-playback decode path can't crop/zoom (the
     // Pi 3 DRM-overlay path). Settings uses this to show the "Smooth Playback"
@@ -78,6 +80,8 @@ signals:
     // connects one handler and branches on `reason`, so it can never silently drop
     // a case the way an unhandled per-reason signal would.
     void playbackEnded(int finalPositionMs, int finalDurationMs, const QString &reason);
+
+    void skipRequested();
 
 private slots:
     void onProcessFinished();
@@ -117,6 +121,7 @@ private:
     QTimer       *m_connectTimer   = nullptr;
     QTimer       *m_watchdogTimer  = nullptr;
     qint64        m_lastIpcEventMs = 0;
+    bool          m_paused         = false;  // mirrors mpv's pause property (watchdog exemption)
     QString       m_appRoot;
     QString       m_socketPath;
     QString       m_inputConfPath;
@@ -128,6 +133,9 @@ private:
     int           m_playlistPos  = -1;
     bool          m_headlessMode = false;
     int           m_previousVt   = -1;
+    bool          m_hasMpvOscScript     = false;
+    bool          m_hasAmbientOscScript = false;
+    bool          m_hasMediaKeysScript  = false;
     int           m_qtDrmFd      = -1;
 #ifdef Q_OS_LINUX
     DrmSavedState m_savedDrm     = {};

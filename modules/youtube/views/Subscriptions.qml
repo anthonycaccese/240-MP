@@ -2,9 +2,9 @@ import QtQuick
 import Components
 
 // Video list — serves the aggregated Subscriptions feed (mode "feed"), a single
-// channel's videos (mode "channel"), the saved Watch Later list ("watchlater")
-// and the recently-watched History list ("history"). Right on any row opens the
-// save/remove watch-later overlay.
+// channel's videos (mode "channel"), a user playlist ("playlist"), the saved
+// Watch Later list ("watchlater") and the recently-watched History list
+// ("history"). Right on any row opens the save/remove watch-later overlay.
 FocusScope {
     id: itemsRoot
 
@@ -17,6 +17,8 @@ FocusScope {
     property string mode: navParams.mode || "feed"
     property string channelId: navParams.channelId || ""
     property string channelName: navParams.channelName || ""
+    property string playlistId: navParams.playlistId || ""
+    property string playlistName: navParams.playlistName || ""
 
     property var items: []
     property bool isLoading: false
@@ -92,6 +94,8 @@ FocusScope {
             errorMessage = ""
             if (mode === "feed")
                 youtubeBackend.load_subscriptions_feed()
+            else if (mode === "playlist")
+                youtubeBackend.load_playlist_videos(playlistId)
             else
                 youtubeBackend.load_channel_videos(channelId)
         }
@@ -116,8 +120,16 @@ FocusScope {
             itemsRoot.restoreListIndex()
         }
 
+        function onPlaylistVideosLoaded(loadedPlaylistId, videos) {
+            if (itemsRoot.mode !== "playlist" || loadedPlaylistId !== itemsRoot.playlistId)
+                return
+            itemsRoot.isLoading = false
+            itemsRoot.items = itemsRoot.filterShorts(videos)
+            itemsRoot.restoreListIndex()
+        }
+
         function onErrorOccurred(msg) {
-            if (itemsRoot.mode !== "feed" && itemsRoot.mode !== "channel")
+            if (itemsRoot.mode !== "feed" && itemsRoot.mode !== "channel" && itemsRoot.mode !== "playlist")
                 return
             itemsRoot.isLoading = false
             itemsRoot.errorMessage = msg
@@ -138,6 +150,7 @@ FocusScope {
         subtitle: itemsRoot.mode === "feed" ? "Subscriptions"
                 : itemsRoot.mode === "watchlater" ? "Watch Later"
                 : itemsRoot.mode === "history" ? "History"
+                : itemsRoot.mode === "playlist" ? itemsRoot.playlistName
                 : itemsRoot.channelName
     }
 

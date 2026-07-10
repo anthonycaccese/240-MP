@@ -85,7 +85,18 @@ Window {
     Connections {
         target: appCore
         function onAppSettingChanged(key, value) {
-            if (key === "color_scheme") root.currentTheme = value
+            if (key === "color_scheme") {
+                root.currentTheme = value
+            } else if (key === "screensaver_timeout") {
+                var sec = parseInt(value)
+                if (sec > 0) {
+                    idleTracker.threshold = sec
+                    idleTracker.enabled = true
+                } else {  // "OFF"
+                    idleTracker.enabled = false
+                    if (screenSaverActive) screenSaverActive = false
+                }
+            }
         }
     }
 
@@ -117,6 +128,15 @@ Window {
         }
         root.currentTheme = savedTheme
 
+        // Screensaver: the tracker starts disabled; this is the single place the
+        // saved setting is applied (live changes land in onAppSettingChanged above,
+        // mirroring color_scheme). parseInt("OFF") is NaN, so OFF stays disabled.
+        var ssSec = parseInt(cfg.app && cfg.app.screensaver_timeout)
+        if (ssSec > 0) {
+            idleTracker.threshold = ssSec
+            idleTracker.enabled = true
+        }
+
         // Break declarative bindings on macOS so the C++ NSWindow override
         // in forceWindowFullScreen() isn't immediately re-fought by QML.
         if (Qt.platform.os === "osx") {
@@ -143,10 +163,31 @@ Window {
     readonly property var hints: inputManager ? inputManager.hints : ({})
     readonly property string appVersion: appCore ? appCore.appVersion : ""
 
+    // --- SCREEN SAVER STATE ---
+    property bool screenSaverActive: false
+
     // --- APP-LEVEL NAV STACK ---
     property var appNavStack: []
     property var appCurrentParams: ({})
     property bool _startupNavigated: false
+
+    // --- MPV PLAYBACK TRACKING ---
+    // Block the screen saver while mpv is playing so it never flashes during or
+    // immediately after playback. The core guard is in IdleTracker (mpvActive
+    // property), which also resets the idle timer on transitions.
+    Connections {
+        target: mpvController
+        function onPositionChanged(ms) {
+            if (ms > 0 && !idleTracker.mpvActive) {
+                idleTracker.mpvActive = true
+                idleTracker.resetActivity()
+            }
+        }
+        function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
+            idleTracker.mpvActive = false
+            idleTracker.resetActivity()
+        }
+    }
 
     // --- MODULE LOADER ---
     Loader {
@@ -194,6 +235,97 @@ Window {
                 moduleLoader.setSource(prev.source, { "navParams": prev.params, "navListState": prev.listState || {} })
             }
 
+        }
+    }
+
+    // --- SCREEN SAVER (Idle Tracker integration) ---
+    Connections {
+        target: idleTracker
+        function onActiveChanged() {
+            // Only show on active → true; never hide here — the overlay's
+            // key handler owns dismissal, preventing the C++ event filter's
+            // synchronous reset from stealing the key from QML.
+            if (idleTracker.active && idleTracker.enabled) {
+                if (!screenSaverActive) {
+                    var usableW = screenSaverOverlay.width - bounceLogo.width
+                    var usableH = screenSaverOverlay.height - bounceLogo.height
+                    bounceLogo.x = Math.random() * (usableW > 0 ? usableW : 1)
+                    bounceLogo.y = Math.random() * (usableH > 0 ? usableH : 1)
+                    bounceLogo.vx = (Math.random() > 0.5 ? 1 : -1) * (1 + Math.random() * 1.5)
+                    bounceLogo.vy = (Math.random() > 0.5 ? 1 : -1) * (1 + Math.random() * 1.5)
+                    screenSaverActive = true
+                    screenSaverOverlay.forceActiveFocus()
+                }
+            }
+        }
+    }
+
+    Item {
+        id: screenSaverOverlay
+        anchors.fill: parent
+        visible: screenSaverActive
+        z: 9999
+        focus: visible
+
+        // Solid black background — no transparency so it serves as a true
+        // CRT burn-in prevention black frame between the logo bounces.
+        Rectangle {
+            anchors.fill: parent
+            color: "#000000"
+        }
+
+        // Bouncing logo — classic DVD player screen saver
+        Image {
+            id: bounceLogo
+            source: "assets/images/logo.svg"
+            sourceSize.width: root.sw * 0.05
+            sourceSize.height: root.sw * 0.05
+            fillMode: Image.PreserveAspectFit
+            antialiasing: true
+
+            property real vx: 0
+            property real vy: 0
+
+            // Physics tick at ~60 fps while the overlay is visible
+            Timer {
+                interval: 16
+                repeat: true
+                running: screenSaverActive
+                onTriggered: {
+                    bounceLogo.x += bounceLogo.vx
+                    bounceLogo.y += bounceLogo.vy
+
+                    if (bounceLogo.x + bounceLogo.width > screenSaverOverlay.width) {
+                        bounceLogo.x = screenSaverOverlay.width - bounceLogo.width
+                        bounceLogo.vx = -Math.abs(bounceLogo.vx)
+                    } else if (bounceLogo.x < 0) {
+                        bounceLogo.x = 0
+                        bounceLogo.vx = Math.abs(bounceLogo.vx)
+                    }
+
+                    if (bounceLogo.y + bounceLogo.height > screenSaverOverlay.height) {
+                        bounceLogo.y = screenSaverOverlay.height - bounceLogo.height
+                        bounceLogo.vy = -Math.abs(bounceLogo.vy)
+                    } else if (bounceLogo.y < 0) {
+                        bounceLogo.y = 0
+                        bounceLogo.vy = Math.abs(bounceLogo.vy)
+                    }
+                }
+            }
+        }
+
+        // Capture any keypress to dismiss — consumes the event so the
+        // underlying view never sees it, preventing accidental navigation.
+        // Ctrl+Q still quits (moduleLoader's handler is a sibling, so it
+        // can't see keys focused here — handle the chord directly).
+        Keys.onPressed: (event) => {
+            event.accepted = true
+            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Q) {
+                Qt.quit()
+                return
+            }
+            screenSaverActive = false
+            moduleLoader.forceActiveFocus()
         }
     }
 }

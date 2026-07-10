@@ -112,6 +112,18 @@ FocusScope {
             moduleId: ""
         })
 
+        // SCREEN SAVER section — single control: OFF disables, a number sets the
+        // timeout for both menu idle and playback pause (handled inside mpv).
+        items.push({
+            type: "list_single",
+            key: "screensaver_timeout",
+            label: "Screen Saver",
+            options: ["OFF", "30", "60", "120"],
+            value: appSettings["screensaver_timeout"] || "OFF",
+            description: "Prevent CRT burn-in after seconds of inactivity or pause",
+            moduleId: ""
+        })
+
         // MODULES section — only show modules with has_settings
         var hasModuleSettings = false
         for (var i = 0; i < installedModules.length; i++) {
@@ -129,7 +141,13 @@ FocusScope {
         }
 
         // SYSTEM section
-        items.push({ type: "section", label: "System" })
+        items.push({ type: "section", label: "Application" })
+        items.push({
+            type: "submenu",
+            key: "software_update",
+            label: "Update 240-MP",
+            moduleId: ""
+        })
         items.push({ type: "quit", label: "Quit 240-MP" })
 
         settingsItems = items
@@ -235,7 +253,10 @@ FocusScope {
         Keys.onReturnPressed: {
             var row = settingsItems[currentIndex]
             if (row && row.type === "submenu") {
-                settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
+                if (row.key === "software_update")
+                    settingsRoot.navigateTo("views/Update.qml", {}, { currentIndex: settingsList.currentIndex })
+                else
+                    settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
             } else if (row && row.type === "quit") {
                 settingsRoot.quitChoiceIndex = 0
                 settingsRoot.quitOverlayVisible = true

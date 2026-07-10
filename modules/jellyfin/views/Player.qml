@@ -33,6 +33,11 @@ FocusScope {
     property bool   pendingRetryTranscode: false
     property string carryAudioLang:     ""
     property string carrySubLang:       "__off__"
+    // Full stream metadata used to disambiguate when several streams share a language.
+    // These are runtime carry-over hints for autoplay; the persisted backend cache
+    // stores the language plus its position within the language group.
+    property var carryAudioPrefs: ({ language: "", title: "", displayTitle: "", codec: "", channels: "" })
+    property var carrySubPrefs:   ({ language: "__off__", title: "", displayTitle: "", codec: "", forced: false })
 
     property int    audioIdx:    0
     property int    subtitleIdx: -1
@@ -43,6 +48,15 @@ FocusScope {
     property int  choiceIndex:     0
     property string resumeSetting: "ask"
 
+    // Intro/outro skip
+    property var    segments:           []
+    property var    activeSegment:      null
+    property bool   skipPromptShown:    false
+    property bool   introAutoSkipped:   false
+    property bool   outroAutoSkipped:   false
+    property string introSkipSetting:   "Off"
+    property string outroSkipSetting:   "Off"
+
     property int lastKnownPositionMs: 0
     property int lastKnownDurationMs: 0
 
@@ -51,6 +65,7 @@ FocusScope {
     Keys.onPressed: function(event) {
         if (overlayVisible) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+                reportStopped(0, 0)
                 goBack()
                 event.accepted = true
             } else if (event.key === Qt.Key_Up) {
@@ -116,34 +131,116 @@ FocusScope {
         captureCarryLanguages()
     }
 
-    // Record the language of the current audio/subtitle selection so the next
-    // episode (which has different per-file stream IDs) can be matched by language.
+    // Record the language and metadata of the current audio/subtitle selection
+    // so the next episode (which has different per-file stream IDs) can be matched
+    // by language, with title/codec/channels used to disambiguate duplicates.
     function captureCarryLanguages() {
         var a = audioStreams[audioIdx]
         carryAudioLang = (a && a.language) ? a.language : ""
+        carryAudioPrefs = a ? {
+            language: a.language || "",
+            title: a.title || "",
+            displayTitle: a.displayTitle || "",
+            codec: a.codec || "",
+            channels: a.channels !== undefined ? a.channels : ""
+        } : { language: "", title: "", displayTitle: "", codec: "", channels: "" }
+
         var s = subtitleStreams[subtitleIdx]
         carrySubLang = (subtitleIdx === -1 || !s) ? "__off__" : (s.language || "")
+        carrySubPrefs = (subtitleIdx === -1 || !s)
+            ? { language: "__off__", title: "", displayTitle: "", codec: "", forced: false }
+            : {
+                language: s.language || "",
+                title: s.title || "",
+                displayTitle: s.displayTitle || "",
+                codec: s.codec || "",
+                forced: s.forced === true
+            }
+    }
+
+    // Score a stream against a previously-selected stream. Returns -1 when the
+    // language doesn't match; higher scores mean a closer match.
+    function streamScore(s, prefs) {
+        if (!s || !prefs) return -1
+        var lang = s.language || ""
+        var prefLang = prefs.language || ""
+        if (lang !== prefLang) return -1
+        var score = 100
+        var st = (s.title || "").toString().toLowerCase()
+        var pt = (prefs.title || "").toString().toLowerCase()
+        if (st && pt && st === pt) score += 100
+        var sd = (s.displayTitle || "").toString().toLowerCase()
+        var pd = (prefs.displayTitle || "").toString().toLowerCase()
+        if (sd && pd && sd === pd) score += 80
+        var sc = (s.codec || "").toString().toLowerCase()
+        var pc = (prefs.codec || "").toString().toLowerCase()
+        if (sc && pc && sc === pc) score += 50
+        if (prefs.channels !== undefined && s.channels !== undefined) {
+            if (String(s.channels).toLowerCase() === String(prefs.channels).toLowerCase())
+                score += 30
+        }
+        if (prefs.forced !== undefined && s.forced === prefs.forced)
+            score += 20
+        return score
+    }
+
+    function bestAudioMatch(streams, prefs) {
+        var best = 0
+        var bestScore = -1
+        for (var i = 0; i < streams.length; i++) {
+            var score = streamScore(streams[i], prefs)
+            if (score > bestScore) {
+                bestScore = score
+                best = i
+            }
+        }
+        return best
+    }
+
+    function bestSubtitleMatch(streams, prefs) {
+        if (!prefs || prefs.language === "__off__" || prefs.language === "") return -1
+        var best = -1
+        var bestScore = -1
+        for (var i = 0; i < streams.length; i++) {
+            var score = streamScore(streams[i], prefs)
+            if (score > bestScore) {
+                bestScore = score
+                best = i
+            }
+        }
+        return best
     }
 
     // Select audioIdx/subtitleIdx on the current stream lists to match the carried
-    // languages. Falls back to the first audio track / subtitles-off when no match.
+    // languages. When several streams share a language, title/codec/channels are
+    // used to pick the closest match; the fallback is the first audio track / off.
     function applyCarryLanguages() {
-        audioIdx = 0
-        for (var i = 0; i < audioStreams.length; i++) {
-            if (carryAudioLang && audioStreams[i].language === carryAudioLang) { audioIdx = i; break }
+        if (audioStreams && audioStreams.length > 0) {
+            if (carryAudioLang && carryAudioPrefs.language)
+                audioIdx = bestAudioMatch(audioStreams, carryAudioPrefs)
+            else
+                audioIdx = 0
+        } else {
+            audioIdx = 0
         }
-        subtitleIdx = -1
-        if (carrySubLang !== "__off__" && carrySubLang !== "") {
-            for (var j = 0; j < subtitleStreams.length; j++) {
-                if (subtitleStreams[j].language === carrySubLang) { subtitleIdx = j; break }
-            }
+
+        if (subtitleStreams && subtitleStreams.length > 0) {
+            if (carrySubLang !== "__off__" && carrySubLang !== "")
+                subtitleIdx = bestSubtitleMatch(subtitleStreams, carrySubPrefs)
+            else
+                subtitleIdx = -1
+        } else {
+            subtitleIdx = -1
         }
     }
 
     function reportStopped(finalPositionMs, finalDurationMs, failed) {
         if (stoppedReported) return
         stoppedReported = true
-        var pos = lastKnownPositionMs || finalPositionMs
+        // Fall back to viewOffset when playback never reported a position
+        // (canceled resume overlay, back during LOADING): Stopped with
+        // PositionTicks=0 would wipe the server-side resume point.
+        var pos = lastKnownPositionMs || finalPositionMs || viewOffset
         jellyfinBackend.report_playback_stopped(itemId, mediaSourceId, msToTicks(pos), failed || false)
     }
 
@@ -171,6 +268,14 @@ FocusScope {
         lastKnownPositionMs  = 0
         lastKnownDurationMs  = 0
 
+        // Reset skip state for the new episode
+        segments = []
+        activeSegment = null
+        skipPromptShown = false
+        introAutoSkipped = false
+        outroAutoSkipped = false
+        mpvController.clearOsdPrompt()
+
         // Repoint the BACK target so exiting returns to THIS episode's detail
         updateBackItem({
             itemId: detail.itemId,
@@ -186,6 +291,30 @@ FocusScope {
         selectedAudioId    = (audioStreams[audioIdx] && audioStreams[audioIdx].id) ? String(audioStreams[audioIdx].id) : ""
         selectedSubtitleId = (subtitleIdx >= 0 && subtitleStreams[subtitleIdx] && subtitleStreams[subtitleIdx].id) ? String(subtitleStreams[subtitleIdx].id) : ""
         captureCarryLanguages()
+        // Compute same-language index for the cache so menu navigation can
+        // restore the exact track, not just the first stream with that language.
+        var aLangIdx = -1
+        if (carryAudioLang && audioStreams && audioStreams.length > 0) {
+            var found = -1
+            for (var ai2 = 0; ai2 < audioStreams.length; ai2++) {
+                if (audioStreams[ai2].language === carryAudioLang) {
+                    found++
+                    if (ai2 === audioIdx) { aLangIdx = found; break }
+                }
+            }
+        }
+        var sLangIdx = -1
+        if (carrySubLang !== "__off__" && carrySubLang !== "" && subtitleStreams && subtitleStreams.length > 0) {
+            var sfound = -1
+            for (var si2 = 0; si2 < subtitleStreams.length; si2++) {
+                if (subtitleStreams[si2].language === carrySubLang) {
+                    sfound++
+                    if (si2 === subtitleIdx) { sLangIdx = sfound; break }
+                }
+            }
+        }
+        jellyfinBackend.set_last_track_langs(carryAudioLang, carrySubLang === "__off__" ? "" : carrySubLang,
+                                              aLangIdx, sLangIdx)
 
         // Request the new stream URL — get_playback_url() reports the playback
         // Start to the server once PlaybackInfo resolves (correct session/method).
@@ -201,7 +330,7 @@ FocusScope {
     // the launch one tick so the loading indicator is rendered first.
     Timer {
         id: startTimer
-        interval: 50
+        interval: 16
         repeat: false
         property int pendingOffset: 0
         onTriggered: doStartPlayback(pendingOffset)
@@ -238,7 +367,7 @@ FocusScope {
         }
         var subTrack
         if (subtitleIdx < 0)
-            subTrack = -1                 // off → forced subs only (matches Plex)
+            subTrack = -2                 // off → --sid=no
         else if (selectedSubUrl)
             subTrack = 0                  // selected sidecar is the first loaded sub-file
         else
@@ -251,12 +380,14 @@ FocusScope {
     }
 
     function doStartPlayback(offsetMs) {
+        var jfToken = jellyfinBackend.get_access_token()
         if (isTranscoding) {
             // HLS manifest bakes in the selected audio, and the chosen subtitle is
             // burned into the video — so there's no soft sub track for mpv to pick
-            // (subTrack -1 = forced-only, a no-op when nothing soft exists).
+            // (subTrack -2 = --sid=no, a no-op when nothing soft exists).
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                       -1, -1, [], [], false, -1, 0.0, "")
+                                       -1, -2, [], [], false, -1, 0.0, "",
+                                       false, "", false, [], 0.0, false, [], jfToken)
         } else {
             // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
             // --aid; subtitles come from buildSubArgs (sidecars + --sid).
@@ -264,7 +395,7 @@ FocusScope {
             var sub = buildSubArgs()
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
                                        audioTrack, sub.track, sub.urls, [], false, -1, 0.0, "",
-                                       false, "", false, sub.titles)
+                                       false, "", false, sub.titles, 0.0, false, [], jfToken)
         }
     }
 
@@ -278,9 +409,29 @@ FocusScope {
         return m + ":" + (sec < 10 ? "0" : "") + sec
     }
 
+    function findActiveSegment(ms) {
+        for (var i = 0; i < segments.length; i++) {
+            if (ms >= segments[i].startMs && ms < segments[i].endMs)
+                return segments[i]
+        }
+        return null
+    }
+
     Connections {
         target: jellyfinBackend
-        function onErrorOccurred(msg) { console.log("[Jellyfin Player] Backend error: " + msg) }
+        function onErrorOccurred(msg) {
+            console.log("[Jellyfin Player] Backend error: " + msg)
+            if (pendingRetryTranscode) {
+                pendingRetryTranscode = false
+                reportStopped(lastKnownPositionMs, lastKnownDurationMs, true)
+                goBack()
+            }
+        }
+
+        function onSegmentsReady(itemId_, segments_) {
+            if (itemId_ !== playerRoot.itemId) return
+            playerRoot.segments = segments_
+        }
 
         function onStreamUrlReady(url) {
             if (pendingNextEpisode) {
@@ -288,6 +439,12 @@ FocusScope {
                 pendingNextEpisode = false
                 playerRoot.streamUrl = url
                 doStartPlayback(0)
+                // Fetch segments for intro/outro skip after playback starts, so
+                // the HTTP request doesn't contend with the PlaybackInfo POST.
+                introSkipSetting = appCore.get_setting(moduleRoot.moduleId, "intro_skip") || "Off"
+                outroSkipSetting = appCore.get_setting(moduleRoot.moduleId, "outro_skip") || "Off"
+                if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
+                    jellyfinBackend.fetchSegments(playerRoot.itemId)
                 return
             }
             if (pendingRetryTranscode) {
@@ -322,10 +479,58 @@ FocusScope {
                 // First position update means mpv is up and playing — drop the
                 // loading indicator (mpv's own window now covers the screen).
                 playerRoot.playbackStarted = true
+
+                // --- Skip segment tracking ---
+                if (playerRoot.segments.length > 0) {
+                    var seg = findActiveSegment(ms)
+                    if (seg && seg !== playerRoot.activeSegment) {
+                        playerRoot.activeSegment = seg
+                        var setting = seg.type === "Intro"
+                            ? playerRoot.introSkipSetting
+                            : playerRoot.outroSkipSetting
+
+                        if (setting === "Auto") {
+                            if (seg.type === "Intro" && !playerRoot.introAutoSkipped) {
+                                playerRoot.introAutoSkipped = true
+                                mpvController.seekTo(seg.endMs)
+                            } else if (seg.type === "Outro" && !playerRoot.outroAutoSkipped) {
+                                playerRoot.outroAutoSkipped = true
+                                mpvController.seekTo(seg.endMs)
+                            }
+                        } else if (setting === "Button") {
+                            if (!playerRoot.skipPromptShown) {
+                                playerRoot.skipPromptShown = true
+                                mpvController.showOsdSkipPrompt()
+                            }
+                        }
+                    } else if (!seg && playerRoot.activeSegment) {
+                        // Segment ended naturally
+                        playerRoot.activeSegment = null
+                        playerRoot.skipPromptShown = false
+                        mpvController.clearOsdPrompt()
+                    }
+                }
+                // --- End skip segment tracking ---
             }
         }
         function onDurationChanged(ms) {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
+        }
+
+        function onSkipRequested() {
+            if (playerRoot.activeSegment) {
+                if (playerRoot.activeSegment.type === "Intro")
+                    playerRoot.introAutoSkipped = true
+                else
+                    playerRoot.outroAutoSkipped = true
+                mpvController.seekTo(playerRoot.activeSegment.endMs)
+                mpvController.clearOsdPrompt()
+                // Don't null activeSegment here — the async seek moves past the
+                // segment boundary, and the next onPositionChanged detects the
+                // end naturally. Nulling it before the seek completes causes a
+                // position update at the old location to re-detect the same
+                // segment as "new" and re-trigger the prompt.
+            }
         }
 
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
@@ -334,6 +539,8 @@ FocusScope {
                     // Direct play failed (e.g. a codec mpv couldn't handle, or a
                     // network drop). Retry transparently with a transcode, resuming
                     // at the last known position. Mirrors the Plex module.
+                    reportStopped(finalPositionMs, finalDurationMs, true)
+                    stoppedReported = false
                     pendingRetryTranscode = true
                     var aIdx = selectedAudioId ? parseInt(selectedAudioId) : -1
                     var sIdx = selectedSubtitleId ? parseInt(selectedSubtitleId) : -1
@@ -368,20 +575,35 @@ FocusScope {
         repeat:   true
         running:  true
         onTriggered: {
-            if (mpvController.position > 0)
+            var pos = mpvController.position
+            if (pos > 0) {
+                if (pos > playerRoot.lastKnownPositionMs)
+                    playerRoot.lastKnownPositionMs = pos
                 jellyfinBackend.update_playback_progress(itemId, mediaSourceId,
-                                                         msToTicks(mpvController.position), false)
+                                                         msToTicks(pos), false)
+            }
         }
     }
 
     Component.onCompleted: {
         initStreamIndices()
         if (streamUrl === "") return
-        resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        var allConfig = appCore.get_settings()
+        var mc = allConfig && allConfig["modules"]
+            ? allConfig["modules"][moduleRoot.moduleId] || {} : {}
+        resumeSetting = mc["resume_playback"] || "ask"
         // Match ModuleSettings.qml's reading of a toggle: stored as a real bool
         // once the user touches it, but accept the legacy "ON" string too.
-        var autoplayRaw = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode")
+        var autoplayRaw = mc["autoplay_next_episode"]
         autoplayNext = (autoplayRaw === true || autoplayRaw === "ON")
+
+        // Hoist skip settings
+        introSkipSetting = mc["intro_skip"] || "Off"
+        outroSkipSetting = mc["outro_skip"] || "Off"
+
+        // Fetch segments if either skip mode is enabled
+        if (introSkipSetting !== "Off" || outroSkipSetting !== "Off")
+            jellyfinBackend.fetchSegments(itemId)
 
         // "ask": prompt resume vs. start over when there's a saved position.
         // "always" (or anything else): resume directly.
@@ -396,7 +618,7 @@ FocusScope {
     // without stopping), report stopped so Jellyfin doesn't show this as
     // still playing. The guard in reportStopped prevents double-reporting.
     Component.onDestruction: {
-        if (lastKnownPositionMs > 0)
+        if (streamUrl !== "")
             reportStopped(lastKnownPositionMs, lastKnownDurationMs)
     }
 
