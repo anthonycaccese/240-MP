@@ -291,7 +291,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
     // playback with spurious 401/400 errors — disabled unless the caller
     // explicitly opts in via extraArgs (e.g. YouTube passes --ytdl=yes).
-    bool ytdlOverridden = ytdl;
+    bool ytdlOverridden = false;
     for (const QString &a : extraArgs) {
         if (a == QLatin1String("--ytdl") || a.startsWith(QLatin1String("--ytdl=")))
             ytdlOverridden = true;

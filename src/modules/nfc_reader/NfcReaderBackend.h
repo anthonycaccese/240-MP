@@ -33,6 +33,7 @@ private:
 
 class NfcReaderBackend : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool available READ available CONSTANT)
     Q_PROPERTY(bool readerConnected READ readerConnected NOTIFY readerConnectedChanged)
     Q_PROPERTY(QString cardState READ cardState NOTIFY cardStateChanged)
     Q_PROPERTY(QString cardUid READ cardUid NOTIFY cardStateChanged)
@@ -44,6 +45,13 @@ public:
     Q_INVOKABLE void reloadMapping();
     Q_INVOKABLE void resetAfterPlayback();
 
+    bool available() const {
+#ifdef MP240_NFC_READER_AVAILABLE
+        return true;
+#else
+        return false;
+#endif
+    }
     bool readerConnected() const { return m_readerConnected; }
     // "none" (no card / idle), "unmatched" (card with no mapping), "matched" (playing)
     QString cardState() const { return m_cardState; }

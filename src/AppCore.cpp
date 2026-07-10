@@ -15,10 +15,6 @@ AppCore::AppCore(const QString &appRoot, const QString &dataRoot, QObject *paren
     QDir modulesDir(appRoot + "/modules");
     const QStringList dirs = modulesDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
     for (const QString &folder : dirs) {
-#ifndef MP240_ENABLE_NFC_READER
-        if (folder == "nfc_reader")
-            continue;
-#endif
         QString manifestPath = modulesDir.absoluteFilePath(folder + "/manifest.json");
         QFile f(manifestPath);
         if (!f.open(QIODevice::ReadOnly)) continue;

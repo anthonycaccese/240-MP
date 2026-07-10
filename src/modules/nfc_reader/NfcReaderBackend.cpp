@@ -11,11 +11,12 @@
 
 #include <cstring>
 
-#if defined(Q_OS_LINUX) || defined(Q_OS_MAC)
+#if defined(MP240_NFC_READER_AVAILABLE) && (defined(Q_OS_LINUX) || defined(Q_OS_MAC))
 #include <PCSC/winscard.h>
 // Not pulled in by winscard.h on macOS; provides the DWORD/LONG typedefs that
 // keep the SCard* calls portable (pcsclite widens them to long on 64-bit Linux).
 #include <PCSC/wintypes.h>
+#define NFC_PCSC_AVAILABLE
 #endif
 
 // How long without a sample before the UI shows disconnected, and before we
@@ -29,7 +30,7 @@ static constexpr int kMaxRespawns = 5;
 // ---------------------------------------------------------------------------
 
 NfcPollWorker::~NfcPollWorker() {
-#if defined(Q_OS_LINUX) || defined(Q_OS_MAC)
+#ifdef NFC_PCSC_AVAILABLE
     if (m_context) {
         SCardReleaseContext(static_cast<SCARDCONTEXT>(m_context));
         m_context = 0;
@@ -47,7 +48,7 @@ void NfcPollWorker::start() {
 }
 
 void NfcPollWorker::poll() {
-#if defined(Q_OS_LINUX) || defined(Q_OS_MAC)
+#ifdef NFC_PCSC_AVAILABLE
     QString reader = findReader();
     if (reader.isEmpty()) {
         emit sampled(false, {});
@@ -59,13 +60,12 @@ void NfcPollWorker::poll() {
     }
     emit sampled(true, readCardUid(reader));
 #else
-    static int mockCounter = 0;
-    mockCounter++;
-    emit sampled(true, (mockCounter % 100 == 0) ? QStringLiteral("04:1A:2B:3C:4D:5E") : QString());
+    // PC/SC not available — reader never connects
+    emit sampled(false, {});
 #endif
 }
 
-#if defined(Q_OS_LINUX) || defined(Q_OS_MAC)
+#ifdef NFC_PCSC_AVAILABLE
 
 QString NfcPollWorker::findReader() {
     if (!m_context) {
@@ -167,7 +167,7 @@ QString NfcPollWorker::readCardUid(const QString &readerName) {
     return uidBytes.toHex(':').toUpper();
 }
 
-#endif // Q_OS_LINUX || Q_OS_MAC
+#endif // NFC_PCSC_AVAILABLE
 
 // ---------------------------------------------------------------------------
 // NfcReaderBackend — main-thread state machine + QML API.

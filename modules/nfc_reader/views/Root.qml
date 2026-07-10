@@ -52,9 +52,58 @@ FocusScope {
         }
     }
 
+    // Shown when PCSC library is not available at build time
+    Column {
+        visible: !nfcReaderBackend.available
+        anchors.centerIn: parent
+        spacing: root.sh * 0.02
+
+        Text {
+            text: "NFC Reader"
+            color: root.primaryColor
+            font.family: root.globalFont
+            font.capitalization: Font.AllUppercase
+            font.pixelSize: root.sh * 0.05
+            anchors.horizontalCenter: parent.horizontalCenter
+        }
+
+        Text {
+            text: "PCSC library not found"
+            color: root.secondaryColor
+            font.family: root.globalFont
+            font.capitalization: Font.AllUppercase
+            font.pixelSize: root.sh * 0.033
+            anchors.horizontalCenter: parent.horizontalCenter
+        }
+
+        Text {
+            text: "On Raspberry Pi, install libpcsclite-dev\nand rebuild. See the wiki for details."
+            color: root.tertiaryColor
+            font.family: root.globalFont
+            font.pixelSize: root.sh * 0.025
+            horizontalAlignment: Text.AlignHCenter
+            anchors.horizontalCenter: parent.horizontalCenter
+            lineHeight: 1.4
+        }
+    }
+
+    Text {
+        visible: !nfcReaderBackend.available
+        text: root.hints.back + ":BACK"
+        color: root.tertiaryColor
+        font.family: root.globalFont
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.bottomMargin: root.sh * 0.1041667
+        anchors.leftMargin: root.sw * 0.125
+        font.pixelSize: root.sh * 0.0333333
+    }
+
     Component.onCompleted: {
-        nfcReaderBackend.reloadMapping()
-        navigateTo("Items.qml", {})
+        if (nfcReaderBackend.available) {
+            nfcReaderBackend.reloadMapping()
+            navigateTo("Items.qml", {})
+        }
     }
 
     Connections {
@@ -62,7 +111,7 @@ FocusScope {
         function onPlaybackRequested(videoPath) {
             // Last arg opts into yt-dlp so YouTube-page URLs in the mapping
             // resolve; local files and direct media URLs play natively.
-            mpvController.loadAndPlay(videoPath, 0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, true)
+            mpvController.loadAndPlay(videoPath, 0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, [], "")
         }
     }
 
