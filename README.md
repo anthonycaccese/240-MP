@@ -82,21 +82,23 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Optional on both macOS and Raspberry Pi; not built by default
 - Trigger video playback by presenting NFC cards
 - Tested reader support: `ACS ACR122U`
-- Uses a UID-to-video mapping file
+- Uses a UID-to-video mapping file (`nfc_mapping.json`) to determine which video to play for a given card
 
 #### Usage
-1. Enable the module in Settings if it is disabled.
-2. Connect an `ACS ACR122U` NFC reader.
-3. Open NFC Reader from the module list.
-4. Create `nfc_mapping.json` in the app data directory.
-5. Add card UIDs as keys and video targets as values in the mapping JSON.
-6. Present a mapped card to start playback.
+1. Connect an `ACS ACR122U` NFC reader
+2. On Raspberry Pi, allow the user to access the NFC reader by running the script `sudo ./scripts/setup-nfc-reader.sh` from the project root
+3. Create `nfc_mapping.json` in the app data directory and add card UIDs as keys and video targets as values in the mapping JSON (check Mapping Example below)
+4. Enable the module in Settings if it is disabled
+5. Open NFC Reader from the module list
+7. Present a mapped card to start playback
 
 #### Mapping Example
 ```json
 {
-    "7A:12:D0:3D": "https://www.youtube.com/watch?v=NC7Dzlh2EWk",
-    "E2:CD:CF:3D": "/path_to_your_video_files/my_video.mp4"
+  "7A:12:D0:3D": {
+    "path": "/full-path-to-your-video-files/RoboCop (1987).mp4",
+    "title": "Robocop Trailer (1987)"
+  }
 }
 ```
 
