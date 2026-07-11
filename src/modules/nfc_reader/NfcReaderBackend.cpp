@@ -262,6 +262,10 @@ bool NfcReaderBackend::loadMapping() {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         qWarning("[NfcReader] Cannot open mapping file %s: %s", qPrintable(path), qPrintable(file.errorString()));
+        if (m_mappingLoaded) {
+            m_mappingLoaded = false;
+            emit mappingLoadedChanged();
+        }
         return false;
     }
 
@@ -271,6 +275,10 @@ bool NfcReaderBackend::loadMapping() {
 
     if (err.error != QJsonParseError::NoError) {
         qWarning("[NfcReader] JSON parse error in %s: %s", qPrintable(path), qPrintable(err.errorString()));
+        if (m_mappingLoaded) {
+            m_mappingLoaded = false;
+            emit mappingLoadedChanged();
+        }
         return false;
     }
 
@@ -301,6 +309,10 @@ bool NfcReaderBackend::loadMapping() {
 
     qDebug("[NfcReader] Loaded mapping with %lld entries from %s",
            static_cast<long long>(m_mapping.size()), qPrintable(path));
+    if (!m_mappingLoaded) {
+        m_mappingLoaded = true;
+        emit mappingLoadedChanged();
+    }
     return true;
 }
 

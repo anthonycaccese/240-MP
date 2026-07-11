@@ -34,6 +34,7 @@ private:
 class NfcReaderBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool available READ available CONSTANT)
+    Q_PROPERTY(bool mappingLoaded READ mappingLoaded NOTIFY mappingLoadedChanged)
     Q_PROPERTY(bool readerConnected READ readerConnected NOTIFY readerConnectedChanged)
     Q_PROPERTY(QString cardState READ cardState NOTIFY cardStateChanged)
     Q_PROPERTY(QString cardUid READ cardUid NOTIFY cardStateChanged)
@@ -52,6 +53,7 @@ public:
         return false;
 #endif
     }
+    bool mappingLoaded() const { return m_mappingLoaded; }
     bool readerConnected() const { return m_readerConnected; }
     // "none" (no card / idle), "unmatched" (card with no mapping), "matched" (playing)
     QString cardState() const { return m_cardState; }
@@ -59,6 +61,7 @@ public:
     QString videoTitle() const { return m_videoTitle; }
 
 signals:
+    void mappingLoadedChanged();
     void readerConnectedChanged();
     void cardStateChanged();
     void playbackRequested(const QString &videoPath);
@@ -76,6 +79,7 @@ private:
     QString m_dataRoot;
     QString m_mappingFile;
     QHash<QString, MappingEntry> m_mapping;
+    bool m_mappingLoaded = false;
     QThread *m_workerThread = nullptr;
     NfcPollWorker *m_worker = nullptr;
     QTimer *m_watchdog = nullptr;

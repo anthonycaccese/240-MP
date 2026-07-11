@@ -11,7 +11,15 @@ FocusScope {
     signal navigateTo(string path, var params, var listState)
     signal goBack()
 
+    property string errorMessage: ""
+
     focus: true
+
+    Component.onCompleted: {
+        errorMessage = nfcReaderBackend.mappingLoaded ? "" : "REQUIRED FILES NOT FOUND\n\n"
+                             + "ADD NFC_MAPPING.JSON\n\n"
+                             + "PLEASE SEE THE WIKI FOR DETAILS"
+    }
 
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
@@ -30,6 +38,7 @@ FocusScope {
     }
 
     Item {
+        visible: errorMessage === ""
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.2604167 //125
@@ -105,6 +114,27 @@ FocusScope {
                 anchors.bottomMargin: root.sh * 0.05 //24
                 font.pixelSize: root.sh * 0.0291667 //14
             }
+        }
+    }
+
+    Text {
+        visible: errorMessage !== ""
+        text: errorMessage
+        color: root.secondaryColor
+        font.family: root.globalFont
+        anchors.centerIn: parent
+        width: root.sw * 0.76875
+        wrapMode: Text.WordWrap
+        horizontalAlignment: Text.AlignHCenter
+        font.pixelSize: root.sh * 0.05
+    }
+
+    Connections {
+        target: nfcReaderBackend
+        function onMappingLoadedChanged() {
+            errorMessage = nfcReaderBackend.mappingLoaded ? "" : "REQUIRED FILES NOT FOUND\n\n"
+                             + "ADD NFC_MAPPING.JSON\n\n"
+                             + "PLEASE SEE THE WIKI FOR DETAILS"
         }
     }
 
