@@ -88,7 +88,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 1. Enable the module in Settings if it is disabled.
 2. Connect an `ACS ACR122U` NFC reader.
 3. Open NFC Reader from the module list.
-4. Set `Mapping File` in module settings (default: `modules/nfc_reader/nfc_mapping.json`). On settings, you can also set the `Mapping File` to a custom path if you want to store it somewhere else.
+4. Create `nfc_mapping.json` in the app data directory.
 5. Add card UIDs as keys and video targets as values in the mapping JSON.
 6. Present a mapped card to start playback.
 

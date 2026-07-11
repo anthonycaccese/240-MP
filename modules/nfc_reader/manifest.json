@@ -9,12 +9,6 @@
       "label": "Enabled",
       "type": "toggle",
       "default": "OFF"
-    },
-    {
-      "key": "mapping_file",
-      "label": "Mapping File",
-      "type": "directory_browser",
-      "default": "modules/nfc_reader/nfc_mapping.json"
     }
   ]
 }

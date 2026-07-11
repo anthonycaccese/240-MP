@@ -77,7 +77,6 @@ private:
 
     QString m_appRoot;
     QString m_dataRoot;
-    QString m_mappingFile;
     QHash<QString, MappingEntry> m_mapping;
     bool m_mappingLoaded = false;
     QThread *m_workerThread = nullptr;

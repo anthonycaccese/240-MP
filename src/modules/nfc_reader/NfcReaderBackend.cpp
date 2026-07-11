@@ -24,6 +24,7 @@
 static constexpr qint64 kStallDisconnectMs = 3000;
 static constexpr qint64 kStallRespawnMs = 10000;
 static constexpr int kMaxRespawns = 5;
+static const char *kMappingFileName = "nfc_mapping.json";
 
 // ---------------------------------------------------------------------------
 // NfcPollWorker — lives on its own QThread; owns all PC/SC state and calls.
@@ -177,10 +178,9 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
     : QObject(parent)
     , m_appRoot(appRoot)
     , m_dataRoot(dataRoot)
-    , m_mappingFile(dataRoot + "/modules/nfc_reader/nfc_mapping.json")
 {
     qDebug("[NfcReader] Initializing NFC reader backend");
-    qDebug("[NfcReader] Mapping file: %s", qPrintable(m_mappingFile));
+    qDebug("[NfcReader] Mapping file: %s", qPrintable(m_dataRoot + "/" + kMappingFileName));
 
     loadMapping();
     startWorker();
@@ -254,10 +254,7 @@ void NfcReaderBackend::abandonWorker(int waitMs) {
 }
 
 bool NfcReaderBackend::loadMapping() {
-    QString path = m_mappingFile;
-    if (!QFile::exists(path)) {
-        path = m_appRoot + "/modules/nfc_reader/nfc_mapping.json";
-    }
+    const QString path = m_dataRoot + "/" + kMappingFileName;
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
