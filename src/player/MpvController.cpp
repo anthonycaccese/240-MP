@@ -412,7 +412,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         m_process->setProcessEnvironment(env);
         args << QString("--input-conf=%1").arg(m_inputConfPath)
              << "--video-sync=audio"
-             << "--fullscreen" << "--no-native-fs";
+             << "--fullscreen";
         appendVideoArgs(args);
 #ifdef Q_OS_MACOS
         // mpv runs as a separate process and can't see the app-bundle font via
