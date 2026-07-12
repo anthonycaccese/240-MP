@@ -108,13 +108,17 @@ sudo apt-get install -y \
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
 
-To include the optional NFC Reader module, also install `libpcsclite-dev` — NFC support is detected automatically at configure time:
+For the NFC Reader module, also install `libpcsclite-dev` — NFC support is detected automatically at configure time:
 
 ```bash
 sudo apt-get install -y libpcsclite-dev
 ```
 
-For the YouTube module, additionally install `yt-dlp` (`sudo apt-get install -y yt-dlp`) — mpv's ytdl hook uses it to resolve YouTube URLs at playback time.
+For the YouTube module, additionally install `yt-dlp` — mpv's ytdl hook uses it to resolve YouTube URLs at playback time and it needs to be up to date.  The version bundled with mpv by default on the Raspberry Pi is out of date so you'll need to use wget to get the latest directly from yt-dlp's github.
+
+```bash
+sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp
+```
 
 ### Get the source
 
