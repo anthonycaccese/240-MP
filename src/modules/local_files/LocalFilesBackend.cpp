@@ -162,9 +162,10 @@ QString LocalFilesBackend::mediaRoot() const {
 }
 
 void LocalFilesBackend::setMediaRoot(const QString &path) {
-    m_mediaRoot = path;
-    QDir().mkpath(path);
-    qDebug("[LocalFiles] media root: %s", qPrintable(path));
+    // An empty (reset) setting means back to the dataRoot/media default.
+    m_mediaRoot = path.isEmpty() ? m_dataRoot + "/media" : path;
+    QDir().mkpath(m_mediaRoot);
+    qDebug("[LocalFiles] media root: %s", qPrintable(m_mediaRoot));
 }
 
 void LocalFilesBackend::onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value) {
