@@ -52,6 +52,16 @@ FocusScope {
         }
     }
 
+    // With PC/SC missing no child view ever loads, so the back keys for the
+    // unavailable screen must be handled here.
+    Keys.onPressed: function(event) {
+        if (!nfcReaderBackend.available &&
+            (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back)) {
+            moduleRoot.goBack()
+            event.accepted = true
+        }
+    }
+
     // Shown when PCSC library is not available at build time
     Column {
         visible: !nfcReaderBackend.available
