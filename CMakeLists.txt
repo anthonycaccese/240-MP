@@ -18,28 +18,26 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
 find_package(OpenSSL REQUIRED)
 find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
-# PC/SC for NFC reader support (optional — module compiles without it but
-# reader functionality is disabled at runtime).
-if(APPLE)
-    find_library(PCSC_LIBRARIES PCSC)
-else()
-    find_library(PCSC_LIBRARIES pcsclite)
-    find_path(PCSC_INCLUDE_DIRS PCSC/winscard.h
-        PATHS /usr/include /usr/local/include
-    )
-endif()
-if(PCSC_LIBRARIES)
-    set(MPCSC_FOUND TRUE)
-else()
-    set(MPCSC_FOUND FALSE)
-    message(STATUS "PC/SC not found — NFC reader module will compile but reader support is disabled")
-endif()
-
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
 # around mpv playback so Qt EGLFS can resume cleanly after mpv exits.
 if(NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(Libdrm REQUIRED libdrm)
+endif()
+
+# PC/SC for the NFC reader module (optional — the module compiles without it
+# but reports itself unavailable at runtime). macOS ships PCSC.framework with
+# the OS; Linux needs libpcsclite-dev.
+if(APPLE)
+    find_library(PCSC_LIBRARIES PCSC)
+    if(PCSC_LIBRARIES)
+        set(PCSC_FOUND TRUE)
+    endif()
+else()
+    pkg_check_modules(PCSC IMPORTED_TARGET libpcsclite)
+endif()
+if(NOT PCSC_FOUND)
+    message(STATUS "PC/SC not found — NFC reader module will compile but reader support is disabled")
 endif()
 
 if(APPLE)
@@ -54,7 +52,6 @@ add_executable(240mp
     src/modules/jellyfin/JellyfinBackend.cpp
     src/modules/ambient_mode/AmbientModeBackend.cpp
     src/modules/youtube/YouTubeBackend.cpp
-    src/modules/nfc_reader/NfcReaderBackend.h
     src/modules/nfc_reader/NfcReaderBackend.cpp
     src/player/MpvController.cpp
     src/input/InputManager.cpp
@@ -74,19 +71,20 @@ target_link_libraries(240mp PRIVATE
     Qt6::Svg
     OpenSSL::Crypto
     SDL2::SDL2
-    $<$<BOOL:${MPCSC_FOUND}>:${PCSC_LIBRARIES}>
     $<$<NOT:$<BOOL:${APPLE}>>:${Libdrm_LIBRARIES}>
 )
 
-if(APPLE AND MPCSC_FOUND)
-    target_link_libraries(240mp PRIVATE "-framework AppKit" ${PCSC_LIBRARIES})
+if(APPLE)
+    target_link_libraries(240mp PRIVATE "-framework AppKit")
 endif()
 
-if(NOT APPLE AND MPCSC_FOUND)
-    target_include_directories(240mp PRIVATE
-        ${PCSC_INCLUDE_DIRS}
-        ${PCSC_INCLUDE_DIRS}/PCSC
-    )
+if(PCSC_FOUND)
+    target_compile_definitions(240mp PRIVATE MP240_NFC_READER_AVAILABLE=1)
+    if(APPLE)
+        target_link_libraries(240mp PRIVATE ${PCSC_LIBRARIES})
+    else()
+        target_link_libraries(240mp PRIVATE PkgConfig::PCSC)
+    endif()
 endif()
 
 if(NOT APPLE)
@@ -96,10 +94,6 @@ endif()
 target_include_directories(240mp PRIVATE
     src
 )
-
-if(MPCSC_FOUND)
-    target_compile_definitions(240mp PRIVATE MP240_NFC_READER_AVAILABLE=1)
-endif()
 
 # ── macOS bundle metadata ──────────────────────────────────────────────────────
 set_target_properties(240mp PROPERTIES
