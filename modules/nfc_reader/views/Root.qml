@@ -119,9 +119,10 @@ FocusScope {
     Connections {
         target: nfcReaderBackend
         function onPlaybackRequested(videoPath) {
-            // Last arg opts into yt-dlp so YouTube-page URLs in the mapping
-            // resolve; local files and direct media URLs play natively.
-            mpvController.loadAndPlay(videoPath, 0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, [], "")
+            // extraArgs opts into yt-dlp so YouTube-page URLs in the mapping
+            // resolve; safe for local files and direct media URLs, which the
+            // native demuxer handles before the ytdl hook ever runs.
+            mpvController.loadAndPlay(videoPath, 0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ["--ytdl=yes"], "")
         }
     }
 
