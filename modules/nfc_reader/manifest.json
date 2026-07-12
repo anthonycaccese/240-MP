@@ -11,6 +11,12 @@
       "default": "OFF"
     },
     {
+      "key": "tags_directory",
+      "label": "Tags Directory",
+      "type": "directory_browser",
+      "default": ""
+    },
+    {
       "key": "resume_playback",
       "label": "Resume Playback",
       "type": "list_single",

@@ -181,6 +181,17 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
     , m_dataRoot(dataRoot)
 {
     qDebug("[NfcReader] Initializing NFC reader backend");
+
+    // Resolve the configured tags directory (falls back to the dataRoot/nfc_tags default).
+    m_tagsDir = m_dataRoot + "/" + kTagsDirName;
+    QFile f(m_dataRoot + "/config.json");
+    if (f.open(QIODevice::ReadOnly)) {
+        const QString dir = QJsonDocument::fromJson(f.readAll()).object()
+            ["modules"].toObject()["com.240mp.nfc_reader"].toObject()
+            ["tags_directory"].toString();
+        if (!dir.isEmpty())
+            m_tagsDir = dir;
+    }
     qDebug("[NfcReader] Tags dir: %s", qPrintable(tagsDirPath()));
 
     QDir().mkpath(tagsDirPath());
@@ -256,7 +267,20 @@ void NfcReaderBackend::abandonWorker(int waitMs) {
 }
 
 QString NfcReaderBackend::tagsDirPath() const {
-    return m_dataRoot + "/" + kTagsDirName;
+    return m_tagsDir;
+}
+
+void NfcReaderBackend::setTagsDir(const QString &path) {
+    // An empty (cleared) setting means back to the dataRoot/nfc_tags default.
+    m_tagsDir = path.isEmpty() ? m_dataRoot + "/" + kTagsDirName : path;
+    QDir().mkpath(m_tagsDir);
+    qDebug("[NfcReader] Tags dir: %s", qPrintable(m_tagsDir));
+    scanTagsDir();
+}
+
+void NfcReaderBackend::onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value) {
+    if (moduleId == QLatin1String("com.240mp.nfc_reader") && key == QLatin1String("tags_directory"))
+        setTagsDir(value.toString());
 }
 
 // One .txt file per card: the filename (minus .txt) is the display title, the

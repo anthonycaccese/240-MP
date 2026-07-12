@@ -78,6 +78,9 @@ signals:
     void playbackRequested(const QString &videoPath);
     void dynamicOptionsReady(const QString &key, const QVariant &options);
 
+public slots:
+    void onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value);
+
 private slots:
     void onSampled(bool readerConnected, const QString &uid);
 
@@ -89,6 +92,7 @@ private:
 
     QString m_appRoot;
     QString m_dataRoot;
+    QString m_tagsDir;
     QHash<QString, MappingEntry> m_mapping;
     QThread *m_workerThread = nullptr;
     NfcPollWorker *m_worker = nullptr;
@@ -108,6 +112,7 @@ private:
     void        saveHistory(const QVariantMap &history);
 
     QString tagsDirPath() const;
+    void setTagsDir(const QString &path);
     void scanTagsDir();
     bool parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut) const;
     void writeStubFile(const QString &normalizedUid);
