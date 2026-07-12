@@ -39,20 +39,7 @@ endif()
 # around mpv playback so Qt EGLFS can resume cleanly after mpv exits.
 if(NOT APPLE)
     find_package(PkgConfig REQUIRED)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(Libdrm REQUIRED libdrm)
-    else()
-        find_path(Libdrm_INCLUDE_DIRS libdrm/drm.h
-            PATHS /usr/include /usr/local/include
-        )
-        find_library(Libdrm_LIBRARIES
-            NAMES drm
-            PATHS /usr/lib /usr/local/lib
-        )
-        if(NOT Libdrm_INCLUDE_DIRS OR NOT Libdrm_LIBRARIES)
-            message(FATAL_ERROR "Could not find libdrm. Install libdrm-dev")
-        endif()
-    endif()
+    pkg_check_modules(Libdrm REQUIRED libdrm)
 endif()
 
 if(APPLE)
@@ -103,9 +90,7 @@ if(NOT APPLE AND MPCSC_FOUND)
 endif()
 
 if(NOT APPLE)
-    target_include_directories(240mp PRIVATE
-        ${Libdrm_INCLUDE_DIRS}
-    )
+    target_include_directories(240mp PRIVATE ${Libdrm_INCLUDE_DIRS})
 endif()
 
 target_include_directories(240mp PRIVATE
@@ -175,12 +160,9 @@ else()
 
     install(DIRECTORY
         "${CMAKE_SOURCE_DIR}/views"
+        "${CMAKE_SOURCE_DIR}/modules"
         "${CMAKE_SOURCE_DIR}/assets"
         "${CMAKE_SOURCE_DIR}/scripts"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp"
-        COMPONENT Runtime)
-
-    install(DIRECTORY "${CMAKE_SOURCE_DIR}/modules"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp"
         COMPONENT Runtime)
 endif()
