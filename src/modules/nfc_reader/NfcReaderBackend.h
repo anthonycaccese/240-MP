@@ -46,6 +46,11 @@ public:
     Q_INVOKABLE void reloadMapping();
     Q_INVOKABLE void resetAfterPlayback();
 
+    Q_INVOKABLE QVariantMap getSavedPosition(const QString &videoPath);
+    Q_INVOKABLE void        savePosition(const QString &videoPath, int positionMs);
+    Q_INVOKABLE void        clearPosition(const QString &videoPath);
+    Q_INVOKABLE void        get_resume_playback_options();
+
     bool available() const {
 #ifdef MP240_NFC_READER_AVAILABLE
         return true;
@@ -65,6 +70,7 @@ signals:
     void readerConnectedChanged();
     void cardStateChanged();
     void playbackRequested(const QString &videoPath);
+    void dynamicOptionsReady(const QString &key, const QVariant &options);
 
 private slots:
     void onSampled(bool readerConnected, const QString &uid);
@@ -90,6 +96,10 @@ private:
     QString m_videoTitle;
     QString m_lastUid;
     bool m_playbackActive = false;
+
+    QString     historyFilePath() const;
+    QVariantMap loadHistory() const;
+    void        saveHistory(const QVariantMap &history);
 
     bool loadMapping();
     void startWorker();

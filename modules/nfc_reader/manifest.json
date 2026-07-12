@@ -9,6 +9,14 @@
       "label": "Enabled",
       "type": "toggle",
       "default": "OFF"
+    },
+    {
+      "key": "resume_playback",
+      "label": "Resume Playback",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_resume_playback_options",
+      "default": "ask"
     }
   ]
 }

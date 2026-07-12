@@ -14,6 +14,11 @@ FocusScope {
     property string errorMessage:    ""
     property int    lastStartMs:     0   // what the last attempt started from, for retry
 
+    property bool   overlayVisible:  false
+    property int    savedPositionMs: 0
+    property int    choiceIndex:     0
+    property string resumeSetting:   "ask"
+
     // Track last non-null values during playback; groundwork for a future
     // resume-playback setting (mirrors the other module players).
     property int    lastKnownPositionMs: 0
@@ -53,6 +58,21 @@ FocusScope {
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 errorMessage = ""
                 play(lastStartMs)
+                event.accepted = true
+            }
+        } else if (overlayVisible) {
+            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+                goBack()
+                event.accepted = true
+            } else if (event.key === Qt.Key_Up) {
+                choiceIndex = 0
+                event.accepted = true
+            } else if (event.key === Qt.Key_Down) {
+                choiceIndex = 1
+                event.accepted = true
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                overlayVisible = false
+                play(choiceIndex === 0 ? savedPositionMs : 0)
                 event.accepted = true
             }
         } else {
@@ -104,6 +124,14 @@ FocusScope {
                 playerRoot.errorMessage = "PLAYBACK FAILED\n\nCHECK THE MAPPED PATH OR URL\n(YOUTUBE LINKS REQUIRE YT-DLP)"
                 return
             }
+            // Same completion rule as local_files: near the end clears the
+            // resume point, meaningful progress saves it.
+            var pos = lastKnownPositionMs || finalPositionMs
+            var dur = lastKnownDurationMs || finalDurationMs
+            if (dur > 0 && pos >= dur * 0.95)
+                nfcReaderBackend.clearPosition(videoPath)
+            else if (pos > 5000)
+                nfcReaderBackend.savePosition(videoPath, pos)
             goBack()
         }
     }
@@ -113,7 +141,28 @@ FocusScope {
             goBack()
             return
         }
-        play(0)
+        // A card tap is user activity but arrives with no key event — if the
+        // screen saver is up, the resume dialog / LOADING frame would render
+        // invisibly behind it.
+        root.dismissScreenSaver()
+
+        resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        if (resumeSetting === "no") {
+            play(0)
+            return
+        }
+
+        var saved    = nfcReaderBackend.getSavedPosition(videoPath)
+        var savedPos = saved.pos || 0
+
+        if (resumeSetting === "yes") {
+            play(savedPos)
+        } else if (savedPos > 0) {
+            savedPositionMs = savedPos
+            overlayVisible = true
+        } else {
+            play(0)
+        }
     }
 
     // Every exit path (natural end, user quit, backing out of the error
@@ -132,7 +181,7 @@ FocusScope {
             font.family: root.globalFont
             anchors.centerIn: parent
             font.pixelSize: root.sh * 0.05 //24
-            visible: !playbackStarted && errorMessage === ""
+            visible: !overlayVisible && !playbackStarted && errorMessage === ""
         }
 
         Column {
@@ -159,4 +208,86 @@ FocusScope {
             }
         }
     }
+
+    Rectangle {
+        anchors.fill: parent
+        color: root.surfaceColor
+        visible: overlayVisible
+
+        Rectangle {
+            id: dialogRect
+            color: root.surfaceColor
+            anchors.centerIn: parent
+            width: root.sw * 0.76875 //492
+            height: root.sh * 0.2833333 //136
+
+            Column {
+                id: dialogColumn
+                anchors.fill: parent
+                spacing: root.sh * 0.05 //24
+
+                Text {
+                    text: "RESUME PLAYBACK?"
+                    color: root.secondaryColor
+                    font.family: root.globalFont
+                    font.pixelSize: root.sh * 0.0333333 //16
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+
+                Column {
+                    Repeater {
+                        model: [
+                            "Resume from " + formatTime(savedPositionMs),
+                            "Start from the beginning"
+                        ]
+                        delegate: Item {
+                            width: dialogColumn.width
+                            height: root.sh * 0.0583333 //28
+
+                            Rectangle {
+                                anchors.fill: delegateText
+                                color: root.accentColor
+                                visible: index === choiceIndex
+                            }
+
+                            Text {
+                                id: delegateText
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData
+                                color: index === choiceIndex ? root.surfaceColor : root.primaryColor
+                                font.family: root.globalFont
+                                font.capitalization: Font.AllUppercase
+                                topPadding: root.sh * 0.0041667 //2
+                                leftPadding: root.sw * 0.009375 //6
+                                rightPadding: root.sw * 0.009375 //6
+                                bottomPadding: root.sh * 0.00625 //3
+                                font.pixelSize: root.sh * 0.0416667 //20
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SELECT"
+                    color: root.tertiaryColor
+                    font.family: root.globalFont
+                    font.pixelSize: root.sh * 0.0333333 //16
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+    }
+
+    function formatTime(ms) {
+        var s   = Math.floor(ms / 1000)
+        var h   = Math.floor(s / 3600)
+        var m   = Math.floor((s % 3600) / 60)
+        var sec = s % 60
+        if (h > 0)
+            return h + ":" + pad(m) + ":" + pad(sec)
+        return m + ":" + pad(sec)
+    }
+
+    function pad(n) { return n < 10 ? "0" + n : "" + n }
 }

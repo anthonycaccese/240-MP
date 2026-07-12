@@ -327,6 +327,57 @@ void NfcReaderBackend::resetAfterPlayback() {
     qDebug("[NfcReader] Playback ended - ready for next card");
 }
 
+// Resume history — same shape as local_files: a JSON map of path → {pos}.
+// Keyed by the mapped video path (not the card UID) so remapping a card to a
+// different video doesn't inherit the old video's resume point.
+QString NfcReaderBackend::historyFilePath() const {
+    return m_dataRoot + "/nfc_reader_history.json";
+}
+
+QVariantMap NfcReaderBackend::loadHistory() const {
+    QFile file(historyFilePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QJsonDocument::fromJson(file.readAll()).object().toVariantMap();
+}
+
+void NfcReaderBackend::saveHistory(const QVariantMap &history) {
+    QFile file(historyFilePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    file.write(QJsonDocument(QJsonObject::fromVariantMap(history)).toJson(QJsonDocument::Compact));
+}
+
+QVariantMap NfcReaderBackend::getSavedPosition(const QString &videoPath) {
+    const QVariant val = loadHistory().value(videoPath);
+    if (!val.canConvert<QVariantMap>())
+        return {};
+    return val.toMap();
+}
+
+void NfcReaderBackend::savePosition(const QString &videoPath, int positionMs) {
+    QVariantMap history = loadHistory();
+    QVariantMap entry;
+    entry["pos"] = positionMs;
+    history[videoPath] = entry;
+    saveHistory(history);
+}
+
+void NfcReaderBackend::clearPosition(const QString &videoPath) {
+    QVariantMap history = loadHistory();
+    history.remove(videoPath);
+    saveHistory(history);
+}
+
+void NfcReaderBackend::get_resume_playback_options() {
+    QVariantList options;
+    QVariantMap ask; ask["id"] = "ask"; ask["label"] = "Ask";
+    QVariantMap yes; yes["id"] = "yes"; yes["label"] = "Always";
+    QVariantMap no;  no["id"]  = "no";  no["label"]  = "Never";
+    options << ask << yes << no;
+    emit dynamicOptionsReady("resume_playback", options);
+}
+
 void NfcReaderBackend::setCardState(const QString &state, const QString &uid, const QString &title) {
     if (m_cardState == state && m_cardUid == uid && m_videoTitle == title) return;
     m_cardState = state;
