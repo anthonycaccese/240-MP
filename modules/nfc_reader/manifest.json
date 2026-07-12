@@ -28,6 +28,24 @@
         "1080p"
       ],
       "default": "480p"
+    },
+    {
+      "key": "auto_subtitles",
+      "label": "Auto Show Subtitles",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_auto_subtitles_options",
+      "default": "forced",
+      "description": "Choose to automatically show subtitles when a video starts.\n[FORCED ONLY] displays for foreign dialogue only."
+    },
+    {
+      "key": "sub_lang",
+      "label": "Subtitle Language",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_subtitle_languages",
+      "default": "-",
+      "description": "Select which language to automatically load subtitles for.\n[Any] is the same as 'no preference'."
     }
   ]
 }

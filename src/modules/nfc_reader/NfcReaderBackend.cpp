@@ -394,6 +394,37 @@ void NfcReaderBackend::get_resume_playback_options() {
     emit dynamicOptionsReady("resume_playback", options);
 }
 
+void NfcReaderBackend::get_auto_subtitles_options() {
+    QVariantList options;
+    QVariantMap forced; forced["id"] = "forced"; forced["label"] = "Forced Only";
+    QVariantMap on;     on["id"] = "on";         on["label"] = "On";
+    QVariantMap off;    off["id"] = "off";       off["label"] = "Off";
+    options << forced << on << off;
+    emit dynamicOptionsReady("auto_subtitles", options);
+}
+
+void NfcReaderBackend::get_subtitle_languages() {
+    QStringList addedLabels;
+    QVariantList options;
+
+    QFile file(m_appRoot + "/modules/nfc_reader/iso639-1.json");
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+
+    options.append(QVariantMap{{"id","-"},{"label","Any"}});
+
+    QVariantList locList = QJsonDocument::fromJson(file.readAll()).toVariant().toList();
+    for (const QVariant loc : locList)
+    {
+        QVariantMap langOption = QVariantMap{{"id",loc.toJsonObject()["id"].toString()},{"label",loc.toJsonObject()["label"].toString()}};
+        if (langOption["label"].toString() == "" || addedLabels.contains(langOption["label"].toString())) continue;
+        addedLabels.append(langOption["label"].toString());
+        options.append(langOption);
+    }
+
+    emit dynamicOptionsReady("sub_lang", options);
+}
+
 void NfcReaderBackend::setCardState(const QString &state, const QString &uid, const QString &title) {
     if (m_cardState == state && m_cardUid == uid && m_videoTitle == title) return;
     m_cardState = state;

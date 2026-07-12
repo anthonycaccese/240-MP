@@ -19,6 +19,11 @@ FocusScope {
     property int    choiceIndex:     0
     property string resumeSetting:   "ask"
     property var    ytdlArgs:        []
+    property string subtitleMode:    "forced"
+    property var    subtitleLangs:   []
+
+    // mpv subtitle-track flag derived from subtitleMode: 0 = on, -1 = forced only, -2 = off.
+    property int    subFlag:         (subtitleMode == "on") ? 0 : ((subtitleMode == "forced") ? -1 : -2)
 
     // Track last non-null values during playback; groundwork for a future
     // resume-playback setting (mirrors the other module players).
@@ -32,7 +37,7 @@ FocusScope {
         // extraArgs opts into yt-dlp so YouTube-page URLs in the mapping
         // resolve; safe for local files and direct media URLs, which the
         // native demuxer handles before the ytdl hook ever runs.
-        mpvController.loadAndPlay(videoPath, startMs / 1000.0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
+        mpvController.loadAndPlay(videoPath, startMs / 1000.0, -1, subFlag, [], subtitleLangs, false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
     }
 
     // Starting mpv runs synchronously and, on the Pi, immediately switches VT
@@ -149,6 +154,13 @@ FocusScope {
 
         var resolution = appCore.get_setting(moduleRoot.moduleId, "playback_resolution") || "480p"
         ytdlArgs = ["--ytdl=yes", "--ytdl-format=" + nfcReaderBackend.ytdlFormatForResolution(resolution)]
+
+        subtitleMode = appCore.get_setting(moduleRoot.moduleId, "auto_subtitles") || "forced"
+        // mpv takes a *list* of languages to fall back through; "-" is the
+        // stored id for "Any" (no preference), which adds nothing and launches
+        // mpv without an --slang preference — same behavior as local_files.
+        var subLangString = appCore.get_setting(moduleRoot.moduleId, "sub_lang") || "-"
+        subtitleLangs = (subLangString !== "-") ? [subLangString] : []
 
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
         if (resumeSetting === "no") {
