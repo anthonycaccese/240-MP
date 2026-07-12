@@ -39,9 +39,10 @@ QString AmbientModeBackend::mediaRoot() const
 
 void AmbientModeBackend::setMediaRoot(const QString &path)
 {
-    m_mediaRoot = path;
-    QDir().mkpath(path);
-    qDebug("[AmbientMode] media root: %s", qPrintable(path));
+    // An empty (reset) setting means back to the dataRoot/ambient default.
+    m_mediaRoot = path.isEmpty() ? m_dataRoot + "/ambient" : path;
+    QDir().mkpath(m_mediaRoot);
+    qDebug("[AmbientMode] media root: %s", qPrintable(m_mediaRoot));
 }
 
 QVariantList AmbientModeBackend::scanFiles(const QStringList &extensions) const
