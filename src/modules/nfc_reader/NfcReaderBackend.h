@@ -50,6 +50,7 @@ public:
     Q_INVOKABLE void        savePosition(const QString &videoPath, int positionMs);
     Q_INVOKABLE void        clearPosition(const QString &videoPath);
     Q_INVOKABLE void        get_resume_playback_options();
+    Q_INVOKABLE QString     ytdlFormatForResolution(const QString &resolution) const;
 
     bool available() const {
 #ifdef MP240_NFC_READER_AVAILABLE

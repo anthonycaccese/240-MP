@@ -17,6 +17,17 @@
       "options_source": "dynamic",
       "options_slot": "get_resume_playback_options",
       "default": "ask"
+    },
+    {
+      "key": "playback_resolution",
+      "label": "YouTube Video Resolution",
+      "type": "list_single",
+      "options": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "default": "480p"
     }
   ]
 }

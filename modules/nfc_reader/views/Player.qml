@@ -18,6 +18,7 @@ FocusScope {
     property int    savedPositionMs: 0
     property int    choiceIndex:     0
     property string resumeSetting:   "ask"
+    property var    ytdlArgs:        []
 
     // Track last non-null values during playback; groundwork for a future
     // resume-playback setting (mirrors the other module players).
@@ -31,7 +32,7 @@ FocusScope {
         // extraArgs opts into yt-dlp so YouTube-page URLs in the mapping
         // resolve; safe for local files and direct media URLs, which the
         // native demuxer handles before the ytdl hook ever runs.
-        mpvController.loadAndPlay(videoPath, startMs / 1000.0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ["--ytdl=yes"])
+        mpvController.loadAndPlay(videoPath, startMs / 1000.0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
     }
 
     // Starting mpv runs synchronously and, on the Pi, immediately switches VT
@@ -145,6 +146,9 @@ FocusScope {
         // screen saver is up, the resume dialog / LOADING frame would render
         // invisibly behind it.
         root.dismissScreenSaver()
+
+        var resolution = appCore.get_setting(moduleRoot.moduleId, "playback_resolution") || "480p"
+        ytdlArgs = ["--ytdl=yes", "--ytdl-format=" + nfcReaderBackend.ytdlFormatForResolution(resolution)]
 
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
         if (resumeSetting === "no") {
