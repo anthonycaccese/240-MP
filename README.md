@@ -4,9 +4,9 @@
 
 240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV).
 
-Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 5 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
+Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 6 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
-It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps outlined below.
+It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps outlined below.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" section.
 
 ## Video Overview
 
@@ -78,35 +78,10 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Mix video with a different audio track
 - Loops forever until you stop it
 
-### NFC Reader Module
-- Optional on both macOS and Raspberry Pi; not built by default
-- Trigger video playback by presenting NFC cards
+### NFC Reader Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader))
+- Start video playback via NFC cards
 - Tested reader support: `ACS ACR122U`
 - Uses a UID-to-video mapping file (`nfc_mapping.json`) to determine which video to play for a given card
-
-#### Usage
-1. Connect an `ACS ACR122U` NFC reader
-2. On Raspberry Pi, allow the user to access the NFC reader by running the script `sudo ./scripts/setup-nfc-reader.sh` from the project root
-3. Create `nfc_mapping.json` in the app data directory and add card UIDs as keys and video targets as values in the mapping JSON (check Mapping Example below)
-4. Enable the module in Settings if it is disabled
-5. Open NFC Reader from the module list
-7. Present a mapped card to start playback
-
-#### Mapping Example
-```json
-{
-  "7A:12:D0:3D": {
-    "path": "/full-path-to-your-video-files/RoboCop (1987).mp4",
-    "title": "Robocop Trailer (1987)"
-  }
-}
-```
-
-#### Notes
-- Mapping values can be absolute paths, relative paths, or direct URLs.
-- Relative paths are resolved from the app/data roots at runtime.
-- Example configure: `cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos -DENABLE_NFC_READER=ON .`
-- Raspberry Pi source builds also need `libpcsclite-dev` when NFC is enabled.
 
 ### Global
 - [Color Schemes](https://github.com/anthonycaccese/240-MP/wiki/Customizations)
@@ -128,19 +103,28 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Why didn't you use Kodi/LibreELEC/OSMC?
     - I've used all of those distros and they are all excellent but I also like making things and wanted something simpler without as many options.  Something that felt like a VCR from my youth.
 - Should I use 240-MP instead of Kodi/LibreELEC/OSMC?
-    - Nope 😄
+    - I would recommend thinking about it like this...
     - All of those distros are amazing, feature rich, work across a ton of devices and have awesome supportive teams behind them.
-    - I on the other hand am just one person making nostalgic things for my own niche use cases.  If those use cases match with what you're looking for, then 240-MP is a bunch of fun and I'd be happy for you to try it.  Otherwise, the well known distros are spectacular and you should likely open those doors instead.
+    - I on the other hand am just one person making nostalgic things for my own niche use cases.
+    - If those use cases match with what you're looking for, then 240-MP is a bunch of fun and I'd be happy for you to try it.
+    - Otherwise, the well known distros are spectacular and you should likely open those doors instead.
 - Will this work on other Raspberry Pi models? (like the 5, 2 zero, etc...)
-    - Sorry, I can't say for sure as I've only tested on the 4b, 3b+ and 3b and don't have plans to test on other devices at this time.
+    - I've tested on the 4b, 3b+ and 3b. Other users have confimred the 5 works well too and all the details on what we've confimred can be found here: https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing
+    - If its not on that list then the short answer is "we don't know but please feel free try and let us know if it works"
 - Where does the name "240-MP" come from?
-    - 240 has a double meaning referring to the longest [VHS tape length](https://en.wikipedia.org/wiki/VHS#Tape_lengths) and my primary display target for it of [CRT TVs](https://consolemods.org/wiki/CRT:What_is_240p%3F).
+    - 240 has a double meaning referring to the longest [VHS tape length](https://en.wikipedia.org/wiki/VHS#Tape_lengths) and love for [CRT TVs](https://consolemods.org/wiki/CRT:What_is_240p%3F) as a display type.
     - MP also has a double meaning of "Media Player" and a play on the "SP/LP/EP/SLP" terminology that was used to refer to the recording quality for VHS recordings.
 - Does the 240 in the name mean that it outputs at 240p resolution?
-    - The output resolution for the menu and video playback when using it on a CRT is 480i/576i (depending on your config).
+    - The UI scales based on the OS config and output cables you are using.
+    - For example: the output resolution for the menu and video playback when using it on a CRT with the configs I use is 480i/576i
+- Does 240-MP support RGB out instead of composite?
+    - 240-MP is just an app that runs on top of an already configured Operating System. If you are able to configure your OS on the Raspberry Pi to output over RGB then 240-MP will simply scale and display to that output when it boots up as well.
+    - If you have a combination of RGB out + OS configuration that works well then please add a comment here with your set up details: https://github.com/anthonycaccese/240-MP/discussions/44
 - Does 240-MP work over HDMI on a modern television too?
     - Yes! The UI was built to scale on modern televisions over HDMI as well.
     - Please make sure you use the config.txt I provide for HDMI and it will output at the proper resolution for a modern tv.
+- Does 240-MP support bluetooth keyboards/remotes/controllers?
+    - 240-MP is just an app that runs on top of an already configured Operating System. If your OS has a way to configure and set up bluetooh controllers then 240-MP will simply see them as controllers when it boots up.
 
 ## Credits & Acknowledgments
 

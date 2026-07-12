@@ -318,6 +318,18 @@ void NfcReaderBackend::reloadMapping() {
     loadMapping();
 }
 
+void NfcReaderBackend::setModuleActive(bool active) {
+    if (m_moduleActive == active) return;
+    m_moduleActive = active;
+    qDebug("[NfcReader] Module %s", active ? "active - card taps armed" : "inactive - card taps ignored");
+    if (!active) {
+        // Leaving the module drops any transient card state so the next visit
+        // starts from a clean "tap a card" screen.
+        m_playbackActive = false;
+        setCardState("none");
+    }
+}
+
 void NfcReaderBackend::resetAfterPlayback() {
     // Back to "tap a card" — but m_lastUid is kept so a card still sitting on
     // the reader doesn't immediately restart playback. It clears (and the card
@@ -325,6 +337,104 @@ void NfcReaderBackend::resetAfterPlayback() {
     m_playbackActive = false;
     setCardState("none");
     qDebug("[NfcReader] Playback ended - ready for next card");
+}
+
+// Resume history — same shape as local_files: a JSON map of path → {pos}.
+// Keyed by the mapped video path (not the card UID) so remapping a card to a
+// different video doesn't inherit the old video's resume point.
+QString NfcReaderBackend::historyFilePath() const {
+    return m_dataRoot + "/nfc_reader_history.json";
+}
+
+QVariantMap NfcReaderBackend::loadHistory() const {
+    QFile file(historyFilePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QJsonDocument::fromJson(file.readAll()).object().toVariantMap();
+}
+
+void NfcReaderBackend::saveHistory(const QVariantMap &history) {
+    QFile file(historyFilePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    file.write(QJsonDocument(QJsonObject::fromVariantMap(history)).toJson(QJsonDocument::Compact));
+}
+
+QVariantMap NfcReaderBackend::getSavedPosition(const QString &videoPath) {
+    const QVariant val = loadHistory().value(videoPath);
+    if (!val.canConvert<QVariantMap>())
+        return {};
+    return val.toMap();
+}
+
+void NfcReaderBackend::savePosition(const QString &videoPath, int positionMs) {
+    QVariantMap history = loadHistory();
+    QVariantMap entry;
+    entry["pos"] = positionMs;
+    history[videoPath] = entry;
+    saveHistory(history);
+}
+
+void NfcReaderBackend::clearPosition(const QString &videoPath) {
+    QVariantMap history = loadHistory();
+    history.remove(videoPath);
+    saveHistory(history);
+}
+
+// Same format cascade as the YouTube module; only applies to mapping entries
+// that resolve through yt-dlp (YouTube page URLs) — local files and direct
+// media URLs never reach the ytdl hook.
+QString NfcReaderBackend::ytdlFormatForResolution(const QString &resolution) const {
+    int height = 480;
+    if (resolution == QLatin1String("720p"))
+        height = 720;
+    else if (resolution == QLatin1String("1080p"))
+        height = 1080;
+    // H.264 first (RPi hardware decode), then any codec at the cap, then best
+    return QStringLiteral("bestvideo[height<=?%1][vcodec^=avc1]+bestaudio/"
+                          "bestvideo[height<=?%1]+bestaudio/"
+                          "best[height<=?%1]/best")
+        .arg(height);
+}
+
+void NfcReaderBackend::get_resume_playback_options() {
+    QVariantList options;
+    QVariantMap ask; ask["id"] = "ask"; ask["label"] = "Ask";
+    QVariantMap yes; yes["id"] = "yes"; yes["label"] = "Always";
+    QVariantMap no;  no["id"]  = "no";  no["label"]  = "Never";
+    options << ask << yes << no;
+    emit dynamicOptionsReady("resume_playback", options);
+}
+
+void NfcReaderBackend::get_auto_subtitles_options() {
+    QVariantList options;
+    QVariantMap forced; forced["id"] = "forced"; forced["label"] = "Forced Only";
+    QVariantMap on;     on["id"] = "on";         on["label"] = "On";
+    QVariantMap off;    off["id"] = "off";       off["label"] = "Off";
+    options << forced << on << off;
+    emit dynamicOptionsReady("auto_subtitles", options);
+}
+
+void NfcReaderBackend::get_subtitle_languages() {
+    QStringList addedLabels;
+    QVariantList options;
+
+    QFile file(m_appRoot + "/modules/nfc_reader/iso639-1.json");
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+
+    options.append(QVariantMap{{"id","-"},{"label","Any"}});
+
+    QVariantList locList = QJsonDocument::fromJson(file.readAll()).toVariant().toList();
+    for (const QVariant loc : locList)
+    {
+        QVariantMap langOption = QVariantMap{{"id",loc.toJsonObject()["id"].toString()},{"label",loc.toJsonObject()["label"].toString()}};
+        if (langOption["label"].toString() == "" || addedLabels.contains(langOption["label"].toString())) continue;
+        addedLabels.append(langOption["label"].toString());
+        options.append(langOption);
+    }
+
+    emit dynamicOptionsReady("sub_lang", options);
 }
 
 void NfcReaderBackend::setCardState(const QString &state, const QString &uid, const QString &title) {
@@ -381,6 +491,15 @@ void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid) {
         }
     }
     if (!readerConnected) return;
+
+    // Outside the module, card events must have no effect — but keep tracking
+    // the UID silently so a card already resting on the reader when the module
+    // opens is not treated as a fresh tap; it must be lifted and re-tapped,
+    // same as a card left on the reader after playback ends.
+    if (!m_moduleActive) {
+        m_lastUid = uid;
+        return;
+    }
 
     if (uid.isEmpty()) {
         if (!m_lastUid.isEmpty()) {

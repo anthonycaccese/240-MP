@@ -10,7 +10,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-AUTHORIZED_USER="${1:-$USER}"
+# Under sudo, $USER is root — fall back to the invoking user so the polkit
+# rules authorize the account that will actually run 240-MP.
+AUTHORIZED_USER="${1:-${SUDO_USER:-$USER}}"
 
 echo "==> Installing PC/SC build & runtime packages..."
 sudo apt-get update -qq
@@ -18,6 +20,16 @@ sudo apt-get install -y \
     libpcsclite-dev \
     pcscd \
     pcsc-tools
+
+echo ""
+echo "==> Blacklisting pn533 kernel modules..."
+# The kernel's NFC stack (pn533/pn533_usb) claims the ACR122U as soon as it
+# is plugged in, which blocks PC/SC from talking to it.
+sudo tee /etc/modprobe.d/blacklist-pn533.conf > /dev/null << 'EOF'
+blacklist pn533
+blacklist pn533_usb
+EOF
+sudo modprobe -r pn533_usb pn533 2>/dev/null || true
 
 echo ""
 echo "==> Creating systemd override for pcscd (disable PrivateUsers)..."

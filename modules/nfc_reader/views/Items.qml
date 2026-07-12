@@ -22,7 +22,7 @@ FocusScope {
     }
 
     Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
+        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
             goBack()
             event.accepted = true
         }
@@ -129,8 +129,29 @@ FocusScope {
         font.pixelSize: root.sh * 0.05
     }
 
+    // Dwell on the matched-cassette state (PLAYING ► + title) briefly before
+    // handing off to the player, so a tap gets on-screen confirmation of what
+    // matched instead of a hard cut to the loading screen. Extra taps during
+    // the dwell are already ignored by the backend (m_playbackActive), and
+    // backing out mid-dwell is safe: leaving the module disarms the backend.
+    Timer {
+        id: matchedDwell
+        interval: 1200
+        repeat: false
+        property string pendingPath: ""
+        property string pendingTitle: ""
+        onTriggered: navigateTo("Player.qml", { videoPath: pendingPath, title: pendingTitle }, {})
+    }
+
     Connections {
         target: nfcReaderBackend
+        // A matched card tap hands off to Player.qml, which owns the whole mpv
+        // session (launch, key forwarding over IPC, exit handling).
+        function onPlaybackRequested(videoPath) {
+            matchedDwell.pendingPath = videoPath
+            matchedDwell.pendingTitle = nfcReaderBackend.videoTitle
+            matchedDwell.restart()
+        }
         function onMappingLoadedChanged() {
             errorMessage = nfcReaderBackend.mappingLoaded ? "" : "REQUIRED FILES NOT FOUND\n\n"
                              + "ADD NFC_MAPPING.JSON\n\n"

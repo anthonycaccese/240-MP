@@ -170,7 +170,8 @@ jobs:
             qml6-module-qtquick-window \
             libdrm-dev \
             libssl-dev \
-            libsdl2-dev
+            libsdl2-dev \
+            libpcsclite-dev
 
       - name: Configure
         run: |

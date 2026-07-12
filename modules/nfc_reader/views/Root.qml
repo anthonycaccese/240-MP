@@ -52,6 +52,16 @@ FocusScope {
         }
     }
 
+    // With PC/SC missing no child view ever loads, so the back keys for the
+    // unavailable screen must be handled here.
+    Keys.onPressed: function(event) {
+        if (!nfcReaderBackend.available &&
+            (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back)) {
+            moduleRoot.goBack()
+            event.accepted = true
+        }
+    }
+
     // Shown when PCSC library is not available at build time
     Column {
         visible: !nfcReaderBackend.available
@@ -101,24 +111,12 @@ FocusScope {
 
     Component.onCompleted: {
         if (nfcReaderBackend.available) {
+            nfcReaderBackend.setModuleActive(true)
             nfcReaderBackend.reloadMapping()
             navigateTo("Items.qml", {})
         }
     }
 
-    Connections {
-        target: nfcReaderBackend
-        function onPlaybackRequested(videoPath) {
-            // Last arg opts into yt-dlp so YouTube-page URLs in the mapping
-            // resolve; local files and direct media URLs play natively.
-            mpvController.loadAndPlay(videoPath, 0, -1, -1, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, [], "")
-        }
-    }
-
-    Connections {
-        target: mpvController
-        function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
-            nfcReaderBackend.resetAfterPlayback()
-        }
-    }
+    // Card taps must do nothing once the user leaves the module.
+    Component.onDestruction: nfcReaderBackend.setModuleActive(false)
 }

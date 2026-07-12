@@ -166,6 +166,16 @@ Window {
     // --- SCREEN SAVER STATE ---
     property bool screenSaverActive: false
 
+    // Playback counts as user activity even when no key started it (an NFC
+    // card tap launches mpv directly). If the saver was showing at launch,
+    // nothing key-driven ever reaches its dismiss handler — focus has moved
+    // into the module's player view — so clear it on playback transitions.
+    function dismissScreenSaver() {
+        if (!screenSaverActive) return
+        screenSaverActive = false
+        moduleLoader.forceActiveFocus()
+    }
+
     // --- APP-LEVEL NAV STACK ---
     property var appNavStack: []
     property var appCurrentParams: ({})
@@ -181,11 +191,13 @@ Window {
             if (ms > 0 && !idleTracker.mpvActive) {
                 idleTracker.mpvActive = true
                 idleTracker.resetActivity()
+                root.dismissScreenSaver()
             }
         }
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
             idleTracker.mpvActive = false
             idleTracker.resetActivity()
+            root.dismissScreenSaver()
         }
     }
 

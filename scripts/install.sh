@@ -49,6 +49,7 @@ sudo apt-get install -y \
     qml6-module-qtquick-window \
     qml6-module-qtquick-effects \
     libsdl2-2.0-0 \
+    libpcsclite1 \
     mpv
 
 # ── udev rule: allow tty group to open /dev/tty0 for VT switching ─────────────
