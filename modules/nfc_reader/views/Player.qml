@@ -190,14 +190,33 @@ FocusScope {
         color: "black"
 
         // Shown while mpv launches and (for YouTube URLs) yt-dlp resolves the
-        // stream. Hidden once the first position update arrives.
-        Text {
-            text: "LOADING..."
-            color: "white"
-            font.family: root.globalFont
+        // stream. Hidden once the first position update arrives. The title
+        // carries the tap confirmation from Items.qml through the whole
+        // pre-playback wait.
+        Column {
             anchors.centerIn: parent
-            font.pixelSize: root.sh * 0.05 //24
+            spacing: root.sh * 0.05 //24
             visible: !overlayVisible && !playbackStarted && errorMessage === ""
+
+            Text {
+                text: "LOADING..."
+                color: "white"
+                font.family: root.globalFont
+                anchors.horizontalCenter: parent.horizontalCenter
+                font.pixelSize: root.sh * 0.05 //24
+            }
+            Text {
+                visible: videoTitle !== ""
+                text: videoTitle
+                color: "#919191"
+                font.family: root.globalFont
+                font.capitalization: Font.AllUppercase
+                width: root.sw * 0.76875 //492
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+                anchors.horizontalCenter: parent.horizontalCenter
+                font.pixelSize: root.sh * 0.0333333 //16
+            }
         }
 
         Column {
