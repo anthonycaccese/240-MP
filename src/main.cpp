@@ -15,6 +15,7 @@
 #include "modules/plex/PlexBackend.h"
 #include "modules/jellyfin/JellyfinBackend.h"
 #include "modules/ambient_mode/AmbientModeBackend.h"
+#include "modules/nfc_reader/NfcReaderBackend.h"
 #include "modules/youtube/YouTubeBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
@@ -84,6 +85,7 @@ int main(int argc, char *argv[]) {
     PlexBackend         plexBackend(appRoot, dataRoot);
     JellyfinBackend     jellyfinBackend(appRoot, dataRoot);
     AmbientModeBackend  ambientMode(dataRoot);
+    NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     MpvController       mpvController(appRoot, &appCore);
     InputManager        inputManager(dataRoot);
@@ -103,6 +105,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.plex",         "plexBackend",        &plexBackend, ctx);
     appCore.registerModule("com.240mp.jellyfin",     "jellyfinBackend",    &jellyfinBackend, ctx);
     appCore.registerModule("com.240mp.ambient_mode", "ambientModeBackend", &ambientMode, ctx);
+    appCore.registerModule("com.240mp.nfc_reader",   "nfcReaderBackend",   &nfcReader,   ctx);
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
 
     ctx->setContextProperty("idleTracker",   &idleTracker);

@@ -1,0 +1,14 @@
+{
+  "id": "com.240mp.nfc_reader",
+  "name": "NFC Reader",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    }
+  ]
+}

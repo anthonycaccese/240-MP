@@ -2,7 +2,7 @@
 
 # 240-MP
 
-240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV). 
+240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV).
 
 Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 5 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
@@ -19,7 +19,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 | <img src="https://github.com/user-attachments/assets/9472d55a-4617-4a7f-80c4-32aa28494048" /> | <img src="https://github.com/user-attachments/assets/4f7d8230-860a-4ace-9370-9f59f43289c0" /> |
 
 | Resume Option | Playback | Settings |
-| --- | --- | --- | 
+| --- | --- | --- |
 | <img src="https://github.com/user-attachments/assets/490e9ebd-fab2-4fd1-9959-35ebb619eff0" /> | <img src="https://github.com/user-attachments/assets/a3c768c7-6ede-4cdf-9d03-90aee7b8cdfb" /> | <img src="https://github.com/user-attachments/assets/0fd48977-8776-4334-b34e-d12256f23b97" /> |
 
 ## Current Features
@@ -78,12 +78,42 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Mix video with a different audio track
 - Loops forever until you stop it
 
+### NFC Reader Module
+- Optional on both macOS and Raspberry Pi; not built by default
+- Trigger video playback by presenting NFC cards
+- Tested reader support: `ACS ACR122U`
+- Uses a UID-to-video mapping file (`nfc_mapping.json`) to determine which video to play for a given card
+
+#### Usage
+1. Connect an `ACS ACR122U` NFC reader
+2. On Raspberry Pi, allow the user to access the NFC reader by running the script `sudo ./scripts/setup-nfc-reader.sh` from the project root
+3. Create `nfc_mapping.json` in the app data directory and add card UIDs as keys and video targets as values in the mapping JSON (check Mapping Example below)
+4. Enable the module in Settings if it is disabled
+5. Open NFC Reader from the module list
+7. Present a mapped card to start playback
+
+#### Mapping Example
+```json
+{
+  "7A:12:D0:3D": {
+    "path": "/full-path-to-your-video-files/RoboCop (1987).mp4",
+    "title": "Robocop Trailer (1987)"
+  }
+}
+```
+
+#### Notes
+- Mapping values can be absolute paths, relative paths, or direct URLs.
+- Relative paths are resolved from the app/data roots at runtime.
+- Example configure: `cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos -DENABLE_NFC_READER=ON .`
+- Raspberry Pi source builds also need `libpcsclite-dev` when NFC is enabled.
+
 ### Global
 - [Color Schemes](https://github.com/anthonycaccese/240-MP/wiki/Customizations)
 - [Keyboard & Controller](https://github.com/anthonycaccese/240-MP/wiki/Input) input support
 - Media Keys during video playback (volume +/-, mute, play/pause, stop, seek, next chapter, previous chapter)
 
-## Install 
+## Install
 - [On a Raspberry Pi](INSTALL.md#on-a-raspberry-pi)
 - [On macOS (ARM)](INSTALL.md#on-macos-arm)
 
@@ -112,7 +142,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
     - Yes! The UI was built to scale on modern televisions over HDMI as well.
     - Please make sure you use the config.txt I provide for HDMI and it will output at the proper resolution for a modern tv.
 
-## Credits & Acknowledgments 
+## Credits & Acknowledgments
 
 - The `VCR OSD Mono` font was created by Riciery Santos Leal (a.k.a. mrmanet) https://www.dafont.com/vcr-osd-mono.font
 - Because this is a hobby project (and a fairly niche use case), I am using [Claude Code](https://www.anthropic.com/product/claude-code) to build a large part of the backend C++ code and structure the modules.  If you have concerns with that, I am glad to talk through it.  Also, please feel free to fork this repo, update any aspects and tailor things to your own use case; that's why the source is fully open and available.
