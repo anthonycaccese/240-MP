@@ -81,7 +81,8 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 ### NFC Reader Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader))
 - Start video playback via NFC cards
 - Tested reader support: `ACS ACR122U`
-- Uses a UID-to-video mapping file (`nfc_mapping.json`) to determine which video to play for a given card
+- Maps cards to videos via per-card text files in the `nfc_tags` data directory — the filename is the display title, line 1 the card UID, line 2 the video path or URL
+- Tapping an unknown card auto-creates a stub tag file for it; rename the file and add a path line to map the card
 
 ### Global
 - [Color Schemes](https://github.com/anthonycaccese/240-MP/wiki/Customizations)
