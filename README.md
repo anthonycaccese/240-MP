@@ -2,7 +2,31 @@
 
 # 240-MP
 
-240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV).
+## Monterey Intel Fork
+
+This fork focuses on running 240-MP reliably on Intel Macs running 
+macOS Monterey.
+
+### Current changes
+
+- Intel x86_64 build target (macOS 12 Monterey)
+- Portable application bundle
+- Fixed the macOS fullscreen white border by removing `--no-native-fs` 
+from the mpv launch arguments
+- Upstream Pull Request: #140
+
+### Planned improvements
+
+- Better YouTube configuration experience
+- Playback information overlay
+- Plex music library support
+
+---
+
+240-MP is a retro VCR style 
+frontend to play content 
+on [Raspberry 
+Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV).
 
 Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 6 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
