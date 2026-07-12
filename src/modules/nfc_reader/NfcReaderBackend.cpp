@@ -1,5 +1,6 @@
 #include "NfcReaderBackend.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -24,7 +25,7 @@
 static constexpr qint64 kStallDisconnectMs = 3000;
 static constexpr qint64 kStallRespawnMs = 10000;
 static constexpr int kMaxRespawns = 5;
-static const char *kMappingFileName = "nfc_mapping.json";
+static const char *kTagsDirName = "nfc_tags";
 
 // ---------------------------------------------------------------------------
 // NfcPollWorker — lives on its own QThread; owns all PC/SC state and calls.
@@ -180,9 +181,10 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
     , m_dataRoot(dataRoot)
 {
     qDebug("[NfcReader] Initializing NFC reader backend");
-    qDebug("[NfcReader] Mapping file: %s", qPrintable(m_dataRoot + "/" + kMappingFileName));
+    qDebug("[NfcReader] Tags dir: %s", qPrintable(tagsDirPath()));
 
-    loadMapping();
+    QDir().mkpath(tagsDirPath());
+    scanTagsDir();
     startWorker();
 
     // If the worker wedges inside a PC/SC call, first report the reader as
@@ -253,69 +255,96 @@ void NfcReaderBackend::abandonWorker(int waitMs) {
     m_worker = nullptr;
 }
 
-bool NfcReaderBackend::loadMapping() {
-    const QString path = m_dataRoot + "/" + kMappingFileName;
+QString NfcReaderBackend::tagsDirPath() const {
+    return m_dataRoot + "/" + kTagsDirName;
+}
 
-    QFile file(path);
+// One .txt file per card: the filename (minus .txt) is the display title, the
+// first non-empty line is the card UID (any formatting — it's normalized), and
+// the second non-empty line is the playback path (absolute, appRoot/dataRoot-
+// relative, or a URL). A file with a UID but no path is a valid "known but
+// unmapped" card. Lines past the second are ignored.
+bool NfcReaderBackend::parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut) const {
+    QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        qWarning("[NfcReader] Cannot open mapping file %s: %s", qPrintable(path), qPrintable(file.errorString()));
-        if (m_mappingLoaded) {
-            m_mappingLoaded = false;
-            emit mappingLoadedChanged();
-        }
+        qWarning("[NfcReader] Cannot open tag file %s: %s",
+                 qPrintable(filePath), qPrintable(file.errorString()));
         return false;
     }
+    QString text = QString::fromUtf8(file.readAll());
+    if (text.startsWith(QChar(0xFEFF)))
+        text.remove(0, 1);
 
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
-    file.close();
-
-    if (err.error != QJsonParseError::NoError) {
-        qWarning("[NfcReader] JSON parse error in %s: %s", qPrintable(path), qPrintable(err.errorString()));
-        if (m_mappingLoaded) {
-            m_mappingLoaded = false;
-            emit mappingLoadedChanged();
-        }
-        return false;
+    QStringList lines;
+    for (QString line : text.split(u'\n')) {
+        line = line.trimmed();  // also strips the \r of CRLF files
+        if (!line.isEmpty()) lines.append(line);
+        if (lines.size() == 2) break;
     }
+    if (lines.isEmpty()) return false;
 
-    // Entries are either "UID": "path" or "UID": { "path": ..., "title": ... }.
-    // Keys are normalized so the file's UID formatting doesn't have to match
-    // the reader's byte formatting exactly.
-    m_mapping.clear();
-    const QJsonObject obj = doc.object();
-    for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
-        MappingEntry entry;
-        if (it.value().isObject()) {
-            const QJsonObject v = it.value().toObject();
-            entry.path = v["path"].toString();
-            entry.title = v["title"].toString();
-        } else {
-            entry.path = it.value().toString();
-        }
-        if (entry.path.isEmpty()) {
-            qWarning("[NfcReader] Skipping mapping entry with no path: %s", qPrintable(it.key()));
-            continue;
-        }
-        if (entry.title.isEmpty()) {
-            const QString base = QFileInfo(entry.path).completeBaseName();
-            entry.title = base.isEmpty() ? entry.path : base;
-        }
-        m_mapping.insert(normalizeUid(it.key()), entry);
-    }
-
-    qDebug("[NfcReader] Loaded mapping with %lld entries from %s",
-           static_cast<long long>(m_mapping.size()), qPrintable(path));
-    if (!m_mappingLoaded) {
-        m_mappingLoaded = true;
-        emit mappingLoadedChanged();
-    }
+    uidOut = normalizeUid(lines.at(0));
+    if (uidOut.isEmpty()) return false;
+    pathOut = lines.size() > 1 ? lines.at(1) : QString();
     return true;
 }
 
+void NfcReaderBackend::scanTagsDir() {
+    m_mapping.clear();
+
+    // QDir's default filter excludes hidden files (.DS_Store etc.). The .txt
+    // suffix is checked manually because nameFilters are case-sensitive on
+    // Linux. Alphabetical listing makes duplicate handling deterministic.
+    const QDir dir(tagsDirPath());
+    const QFileInfoList files =
+        dir.entryInfoList(QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
+
+    int fileCount = 0;
+    for (const QFileInfo &fi : files) {
+        if (fi.suffix().compare(QLatin1String("txt"), Qt::CaseInsensitive) != 0)
+            continue;
+
+        QString uid, path;
+        if (!parseTagFile(fi.absoluteFilePath(), uid, path)) {
+            qWarning("[NfcReader] Skipping tag file with no usable UID: %s",
+                     qPrintable(fi.fileName()));
+            continue;
+        }
+        if (m_mapping.contains(uid)) {
+            qWarning("[NfcReader] Duplicate UID %s in %s - keeping earlier file",
+                     qPrintable(uid), qPrintable(fi.fileName()));
+            continue;
+        }
+        m_mapping.insert(uid, MappingEntry{path, fi.completeBaseName()});
+        fileCount++;
+    }
+    qDebug("[NfcReader] Scanned %d tag files from %s", fileCount, qPrintable(tagsDirPath()));
+}
+
+// A tapped card with no tag file gets a stub written for it so the user only
+// has to rename the file and add a path line. NewOnly never overwrites: if a
+// same-named file already exists (e.g. it holds a different UID), skip + warn.
+void NfcReaderBackend::writeStubFile(const QString &normalizedUid) {
+    QDir().mkpath(tagsDirPath());  // recreate if deleted at runtime
+    QString name = normalizedUid;
+    name.replace(QLatin1Char(':'), QLatin1Char('-'));
+    const QString path = tagsDirPath() + "/" + name + ".txt";
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+        qWarning("[NfcReader] Could not create stub tag file %s: %s",
+                 qPrintable(path), qPrintable(file.errorString()));
+        return;
+    }
+    file.write((normalizedUid + "\n").toUtf8());
+    qDebug("[NfcReader] Created stub tag file: %s", qPrintable(path));
+    // Register as known-unmapped so a lift-and-retap doesn't re-scan/re-write.
+    m_mapping.insert(normalizedUid, MappingEntry{QString(), name});
+}
+
 void NfcReaderBackend::reloadMapping() {
-    qDebug("[NfcReader] Reloading mapping file");
-    loadMapping();
+    qDebug("[NfcReader] Rescanning tags dir");
+    scanTagsDir();
 }
 
 void NfcReaderBackend::setModuleActive(bool active) {
@@ -522,15 +551,29 @@ void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid) {
         return;
     }
 
-    const auto it = m_mapping.constFind(normalizedUid);
-    if (it != m_mapping.constEnd()) {
+    auto it = m_mapping.constFind(normalizedUid);
+    if (it == m_mapping.constEnd() || it->path.isEmpty()) {
+        // Unknown or not-yet-mapped card: the user may have just added or
+        // edited a tag file. Re-scan once before deciding. Cheap (tiny dir)
+        // and naturally rate-limited by the uid == m_lastUid early return.
+        scanTagsDir();
+        it = m_mapping.constFind(normalizedUid);
+    }
+
+    if (it != m_mapping.constEnd() && !it->path.isEmpty()) {
         QString resolvedPath = resolveVideoPath(it->path);
         qDebug("[NfcReader] Mapping found: %s -> %s", qPrintable(normalizedUid), qPrintable(resolvedPath));
         m_playbackActive = true;
         setCardState("matched", normalizedUid, it->title);
         emit playbackRequested(resolvedPath);
     } else {
-        qWarning("[NfcReader] No mapping for UID: %s", qPrintable(normalizedUid));
+        if (it == m_mapping.constEnd()) {
+            qWarning("[NfcReader] No tag file for UID %s - creating stub", qPrintable(normalizedUid));
+            writeStubFile(normalizedUid);
+        } else {
+            qWarning("[NfcReader] Tag file for UID %s has no path line: %s",
+                     qPrintable(normalizedUid), qPrintable(it->title));
+        }
         setCardState("unmatched", normalizedUid);
     }
 }

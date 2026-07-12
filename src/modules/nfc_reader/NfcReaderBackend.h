@@ -34,7 +34,6 @@ private:
 class NfcReaderBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool available READ available CONSTANT)
-    Q_PROPERTY(bool mappingLoaded READ mappingLoaded NOTIFY mappingLoadedChanged)
     Q_PROPERTY(bool readerConnected READ readerConnected NOTIFY readerConnectedChanged)
     Q_PROPERTY(QString cardState READ cardState NOTIFY cardStateChanged)
     Q_PROPERTY(QString cardUid READ cardUid NOTIFY cardStateChanged)
@@ -67,15 +66,13 @@ public:
         return false;
 #endif
     }
-    bool mappingLoaded() const { return m_mappingLoaded; }
     bool readerConnected() const { return m_readerConnected; }
-    // "none" (no card / idle), "unmatched" (card with no mapping), "matched" (playing)
+    // "none" (no card / idle), "unmatched" (card with no tag file or no path yet), "matched" (playing)
     QString cardState() const { return m_cardState; }
     QString cardUid() const { return m_cardUid; }
     QString videoTitle() const { return m_videoTitle; }
 
 signals:
-    void mappingLoadedChanged();
     void readerConnectedChanged();
     void cardStateChanged();
     void playbackRequested(const QString &videoPath);
@@ -86,14 +83,13 @@ private slots:
 
 private:
     struct MappingEntry {
-        QString path;
+        QString path;  // empty = known card with a tag file but no path yet
         QString title;
     };
 
     QString m_appRoot;
     QString m_dataRoot;
     QHash<QString, MappingEntry> m_mapping;
-    bool m_mappingLoaded = false;
     QThread *m_workerThread = nullptr;
     NfcPollWorker *m_worker = nullptr;
     QTimer *m_watchdog = nullptr;
@@ -111,7 +107,10 @@ private:
     QVariantMap loadHistory() const;
     void        saveHistory(const QVariantMap &history);
 
-    bool loadMapping();
+    QString tagsDirPath() const;
+    void scanTagsDir();
+    bool parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut) const;
+    void writeStubFile(const QString &normalizedUid);
     void startWorker();
     void abandonWorker(int waitMs);
     void setCardState(const QString &state, const QString &uid = {}, const QString &title = {});
