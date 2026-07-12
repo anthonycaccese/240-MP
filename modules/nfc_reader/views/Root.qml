@@ -111,8 +111,12 @@ FocusScope {
 
     Component.onCompleted: {
         if (nfcReaderBackend.available) {
+            nfcReaderBackend.setModuleActive(true)
             nfcReaderBackend.reloadMapping()
             navigateTo("Items.qml", {})
         }
     }
+
+    // Card taps must do nothing once the user leaves the module.
+    Component.onDestruction: nfcReaderBackend.setModuleActive(false)
 }

@@ -46,6 +46,12 @@ public:
     Q_INVOKABLE void reloadMapping();
     Q_INVOKABLE void resetAfterPlayback();
 
+    // The module's Root.qml raises/lowers this on load/unload. Polling runs
+    // for the whole app lifetime (the watchdog needs it), but card events must
+    // not do anything — no state changes, no playback — unless the user is
+    // inside the NFC module.
+    Q_INVOKABLE void setModuleActive(bool active);
+
     Q_INVOKABLE QVariantMap getSavedPosition(const QString &videoPath);
     Q_INVOKABLE void        savePosition(const QString &videoPath, int positionMs);
     Q_INVOKABLE void        clearPosition(const QString &videoPath);
@@ -99,6 +105,7 @@ private:
     QString m_videoTitle;
     QString m_lastUid;
     bool m_playbackActive = false;
+    bool m_moduleActive = false;
 
     QString     historyFilePath() const;
     QVariantMap loadHistory() const;

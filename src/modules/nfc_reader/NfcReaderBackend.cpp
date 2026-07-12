@@ -318,6 +318,18 @@ void NfcReaderBackend::reloadMapping() {
     loadMapping();
 }
 
+void NfcReaderBackend::setModuleActive(bool active) {
+    if (m_moduleActive == active) return;
+    m_moduleActive = active;
+    qDebug("[NfcReader] Module %s", active ? "active - card taps armed" : "inactive - card taps ignored");
+    if (!active) {
+        // Leaving the module drops any transient card state so the next visit
+        // starts from a clean "tap a card" screen.
+        m_playbackActive = false;
+        setCardState("none");
+    }
+}
+
 void NfcReaderBackend::resetAfterPlayback() {
     // Back to "tap a card" — but m_lastUid is kept so a card still sitting on
     // the reader doesn't immediately restart playback. It clears (and the card
@@ -479,6 +491,15 @@ void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid) {
         }
     }
     if (!readerConnected) return;
+
+    // Outside the module, card events must have no effect — but keep tracking
+    // the UID silently so a card already resting on the reader when the module
+    // opens is not treated as a fresh tap; it must be lifted and re-tapped,
+    // same as a card left on the reader after playback ends.
+    if (!m_moduleActive) {
+        m_lastUid = uid;
+        return;
+    }
 
     if (uid.isEmpty()) {
         if (!m_lastUid.isEmpty()) {
