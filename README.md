@@ -79,7 +79,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Loops forever until you stop it
 
 ### NFC Reader Module
-- Optional on both macOS and Raspberry Pi; not built by default
+- Optional module — support is detected at build time: always compiled on macOS (`PCSC.framework` ships with the OS), and on Raspberry Pi whenever `libpcsclite-dev` is installed
 - Trigger video playback by presenting NFC cards
 - Tested reader support: `ACS ACR122U`
 - Uses a UID-to-video mapping file (`nfc_mapping.json`) to determine which video to play for a given card
@@ -90,7 +90,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 3. Create `nfc_mapping.json` in the app data directory and add card UIDs as keys and video targets as values in the mapping JSON (check Mapping Example below)
 4. Enable the module in Settings if it is disabled
 5. Open NFC Reader from the module list
-7. Present a mapped card to start playback
+6. Present a mapped card to start playback
 
 #### Mapping Example
 ```json
@@ -103,10 +103,9 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 ```
 
 #### Notes
-- Mapping values can be absolute paths, relative paths, or direct URLs.
+- Mapping values can be absolute paths, relative paths, direct media URLs, or YouTube page URLs (YouTube playback requires `yt-dlp` to be installed).
 - Relative paths are resolved from the app/data roots at runtime.
-- Example configure: `cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos -DENABLE_NFC_READER=ON .`
-- Raspberry Pi source builds also need `libpcsclite-dev` when NFC is enabled.
+- Raspberry Pi source builds need `libpcsclite-dev` installed before configuring; if it is missing, the app still builds and the module explains what to install when opened.
 
 ### Global
 - [Color Schemes](https://github.com/anthonycaccese/240-MP/wiki/Customizations)

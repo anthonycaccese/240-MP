@@ -43,7 +43,7 @@ SDL2 is a build-time dependency — `InputManager` links against it for USB game
 
 **Optional NFC Reader build support:**
 
-- No extra package install is needed on macOS. `PCSC.framework` is provided by the OS.
+- No extra package install is needed on macOS. `PCSC.framework` is provided by the OS, so NFC reader support is always compiled in.
 
 ### Get the source
 
@@ -58,12 +58,6 @@ cd 240-mp
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos . && cmake --build build
-```
-
-To compile the optional NFC Reader module too:
-
-```bash
-cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.0/macos -DENABLE_NFC_READER=ON . && cmake --build build
 ```
 
 **For incremental builds:**
@@ -114,11 +108,12 @@ sudo apt-get install -y \
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
 
-If you want to compile the optional NFC Reader module on Raspberry Pi too, also install:
+To include the optional NFC Reader module, also install `libpcsclite-dev` — NFC support is detected automatically at configure time:
 
 ```bash
 sudo apt-get install -y libpcsclite-dev
 ```
+
 For the YouTube module, additionally install `yt-dlp` (`sudo apt-get install -y yt-dlp`) — mpv's ytdl hook uses it to resolve YouTube URLs at playback time.
 
 ### Get the source
@@ -134,12 +129,6 @@ cd 240-mp
 
 ```bash
 cmake -B build
-```
-
-To compile the optional NFC Reader module too:
-
-```bash
-cmake -B build -DENABLE_NFC_READER=ON
 ```
 
 **For incremental builds:**
