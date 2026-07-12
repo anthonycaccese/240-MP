@@ -131,6 +131,11 @@ FocusScope {
 
     Connections {
         target: nfcReaderBackend
+        // A matched card tap hands off to Player.qml, which owns the whole mpv
+        // session (launch, key forwarding over IPC, exit handling).
+        function onPlaybackRequested(videoPath) {
+            navigateTo("Player.qml", { videoPath: videoPath, title: nfcReaderBackend.videoTitle }, {})
+        }
         function onMappingLoadedChanged() {
             errorMessage = nfcReaderBackend.mappingLoaded ? "" : "REQUIRED FILES NOT FOUND\n\n"
                              + "ADD NFC_MAPPING.JSON\n\n"
