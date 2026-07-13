@@ -749,8 +749,12 @@ void PlexBackend::build_stream_url(const QString &ratingKey,
                                    const QString &sessionId) {
     QString uri = serverUrl();
     QString token = serverToken();
+    // Cloud-hosted extras have part keys that already carry a query string
+    // (e.g. /services/iva/assets/…/video.mp4?fmt=4&bitrate=750), so join with
+    // '&' in that case — a second '?' makes PMS reject the request with a 400.
     QString url = uri + partKey
-                + "?X-Plex-Client-Identifier="  + clientId()
+                + (partKey.contains('?') ? "&" : "?")
+                + "X-Plex-Client-Identifier="   + clientId()
                 + "&X-Plex-Session-Identifier=" + sessionId;
     qDebug() << "[Plex] Playback: DIRECT PLAY";
     emit streamUrlReady(url, token);
@@ -1705,6 +1709,47 @@ void PlexBackend::load_children(const QString &ratingKey) {
         QVariantList items;
         for (const auto &mv : metadata) items.append(formatItem(mv.toObject()));
         emit childrenLoaded(items);
+    });
+}
+
+void PlexBackend::load_extras(const QString &ratingKey) {
+    QString uri = serverUrl(), token = serverToken();
+    auto *reply = plexGet(QUrl(uri + "/library/metadata/" + ratingKey + "/extras"), token);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, ratingKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this, ratingKey]{ load_extras(ratingKey); }); return;
+            }
+            // No errorOccurred here: the detail views' error handlers reset
+            // loading/play state, and a failed extras fetch must not do that.
+            qDebug() << "[Plex] Load extras failed:" << reply->errorString();
+            emit extrasLoaded(QVariantList{}); return;
+        }
+        QJsonArray metadata = QJsonDocument::fromJson(reply->readAll())
+                              .object()["MediaContainer"].toObject()["Metadata"].toArray();
+        QVariantList items;
+        for (const auto &mv : metadata) {
+            QJsonObject meta = mv.toObject();
+            QVariantMap detail = buildItemDetail(meta);
+            if (detail.isEmpty()) continue; // metadata-only extra, nothing playable
+
+            // "behindTheScenes" → "BEHIND THE SCENES". Plex's own UI shortens
+            // the raw "sceneOrSample" subtype to just "Scene"; match that.
+            QString subtype = meta["subtype"].toString();
+            QString label;
+            if (subtype == "sceneOrSample") {
+                label = QStringLiteral("SCENE");
+            } else {
+                for (const QChar &c : subtype) {
+                    if (c.isUpper() && !label.isEmpty()) label += ' ';
+                    label += c.toUpper();
+                }
+            }
+            detail["extraTypeLabel"] = label.isEmpty() ? QStringLiteral("EXTRA") : label;
+            items.append(detail);
+        }
+        emit extrasLoaded(items);
     });
 }
 

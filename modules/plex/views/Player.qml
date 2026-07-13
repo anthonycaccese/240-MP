@@ -27,6 +27,9 @@ FocusScope {
     property var    imageSubtitleIds: navParams.imageSubtitleIds || []
     property string selectedAudioId:    navParams.selectedAudioId    || ""
     property string selectedSubtitleId: navParams.selectedSubtitleId || "0"
+    // Extras pass false: "next episode" has no meaning for a trailer/clip, so a
+    // natural end must return to the Extras list instead of probing for one.
+    property bool   allowAutoplay:      navParams.allowAutoplay !== false
 
     property bool stoppedReported:    false
     property bool playbackStarted:    false
@@ -390,7 +393,7 @@ FocusScope {
         // Match ModuleSettings.qml's reading of a toggle: stored as a real bool
         // once the user touches it, but accept the legacy "ON" string too.
         var autoplayRaw = appCore.get_setting(moduleRoot.moduleId, "autoplay_next_episode")
-        autoplayNext  = (autoplayRaw === true || autoplayRaw === "ON")
+        autoplayNext  = allowAutoplay && (autoplayRaw === true || autoplayRaw === "ON")
 
         if (resumeSetting === "ask" && viewOffset > 0) {
             overlayVisible = true

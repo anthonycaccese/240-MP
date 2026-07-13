@@ -16,7 +16,11 @@ FocusScope {
     property var episodes: []
     property bool isLoading: false
 
-    // Focus rows: 0 = play button, 1 = episode list
+    // Extras attached to this season (trailers, behind the scenes, …)
+    property var extras: []
+    readonly property bool hasExtras: extras.length > 0
+
+    // Focus rows: 0 = play button, 1 = extras (when hasExtras), 2 = episode list
     property int focusRow: 0
 
     Connections {
@@ -30,6 +34,10 @@ FocusScope {
             }
         }
 
+        function onExtrasLoaded(items) {
+            seasonRoot.extras = items
+        }
+
         function onErrorOccurred(msg) {
             seasonRoot.isLoading = false
             console.log("[SeasonItem] Error: " + msg)
@@ -39,23 +47,38 @@ FocusScope {
     Component.onCompleted: {
         isLoading = true
         focusRow = 0
-        if (item.ratingKey) plexBackend.load_children(item.ratingKey)
+        if (item.ratingKey) {
+            plexBackend.load_children(item.ratingKey)
+            plexBackend.load_extras(item.ratingKey)
+        }
     }
 
     focus: true
 
+    // Season label as displayed in the header line ("SPECIALS" / "SEASON n")
+    function seasonLabel() {
+        if (item.index === 0) return "Specials"
+        if (item.index) return "Season " + item.index
+        return ""
+    }
+
     Keys.onUpPressed: {
-        if (focusRow === 1) {
+        if (focusRow === 2) {
             if (episodeList.currentIndex > 0) {
                 episodeList.currentIndex--
             } else {
-                focusRow = 0
+                focusRow = hasExtras ? 1 : 0
             }
+        } else if (focusRow === 1) {
+            focusRow = 0
         }
     }
     Keys.onDownPressed: {
         if (focusRow === 0) {
-            if (episodes.length > 0) focusRow = 1
+            if (hasExtras) focusRow = 1
+            else if (episodes.length > 0) focusRow = 2
+        } else if (focusRow === 1) {
+            if (episodes.length > 0) focusRow = 2
         } else {
             if (episodeList.currentIndex < episodes.length - 1)
                 episodeList.currentIndex++
@@ -64,6 +87,14 @@ FocusScope {
     Keys.onReturnPressed: {
         if (focusRow === 0) {
             playBestEpisode()
+        } else if (focusRow === 1) {
+            var label = seasonLabel()
+            seasonRoot.navigateTo("Extras.qml", {
+                extras: extras,
+                ratingKey: item.ratingKey,
+                itemTitle: showTitle + (label ? " - " + label : ""),
+                libraryName: libraryName
+            }, {})
         } else {
             var ep = episodes[episodeList.currentIndex]
             if (!ep) return
@@ -144,27 +175,50 @@ FocusScope {
             height: root.sh * 0.175 //84
             spacing: root.sw * 0.0375 //24
 
-            // PLAY / RSUM button
-            Rectangle {
-                id: playButton
-                color: focusRow === 0 ? root.accentColor : root.surfaceColor
-                border.color: focusRow === 0 ? root.accentColor : root.tertiaryColor
+            Column {
                 width: root.sw * 0.1875 //120
-                height: root.sh * 0.1166667 //56
-                border.width: root.sh * 0.003125 //2
 
-                Text {
-                    anchors.centerIn: parent
-                    text: {
-                        // Show RSUM if any in-progress episode exists
-                        for (var i = 0; i < seasonRoot.episodes.length; i++) {
-                            if (seasonRoot.episodes[i].viewOffset > 0) return "RSUM \u25BA"
+                // PLAY / RSUM button
+                Rectangle {
+                    id: playButton
+                    color: focusRow === 0 ? root.accentColor : root.surfaceColor
+                    border.color: focusRow === 0 ? root.accentColor : root.tertiaryColor
+                    width: root.sw * 0.1875 //120
+                    height: root.sh * 0.1166667 //56
+                    border.width: root.sh * 0.003125 //2
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: {
+                            // Show RSUM if any in-progress episode exists
+                            for (var i = 0; i < seasonRoot.episodes.length; i++) {
+                                if (seasonRoot.episodes[i].viewOffset > 0) return "RSUM \u25BA"
+                            }
+                            return "PLAY \u25BA"
                         }
-                        return "PLAY \u25BA"
+                        color: focusRow === 0 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        font.pixelSize: root.sh * 0.05 //24
                     }
-                    color: focusRow === 0 ? root.surfaceColor : root.primaryColor
-                    font.family: root.globalFont
-                    font.pixelSize: root.sh * 0.05 //24
+                }
+
+                // Extras Button
+                Rectangle {
+                    id: extrasButton
+                    visible: seasonRoot.hasExtras
+                    color: focusRow === 1 ? root.accentColor : "transparent"
+                    width: parent.width
+                    height: extrasLabel.implicitHeight + root.sh * 0.025 //12
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    Text {
+                        id: extrasLabel
+                        text: "VIEW EXTRAS"
+                        color: focusRow === 1 ? root.surfaceColor : root.secondaryColor
+                        font.family: root.globalFont
+                        anchors.centerIn: parent
+                        font.pixelSize: root.sh * 0.025 //12
+                    }
                 }
             }
 
@@ -241,7 +295,7 @@ FocusScope {
                     Rectangle {
                         color: root.accentColor
                         anchors.fill: rowText
-                        visible: episodeList.currentIndex === index && focusRow === 1
+                        visible: episodeList.currentIndex === index && focusRow === 2
                     }
 
                     Text {
@@ -252,7 +306,7 @@ FocusScope {
                             var prefix = (s || e) ? (s + e + ": ") : ""
                             return prefix + (modelData.title || "")
                         }
-                        color: (episodeList.currentIndex === index && focusRow === 1)
+                        color: (episodeList.currentIndex === index && focusRow === 2)
                                ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         font.capitalization: Font.AllUppercase
@@ -267,7 +321,7 @@ FocusScope {
 
                     SequentialAnimation {
                         running: (episodeList.currentIndex === index) &&
-                                 (focusRow === 1) &&
+                                 (focusRow === 2) &&
                                  (rowText.implicitWidth > textClip.width)
                         loops: Animation.Infinite
                         onRunningChanged: if (!running) rowText.x = 0

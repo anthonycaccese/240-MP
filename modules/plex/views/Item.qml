@@ -6,7 +6,7 @@ FocusScope {
 
     property var navParams: ({})
 
-    signal navigateTo(string path, var params)
+    signal navigateTo(string path, var params, var listState)
     signal goBack()
 
     property var item: navParams.item || {}
@@ -15,8 +15,36 @@ FocusScope {
     // Loaded detail from backend
     property var detail: null
 
-    // Focus rows: 0=play button, 1=audio, 2=subtitles
+    // Extras attached to this item (trailers, deleted scenes, …)
+    property var extras: []
+    readonly property bool hasExtras: extras.length > 0
+
+    // Displayed name — also used as the Extras view's header subtitle
+    readonly property string displayName: {
+        var base = (item.type === "episode" && item.grandparentTitle)
+                   ? item.grandparentTitle : item.title
+        return item.editionTitle ? base + " (" + item.editionTitle + ")" : base
+    }
+
+    // Focus rows: 0=play button, 1=extras (when hasExtras), 2=audio, 3=subtitles
     property int focusRow: 0
+
+    // Ordered list of currently reachable focus rows
+    function activeRows() {
+        var rows = [0]
+        if (hasExtras) rows.push(1)
+        if (detail && detail.audioStreams && detail.audioStreams.length > 0) rows.push(2)
+        if (detail && detail.subtitleStreams && detail.subtitleStreams.length > 1) rows.push(3)
+        return rows
+    }
+
+    function stepFocus(dir) {
+        var rows = activeRows()
+        var i = rows.indexOf(focusRow)
+        if (i === -1) { focusRow = 0; return }
+        var next = i + dir
+        if (next >= 0 && next < rows.length) focusRow = rows[next]
+    }
 
     // True from when PLAY is pressed until we navigate to the Player (or error
     // out). Plex can take a few seconds to hand back a stream/transcode URL, so
@@ -102,7 +130,11 @@ FocusScope {
                 sessionId: detailRoot.sessionId,
                 isTranscoding: d.forceTranscode || false,
                 imageSubtitleIds: imageSubs
-            })
+            }, {})
+        }
+
+        function onExtrasLoaded(items) {
+            detailRoot.extras = items
         }
 
         function onErrorOccurred(msg) {
@@ -112,7 +144,10 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (item.ratingKey) plexBackend.load_item_detail(item.ratingKey)
+        if (item.ratingKey) {
+            plexBackend.load_item_detail(item.ratingKey)
+            plexBackend.load_extras(item.ratingKey)
+        }
         focusRow = 0
     }
 
@@ -120,35 +155,39 @@ FocusScope {
 
     Keys.onUpPressed: {
         if (isLaunching) return
-        if (focusRow > 0) focusRow--
+        stepFocus(-1)
     }
     Keys.onDownPressed: {
         if (isLaunching) return
-        if (detail) {
-            var maxRow = 0
-            if (detail.audioStreams && detail.audioStreams.length > 0) maxRow = 1
-            if (detail.subtitleStreams && detail.subtitleStreams.length > 1) maxRow = 2
-            if (focusRow < maxRow) focusRow++
-        }
+        stepFocus(1)
     }
     Keys.onLeftPressed: {
         if (isLaunching) return
         if (!detail) return
-        if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1)
+        if (focusRow === 2 && detail.audioStreams && detail.audioStreams.length > 1)
             audioIdx = (audioIdx - 1 + detail.audioStreams.length) % detail.audioStreams.length
-        else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 1)
+        else if (focusRow === 3 && detail.subtitleStreams && detail.subtitleStreams.length > 1)
             subtitleIdx = (subtitleIdx - 1 + detail.subtitleStreams.length) % detail.subtitleStreams.length
     }
     Keys.onRightPressed: {
         if (isLaunching) return
         if (!detail) return
-        if (focusRow === 1 && detail.audioStreams && detail.audioStreams.length > 1)
+        if (focusRow === 2 && detail.audioStreams && detail.audioStreams.length > 1)
             audioIdx = (audioIdx + 1) % detail.audioStreams.length
-        else if (focusRow === 2 && detail.subtitleStreams && detail.subtitleStreams.length > 1)
+        else if (focusRow === 3 && detail.subtitleStreams && detail.subtitleStreams.length > 1)
             subtitleIdx = (subtitleIdx + 1) % detail.subtitleStreams.length
     }
     Keys.onReturnPressed: {
         if (isLaunching) return
+        if (focusRow === 1 && hasExtras) {
+            navigateTo("Extras.qml", {
+                extras: extras,
+                ratingKey: item.ratingKey,
+                itemTitle: displayName,
+                libraryName: libraryName
+            }, {})
+            return
+        }
         if (focusRow === 0 && detail) {
             // Show the loading overlay immediately; clears on navigate or error.
             isLaunching = true
@@ -228,21 +267,44 @@ FocusScope {
             height: root.sh * 0.35 //168
             spacing: root.sw * 0.0375 //24
 
-            // PLAY / RSUM button
-            Rectangle {
-                id: playButton
-                color: focusRow === 0 ? root.accentColor : root.surfaceColor
-                border.color: focusRow === 0 ? root.accentColor : root.tertiaryColor
+            Column {
                 width: root.sw * 0.1875 //120
-                height: root.sh * 0.1166667 //56
-                border.width: root.sh * 0.003125 //2
 
-                Text {
-                    anchors.centerIn: parent
-                    text: (detail && detail.viewOffset > 0) ? "RSUM \u25BA" : "PLAY \u25BA"
-                    color: focusRow === 0 ? root.surfaceColor : root.primaryColor
-                    font.family: root.globalFont
-                    font.pixelSize: root.sh * 0.05 //24
+                // PLAY / RSUM button
+                Rectangle {
+                    id: playButton
+                    color: focusRow === 0 ? root.accentColor : root.surfaceColor
+                    border.color: focusRow === 0 ? root.accentColor : root.tertiaryColor
+                    width: root.sw * 0.1875 //120
+                    height: root.sh * 0.1166667 //56
+                    border.width: root.sh * 0.003125 //2
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: (detail && detail.viewOffset > 0) ? "RSUM \u25BA" : "PLAY \u25BA"
+                        color: focusRow === 0 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        font.pixelSize: root.sh * 0.05 //24
+                    }
+                }
+
+                // Extras Button
+                Rectangle {
+                    id: extrasButton
+                    visible: detailRoot.hasExtras
+                    color: focusRow === 1 ? root.accentColor : "transparent"
+                    width: parent.width
+                    height: extrasLabel.implicitHeight + root.sh * 0.025 //12
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    Text {
+                        id: extrasLabel
+                        text: "VIEW EXTRAS"
+                        color: focusRow === 1 ? root.surfaceColor : root.secondaryColor
+                        font.family: root.globalFont
+                        anchors.centerIn: parent
+                        font.pixelSize: root.sh * 0.025 //12
+                    }
                 }
             }
 
@@ -253,11 +315,7 @@ FocusScope {
 
                 //Name
                 Text {
-                    text: {
-                        var base = (item.type === "episode" && item.grandparentTitle)
-                                   ? item.grandparentTitle : item.title
-                        return item.editionTitle ? base + " (" + item.editionTitle + ")" : base
-                    }
+                    text: detailRoot.displayName
                     color: root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
@@ -352,12 +410,12 @@ FocusScope {
 
             Rectangle {
                 anchors.fill: parent
-                color: focusRow === 1 ? root.accentColor : "transparent"
+                color: focusRow === 2 ? root.accentColor : "transparent"
             }
 
             Text {
                 text: "Audio"
-                color: focusRow === 1 ? root.surfaceColor : root.primaryColor
+                color: focusRow === 2 ? root.surfaceColor : root.primaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
                 anchors.verticalCenter: parent.verticalCenter
@@ -374,7 +432,7 @@ FocusScope {
 
                 Text {
                     text: "\u25C4"
-                    color: focusRow === 1 ? root.surfaceColor : root.tertiaryColor
+                    color: focusRow === 2 ? root.surfaceColor : root.tertiaryColor
                     font.family: root.globalFont
                     anchors.verticalCenter: parent.verticalCenter
                     font.pixelSize: root.sh * 0.0375 //18
@@ -382,7 +440,7 @@ FocusScope {
                 Text {
                     text: (detail && detail.audioStreams && detail.audioStreams[audioIdx])
                           ? detail.audioStreams[audioIdx].displayTitle : ""
-                    color: focusRow === 1 ? root.surfaceColor : root.primaryColor
+                    color: focusRow === 2 ? root.surfaceColor : root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
                     anchors.verticalCenter: parent.verticalCenter
@@ -390,7 +448,7 @@ FocusScope {
                 }
                 Text {
                     text: "\u25BA"
-                    color: focusRow === 1 ? root.surfaceColor : root.tertiaryColor
+                    color: focusRow === 2 ? root.surfaceColor : root.tertiaryColor
                     font.family: root.globalFont
                     anchors.verticalCenter: parent.verticalCenter
                     font.pixelSize: root.sh * 0.0375 //18
@@ -409,12 +467,12 @@ FocusScope {
 
             Rectangle {
                 anchors.fill: parent
-                color: focusRow === 2 ? root.accentColor : "transparent"
+                color: focusRow === 3 ? root.accentColor : "transparent"
             }
 
             Text {
                 text: "Subtitles"
-                color: focusRow === 2 ? root.surfaceColor : root.primaryColor
+                color: focusRow === 3 ? root.surfaceColor : root.primaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
                 anchors.left: parent.left
@@ -431,7 +489,7 @@ FocusScope {
 
                 Text {
                     text: "\u25C4"
-                    color: focusRow === 2 ? root.surfaceColor : root.tertiaryColor
+                    color: focusRow === 3 ? root.surfaceColor : root.tertiaryColor
                     font.family: root.globalFont
                     anchors.verticalCenter: parent.verticalCenter
                     font.pixelSize: root.sh * 0.0375 //18
@@ -439,7 +497,7 @@ FocusScope {
                 Text {
                     text: (detail && detail.subtitleStreams && detail.subtitleStreams[subtitleIdx])
                           ? detail.subtitleStreams[subtitleIdx].displayTitle : ""
-                    color: focusRow === 2 ? root.surfaceColor : root.primaryColor
+                    color: focusRow === 3 ? root.surfaceColor : root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
                     anchors.verticalCenter: parent.verticalCenter
@@ -447,7 +505,7 @@ FocusScope {
                 }
                 Text {
                     text: "\u25BA"
-                    color: focusRow === 2 ? root.surfaceColor : root.tertiaryColor
+                    color: focusRow === 3 ? root.surfaceColor : root.tertiaryColor
                     font.family: root.globalFont
                     anchors.verticalCenter: parent.verticalCenter
                     font.pixelSize: root.sh * 0.0375 //18

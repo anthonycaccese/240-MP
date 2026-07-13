@@ -45,6 +45,11 @@ public:
     Q_INVOKABLE void load_category_items(const QString &sectionId, const QString &filterKey);
     Q_INVOKABLE void check_section_capabilities(const QString &sectionId);
     Q_INVOKABLE void load_children(const QString &ratingKey);
+    // Loads the extras (trailers, deleted scenes, …) attached to an item and
+    // emits extrasLoaded with a list of playable details (buildItemDetail shape
+    // plus extraTypeLabel). Emits an empty list on failure — extras are an
+    // enhancement, so errors must not disturb the detail views' main flows.
+    Q_INVOKABLE void load_extras(const QString &ratingKey);
     Q_INVOKABLE void load_on_deck_for(const QString &ratingKey);
     // Resolves the next episode in the same season as currentRatingKey and emits
     // nextEpisodeReady with a full playable detail (same shape as load_item_detail),
@@ -105,6 +110,7 @@ signals:
     void itemLoaded(const QVariant &detail);
     void streamUrlReady(const QString &url, const QString &plexToken);
     void childrenLoaded(const QVariant &items);
+    void extrasLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);
     void nextEpisodeReady(const QVariant &detail);
 
