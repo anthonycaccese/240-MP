@@ -118,13 +118,16 @@ end
 
 local transcode_offset = tonumber(mp.get_opt("transcode-offset") or "0") or 0
 
--- Latch duration on first valid read; used to detect PTS base shifts during HLS seeking
+-- Latch duration on the first valid read of each file: when Plex restarts an HLS
+-- transcode after rapid seeking, `duration` can spike mid-stream and corrupt the
+-- end-time display. Cleared per file so each playlist item latches its own duration.
 local stable_duration = nil
 mp.observe_property("duration", "number", function(_, value)
     if value and value > 0 and not stable_duration then
         stable_duration = value
     end
 end)
+mp.register_event("start-file", function() stable_duration = nil end)
 
 local function format_time(seconds)
     if not seconds or seconds < 0 then seconds = 0 end
