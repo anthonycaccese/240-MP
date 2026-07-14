@@ -91,6 +91,10 @@ local function has_playlist()
     return (mp.get_property_number("playlist-count", 1) or 1) > 1
 end
 
+-- Set by MpvController on decode paths where --panscan blanks the video
+-- (Pi 3 overlay path with 1080p Playback ON) — the CROP button would be a no-op.
+local hide_crop = mp.get_opt("hide-crop") == "1"
+
 local function build_left_btns(has_sub, has_pl, bar_w)
     local btns = {}
     if skip_active then
@@ -102,7 +106,9 @@ local function build_left_btns(has_sub, has_pl, bar_w)
     if has_sub then
         table.insert(btns, {label="SUBTITLE", width=math.floor(bar_w * 0.15625), action=btn_actions[2]})
     end
-    table.insert(btns, {label="CROP", width=math.floor(bar_w * 0.090625), action=btn_actions[3]})
+    if not hide_crop then
+        table.insert(btns, {label="CROP", width=math.floor(bar_w * 0.090625), action=btn_actions[3]})
+    end
     if has_pl then
         table.insert(btns, {label="<", width=math.floor(bar_w * 0.055), action=btn_actions[5]})
         table.insert(btns, {label=">", width=math.floor(bar_w * 0.055), action=btn_actions[6]})
@@ -214,7 +220,7 @@ local function draw_menu()
     end
 
     -- ── Row 3: Buttons ────────────────────────────────────────────
-    -- Left group: AUDIO, [SUBTITLE], CROP
+    -- Left group: [SKIP], AUDIO, [SUBTITLE], [CROP], [< >]
     local stop_idx = #left_btns + 1
     local bx = lm
     for i, btn in ipairs(left_btns) do

@@ -253,6 +253,10 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
     if (screensaverTimeout > 0)
         scriptOpts << QString("screensaver_timeout=%1").arg(screensaverTimeout);
+    // Tell the OSC scripts to hide their CROP button on decode paths where
+    // --panscan would blank the video (Pi 3 overlay path, 1080p Playback ON).
+    if (cropUnavailable())
+        scriptOpts << QStringLiteral("hide-crop=1");
 
     // Hand the OSC a map of external sub-file URL -> friendly track name so it can show
     // the real subtitle name. mpv otherwise titles an external sub from its URL basename
@@ -315,11 +319,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // Auto Crop: start with panscan=1 unless the current decode path can't crop.
     // The Pi3 overlay (smooth) path blanks video under panscan, so suppress there —
     // matching the 1080p Playback trade-off. The OSC CROP button still toggles live.
-    if (autoCropEnabled()) {
-        const bool cropSafe = !(m_videoProfile == VideoProfile::Pi3 && smoothPlaybackEnabled());
-        if (cropSafe)
-            args << QStringLiteral("--panscan=1");
-    }
+    if (autoCropEnabled() && !cropUnavailable())
+        args << QStringLiteral("--panscan=1");
 
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -701,6 +702,13 @@ bool MpvController::autoCropEnabled() const {
         return false;
     const QVariant v = m_appCore->get_setting(QString(), "auto_crop");
     return v.toString().compare(QStringLiteral("On"), Qt::CaseInsensitive) == 0;
+}
+
+bool MpvController::cropUnavailable() const {
+    // The Pi 3 smooth (overlay-plane) path is the one decode path that can't
+    // crop/zoom: --panscan blanks the video there. (Ignores the mpv_video_args
+    // override, same as the auto-crop gate — the setting still reflects intent.)
+    return m_videoProfile == VideoProfile::Pi3 && smoothPlaybackEnabled();
 }
 
 bool MpvController::hasSmoothPlaybackTradeoff() const {

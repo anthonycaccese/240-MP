@@ -105,6 +105,10 @@ private:
     // App-level "auto_crop" setting (default OFF). When ON, playback starts with
     // panscan=1 so video fills a CRT/4:3 screen by default (still toggleable live).
     bool autoCropEnabled() const;
+    // True when the active decode path can't crop (Pi 3 overlay path with smooth
+    // playback ON): --panscan blanks the video there. Gates auto-crop and tells
+    // the OSC scripts to hide their CROP button.
+    bool cropUnavailable() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;
