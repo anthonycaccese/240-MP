@@ -239,19 +239,10 @@ jobs:
             artifacts/SHA256SUMS
             scripts/install.sh
           body: |
-            ### Downloads:
-
-            | Platform | File |
-            |---|---|
-            | Raspberry Pi OS Trixie (arm64) | `240-MP-${{ github.ref_name }}-linux-arm64.tar.gz` |
-            | macOS (Apple Silicon) | `240-MP-${{ github.ref_name }}-macOS-arm64.dmg` |
-
-            ### Install Instructions:
-
-            - Raspberry Pi OS Trixie (arm64): [Instructions](INSTALL.md#on-a-raspberry-pi)
+            Install:
+            - Raspberry Pi OS Trixie (arm64): Please follow [these instructions](INSTALL.md#on-a-raspberry-pi)
             - macOS (Apple Silicon): Download the `.dmg`, open and move 240mp.app to your applications folder
 
-            ### Update Instructions:
-
-            - Raspberry Pi OS Trixie (arm64): [Instructions](INSTALL.md#update)
-            - macOS (Apple Silicon): Download the `.dmg`, open and move 240mp.app to your applications folder
+            Update:
+            - Raspberry Pi OS Trixie (arm64): Use the in-app updater or follow [these instructions](INSTALL.md#update)
+            - macOS (Apple Silicon): Use the in-app updater or download the `.dmg`, open and move 240mp.app to your applications folder
