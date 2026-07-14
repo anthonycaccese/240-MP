@@ -138,6 +138,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     m_playlistPos = -1;
     m_paused      = false;
     m_lastEndFileReason.clear();
+    m_pendingStartClear = false;
 
 #ifdef Q_OS_MACOS
     // .app bundles launched via double-click get a minimal PATH that excludes
@@ -223,8 +224,10 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
 
     if (playlistStart >= 0)
         args << QString("--playlist-start=%1").arg(playlistStart);
-    if (startSeconds > 0.5f)
+    if (startSeconds > 0.5f) {
         args << QString("--start=%1").arg(double(startSeconds), 0, 'f', 3);
+        m_pendingStartClear = true;
+    }
     if (audioTrack > 0)
         args << QString("--aid=%1").arg(audioTrack);
     for (const QString &sf : subFiles)
@@ -480,6 +483,17 @@ void MpvController::onIpcReadyRead() {
             // so onProcessFinished can distinguish a natural finish from a quit.
             if (event == "end-file") {
                 m_lastEndFileReason = obj["reason"].toString();
+            } else if (event == "playback-restart" && m_pendingStartClear) {
+                // --start is a global option that mpv re-applies on *every* file load,
+                // and --loop-playlist reloads its entries on wrap. Left set, a resumed
+                // file would restart at the resume offset on every loop lap (and every
+                // later playlist entry would start there too) instead of at the
+                // beginning. mpv only reads `start` when it loads a file, and
+                // playback-restart means the initial seek is already done — so clearing
+                // it here leaves the current playback alone while every subsequent load
+                // begins at 0. Guarded so it fires once per session, not on every seek.
+                m_pendingStartClear = false;
+                sendCommand({"set_property", "start", "none"});
             } else if (event == "client-message") {
                 const QJsonArray args = obj["args"].toArray();
                 if (args.size() > 0) {

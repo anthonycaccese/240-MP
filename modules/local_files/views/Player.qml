@@ -33,13 +33,6 @@ FocusScope {
     property int    lastKnownDurationMs:  0
     property int    lastKnownPlaylistPos: -1
 
-    // Playlist resume correction: --start=T is global so every subsequent
-    // video in the playlist would also start at T. We track which playlist
-    // position was resumed from and seek to 0 on the first position event
-    // after each advancement past that point.
-    property int    resumedFromPlaylistPos: -1
-    property bool   needsSeekToZero:        false
-
     focus: true
 
     Keys.onPressed: function(event) {
@@ -56,8 +49,6 @@ FocusScope {
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 var startMs    = choiceIndex === 0 ? savedPositionMs  : 0
                 var startPlPos = choiceIndex === 0 ? savedPlaylistPos : -1
-                if (choiceIndex === 0 && startPlPos >= 0)
-                    resumedFromPlaylistPos = startPlPos
                 overlayVisible = false
                 mpvController.loadAndPlay(filePath, startMs / 1000.0, 0, subFlag, [], subtitleLangs, loopOn, startPlPos, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
                 event.accepted = true
@@ -95,22 +86,13 @@ FocusScope {
         target: mpvController
 
         function onPositionChanged(ms) {
-            if (ms > 0) {
-                if (needsSeekToZero) {
-                    needsSeekToZero = false
-                    mpvController.seekTo(0)
-                    return
-                }
-                playerRoot.lastKnownPositionMs = ms
-            }
+            if (ms > 0) playerRoot.lastKnownPositionMs = ms
         }
         function onDurationChanged(ms) {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
         }
         function onPlaylistPosChanged(pos) {
             if (pos >= 0) {
-                if (resumedFromPlaylistPos >= 0 && pos > resumedFromPlaylistPos)
-                    needsSeekToZero = true
                 playerRoot.lastKnownPlaylistPos = pos
                 playerRoot.lastKnownPositionMs  = 0
             }
@@ -194,8 +176,6 @@ FocusScope {
         var savedPl  = (saved.plPos !== undefined && saved.plPos !== null) ? saved.plPos : -1
 
         if (resumeSetting === "yes") {
-            if (savedPos > 0 && savedPl >= 0)
-                resumedFromPlaylistPos = savedPl
             mpvController.loadAndPlay(filePath, savedPos > 0 ? savedPos / 1000.0 : 0.0,
                                       0, subFlag, [], subtitleLangs, loopOn, savedPos > 0 ? savedPl : -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
         } else {
