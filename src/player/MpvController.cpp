@@ -669,11 +669,12 @@ void MpvController::appendVideoArgs(QStringList &args) const {
             else
                 args << "--vo=drm" << "--hwdec=v4l2m2m-copy";
         } else {
-            // Pi 5 (Full KMS) and the safe fallback for unknown headless Linux.
-            // --monitorpixelaspect=0.82 corrects non-square pixel aspect on
-            // composite CRTs (704×432 on 4:3). Pure math, zero rendering cost.
-            args << "--vo=drm" << "--hwdec=auto-safe"
-                 << "--monitorpixelaspect=0.82";
+            // Pi 5 (Full KMS) and a safe fallback for unknown headless Linux for now.
+            // Note: Sometimes on Pi5+composite CRTs the Pi5 reports its composite raster 
+            // inconsistently (sometimes a narrow 704×432 instead of the standard 720×480i)
+            // this can be accomodated for in mpv.conf via a monitorpixelaspect property or
+            // in cmdline.txt/config.txt at the OS level vs hardcoding something here.
+            args << "--vo=drm" << "--hwdec=auto-safe";
         }
     } else {
 #ifdef Q_OS_MACOS

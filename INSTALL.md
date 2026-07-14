@@ -161,7 +161,7 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     [pi5]
 
     # Drivers & Video
-    dtoverlay=vc4-kms-v3d,cma-512,composite=1
+    dtoverlay=vc4-kms-v3d
     
     # --- Global ---
     [all]
