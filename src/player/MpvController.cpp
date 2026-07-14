@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QRegularExpression>
 #include <QDebug>
+#include <algorithm>
 
 #ifdef Q_OS_LINUX
 #include <fcntl.h>
@@ -319,8 +320,17 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // Auto Crop: start with panscan=1 unless the current decode path can't crop.
     // The Pi3 overlay (smooth) path blanks video under panscan, so suppress there —
     // matching the 1080p Playback trade-off. The OSC CROP button still toggles live.
-    if (autoCropEnabled() && !cropUnavailable())
-        args << QStringLiteral("--panscan=1");
+    if (autoCropEnabled() && !cropUnavailable()) {
+            args << QStringLiteral("--panscan=1");
+            const int overscanX = autoCropOverscanHorizontalPercent();
+            const int overscanY = autoCropOverscanVerticalPercent();
+            if (overscanX > 0 || overscanY > 0) {
+                const double scaleX = std::max(0.50, 1.0 - (double(overscanX) / 100.0));
+                const double scaleY = std::max(0.50, 1.0 - (double(overscanY) / 100.0));
+                args << QString("--video-scale-x=%1").arg(scaleX, 0, 'f', 3);
+                args << QString("--video-scale-y=%1").arg(scaleY, 0, 'f', 3);
+            }
+    }
 
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -710,6 +720,47 @@ bool MpvController::cropUnavailable() const {
     // crop/zoom: --panscan blanks the video there. (Ignores the mpv_video_args
     // override, same as the auto-crop gate — the setting still reflects intent.)
     return m_videoProfile == VideoProfile::Pi3 && smoothPlaybackEnabled();
+}
+
+static int parseOverscanPercent(const QVariant &value, int maxPct) {
+    if (!value.isValid())
+        return 0;
+    const QString s = value.toString().trimmed();
+    if (s.isEmpty())
+        return 0;
+    bool ok = false;
+    int pct = s.toInt(&ok);
+    if (!ok) {
+        const QString digits = s.left(s.indexOf('%') >= 0 ? s.indexOf('%') : s.size());
+        pct = digits.toInt(&ok);
+    }
+    if (!ok)
+        return 0;
+    if (pct < 0)
+        return 0;
+    if (pct > maxPct)
+        return maxPct;
+    return pct;
+}
+
+int MpvController::autoCropOverscanHorizontalPercent() const {
+    if (!m_appCore)
+        return 0;
+    const QVariant v = m_appCore->get_setting(QString(), "crop_overscan_x");
+    if (v.isValid() && !v.toString().isEmpty())
+        return parseOverscanPercent(v, 30);
+    // Backward compatibility with the old single-axis setting.
+    return parseOverscanPercent(m_appCore->get_setting(QString(), "crop_overscan"), 30);
+}
+
+int MpvController::autoCropOverscanVerticalPercent() const {
+    if (!m_appCore)
+        return 0;
+    const QVariant v = m_appCore->get_setting(QString(), "crop_overscan_y");
+    if (v.isValid() && !v.toString().isEmpty())
+        return parseOverscanPercent(v, 30);
+    // Backward compatibility with the old single-axis setting.
+    return parseOverscanPercent(m_appCore->get_setting(QString(), "crop_overscan"), 30);
 }
 
 bool MpvController::hasSmoothPlaybackTradeoff() const {

@@ -242,6 +242,15 @@ This config is read at each playback event, so a change applies on the next play
 
 The trade-off with this approach: the copy path didn't look like it could reliabilty play back 1080p on the Pi 3 in my testing. I found it can easily peg the CPU and cause stuttering. So enabling crop on a Pi 3 means keeping your source content to **720p and below**. Ultimately its your call: smooth 1080p without crop (keep the default), or enable crop with a 720p ceiling using --hwdec=v4l2m2m-copy.
 
+### CRT overscan tuning (Auto Crop)
+
+If **Auto Crop** fills the screen but goes a bit past the visible CRT area, use:
+
+- **Settings → Crop Overscan X** (horizontal fit)
+- **Settings → Crop Overscan Y** (vertical fit)
+
+Both apply only when Auto Crop is ON and can be tuned independently (0% to 30%).
+
 ## Debugging & logs
 
 240-MP logs to **stdout/stderr** via Qt's `qDebug` / `qWarning` (used throughout `AppCore`, `MpvController`, and the module backends). The trick is knowing where that output goes depending on how you launched the app.

@@ -111,6 +111,40 @@ FocusScope {
             description: "[ON] Video starts cropped to fill screen\n[OFF] Video starts at its original aspect ratio",
             moduleId: ""
         })
+        var cropOverscanOpts = ["0%", "2%", "4%", "6%", "8%", "10%", "12%", "14%", "16%", "18%", "20%", "22%", "24%", "26%", "28%", "30%"]
+        var cropOverscanLegacyRaw = appSettings["crop_overscan"] || "0%"
+        var cropOverscanRawX = appSettings["crop_overscan_x"] || cropOverscanLegacyRaw
+        var cropOverscanRawY = appSettings["crop_overscan_y"] || cropOverscanLegacyRaw
+        var cropOverscanNumX = parseInt(cropOverscanRawX)
+        var cropOverscanNumY = parseInt(cropOverscanRawY)
+        if (isNaN(cropOverscanNumX)) cropOverscanNumX = 0
+        if (isNaN(cropOverscanNumY)) cropOverscanNumY = 0
+        if (cropOverscanNumX < 0) cropOverscanNumX = 0
+        if (cropOverscanNumX > 30) cropOverscanNumX = 30
+        if (cropOverscanNumY < 0) cropOverscanNumY = 0
+        if (cropOverscanNumY > 30) cropOverscanNumY = 30
+        var cropOverscanValueX = cropOverscanNumX + "%"
+        var cropOverscanValueY = cropOverscanNumY + "%"
+        if (!cropOverscanOpts.includes(cropOverscanValueX)) cropOverscanValueX = "0%"
+        if (!cropOverscanOpts.includes(cropOverscanValueY)) cropOverscanValueY = "0%"
+        items.push({
+            type: "list_single",
+            key: "crop_overscan_x",
+            label: "Crop Overscan X",
+            options: cropOverscanOpts,
+            value: cropOverscanValueX,
+            description: "When AUTO CROP is ON, shrink width to fit CRT overscan (higher = narrower image)",
+            moduleId: ""
+        })
+        items.push({
+            type: "list_single",
+            key: "crop_overscan_y",
+            label: "Crop Overscan Y",
+            options: cropOverscanOpts,
+            value: cropOverscanValueY,
+            description: "When AUTO CROP is ON, shrink height to fit CRT overscan (higher = shorter image)",
+            moduleId: ""
+        })
 
         // SCREEN SAVER section — single control: OFF disables, a number sets the
         // timeout for both menu idle and playback pause (handled inside mpv).

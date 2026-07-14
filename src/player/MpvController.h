@@ -109,6 +109,10 @@ private:
     // playback ON): --panscan blanks the video there. Gates auto-crop and tells
     // the OSC scripts to hide their CROP button.
     bool cropUnavailable() const;
+    // App-level overscan compensation (default 0%). Applies only when auto-crop
+    // is ON and can be tuned independently for horizontal and vertical axes.
+    int autoCropOverscanHorizontalPercent() const;
+    int autoCropOverscanVerticalPercent() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;
