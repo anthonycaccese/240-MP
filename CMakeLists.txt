@@ -50,6 +50,7 @@ add_executable(240mp
     src/modules/local_files/LocalFilesBackend.cpp
     src/modules/plex/PlexBackend.cpp
     src/modules/jellyfin/JellyfinBackend.cpp
+    src/modules/emby/EmbyBackend.cpp
     src/modules/ambient_mode/AmbientModeBackend.cpp
     src/modules/youtube/YouTubeBackend.cpp
     src/modules/nfc_reader/NfcReaderBackend.cpp
