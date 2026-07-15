@@ -1,13 +1,1 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder Emby-style pinwheel mark, white monochrome to match the app's
-     icon convention. Not the official Emby logo — swap for official brand art
-     if/when licensing allows. "Emby" is a trademark of Emby LLC. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <g fill="#ffffff">
-    <path d="M256,256 C320,190 312,108 256,66 C236,138 250,208 256,256 Z" transform="rotate(0 256 256)"/>
-    <path d="M256,256 C320,190 312,108 256,66 C236,138 250,208 256,256 Z" transform="rotate(90 256 256)"/>
-    <path d="M256,256 C320,190 312,108 256,66 C236,138 250,208 256,256 Z" transform="rotate(180 256 256)"/>
-    <path d="M256,256 C320,190 312,108 256,66 C236,138 250,208 256,256 Z" transform="rotate(270 256 256)"/>
-    <circle cx="256" cy="256" r="34"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" viewBox="0 0 512 512"><path d="m97.1 229.4 26.5 26.5L0 379.5l132.4 132.4 26.5-26.5L282.5 609l141.2-141.2-26.5-26.5L512 326.5 379.6 194.1l-26.5 26.5L229.5 97z" style="fill:#52b54b" transform="translate(0 -97)"/><path d="M196.8 351.2v-193L366 254.7 281.4 303z" style="fill:#fff"/></svg>
