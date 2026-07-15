@@ -65,6 +65,13 @@
       "options_slot": "get_image_duration_options",
       "default": "5",
       "description": "How long an image is shown before advancing.\nApplies to images in folders and playlists."
+    },
+    {
+      "key": "hide_extensions",
+      "label": "Hide File Extensions",
+      "type": "toggle",
+      "default": "OFF",
+      "description": "Hide file extensions when browsing."
     }
   ]
 }

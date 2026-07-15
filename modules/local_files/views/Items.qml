@@ -8,6 +8,17 @@ FocusScope {
     property var navListState: navParams.navListState || ({})
     property string folderPath: navParams.folderPath || localFilesBackend.mediaRoot()
     property string folderName: navParams.folderName || ""
+    readonly property bool hideExtensions: {
+        var v = appCore.get_setting(moduleRoot.moduleId, "hide_extensions")
+        return v === true || v === "ON"
+    }
+
+    function displayName(item) {
+        if (item.isFolder) return item.name + "/"
+        if (!hideExtensions) return item.name
+        var dot = item.name.lastIndexOf(".")
+        return dot > 0 ? item.name.substring(0, dot) : item.name
+    }
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -105,7 +116,7 @@ FocusScope {
 
                 Text {
                     id: rowText
-                    text: modelData.isFolder ? modelData.name + "/" : modelData.name
+                    text: itemsRoot.displayName(modelData)
                     color: fileList.currentIndex === index ? root.surfaceColor : root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
