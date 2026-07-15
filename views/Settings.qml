@@ -124,6 +124,19 @@ FocusScope {
             moduleId: ""
         })
 
+        // Video Levels: overrides mpv's auto-detected output range. Auto trusts
+        // the source's tagged range; force Limited/Full if content looks washed
+        // out or crushed on your display regardless of what the file is tagged.
+        items.push({
+            type: "list_single",
+            key: "video_output_levels",
+            label: "Video Levels",
+            options: ["Auto", "Limited", "Full"],
+            value: appSettings["video_output_levels"] || "Auto",
+            description: "Override output color range if video looks washed out or crushed\n[AUTO] Trust the source file's tagged range",
+            moduleId: ""
+        })
+
         // MODULES section — only show modules with has_settings
         var hasModuleSettings = false
         for (var i = 0; i < installedModules.length; i++) {

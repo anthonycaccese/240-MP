@@ -211,6 +211,17 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         }
     }
 
+    // Video Levels: leave mpv's auto-detection alone unless the user has
+    // explicitly overridden it (e.g. content looking washed out/crushed on a
+    // given display regardless of the source file's tagged range).
+    if (m_appCore) {
+        const QString levels = m_appCore->get_setting(QString(), "video_output_levels").toString();
+        if (levels == QLatin1String("Limited"))
+            args << QStringLiteral("--video-output-levels=limited");
+        else if (levels == QLatin1String("Full"))
+            args << QStringLiteral("--video-output-levels=full");
+    }
+
     // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
     // primary plane between two consecutive same-size/format stills, so a photo
     // playlist freezes on the first frame while the clock advances. This script
