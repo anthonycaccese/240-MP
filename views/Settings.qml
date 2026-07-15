@@ -144,6 +144,12 @@ FocusScope {
         items.push({ type: "section", label: "Application" })
         items.push({
             type: "submenu",
+            key: "remote_controls",
+            label: "Remote Controls",
+            moduleId: ""
+        })
+        items.push({
+            type: "submenu",
             key: "software_update",
             label: "Update 240-MP",
             moduleId: ""
@@ -255,6 +261,8 @@ FocusScope {
             if (row && row.type === "submenu") {
                 if (row.key === "software_update")
                     settingsRoot.navigateTo("views/Update.qml", {}, { currentIndex: settingsList.currentIndex })
+                else if (row.key === "remote_controls")
+                    settingsRoot.navigateTo("views/RemapControls.qml", {}, { currentIndex: settingsList.currentIndex })
                 else
                     settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
             } else if (row && row.type === "quit") {
