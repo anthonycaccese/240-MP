@@ -18,6 +18,7 @@
 #include "modules/plex/PlexBackend.h"
 #include "modules/jellyfin/JellyfinBackend.h"
 #include "modules/emby/EmbyBackend.h"
+#include "modules/iptv/IptvBackend.h"
 #include "modules/ambient_mode/AmbientModeBackend.h"
 #include "modules/nfc_reader/NfcReaderBackend.h"
 #include "modules/youtube/YouTubeBackend.h"
@@ -153,6 +154,7 @@ int main(int argc, char *argv[]) {
     PlexBackend         plexBackend(appRoot, dataRoot);
     JellyfinBackend     jellyfinBackend(appRoot, dataRoot);
     EmbyBackend         embyBackend(appRoot, dataRoot);
+    IptvBackend         iptvBackend(appRoot, dataRoot);
     AmbientModeBackend  ambientMode(dataRoot);
     NfcReaderBackend    nfcReader(appRoot, dataRoot, &appCore);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
@@ -181,6 +183,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.plex",         "plexBackend",        &plexBackend, ctx);
     appCore.registerModule("com.240mp.jellyfin",     "jellyfinBackend",    &jellyfinBackend, ctx);
     appCore.registerModule("com.240mp.emby",         "embyBackend",        &embyBackend, ctx);
+    appCore.registerModule("com.240mp.iptv",         "iptvBackend",        &iptvBackend, ctx);
     appCore.registerModule("com.240mp.ambient_mode", "ambientModeBackend", &ambientMode, ctx);
     appCore.registerModule("com.240mp.nfc_reader",   "nfcReaderBackend",   &nfcReader,   ctx);
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
