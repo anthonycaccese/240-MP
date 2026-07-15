@@ -20,6 +20,7 @@ public:
     Q_INVOKABLE void        savePosition(const QString &filePath, int positionMs, int playlistPos);
     Q_INVOKABLE void        clearPosition(const QString &filePath);
     Q_INVOKABLE void        get_resume_playback_options();
+    Q_INVOKABLE void        get_shuffle_playback_options();
     Q_INVOKABLE void        get_auto_subtitles_options();
     Q_INVOKABLE void        get_subtitle_languages();
     Q_INVOKABLE void        get_image_duration_options();

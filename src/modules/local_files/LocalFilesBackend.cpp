@@ -125,6 +125,15 @@ void LocalFilesBackend::get_resume_playback_options() {
     emit dynamicOptionsReady("resume_playback", options);
 }
 
+void LocalFilesBackend::get_shuffle_playback_options() {
+    QVariantList options;
+    QVariantMap ask; ask["id"] = "ask"; ask["label"] = "Ask";
+    QVariantMap yes; yes["id"] = "yes"; yes["label"] = "Always"; yes["old"] = true;
+    QVariantMap no;  no["id"]  = "no";  no["label"]  = "Never";  no["old"]  = false;
+    options << ask << yes << no;
+    emit dynamicOptionsReady("shuffle_playback", options);
+}
+
 void LocalFilesBackend::get_image_duration_options() {
     QVariantList options;
     QVariantMap five;   five["id"]   = "5";  five["label"]   = "5 Seconds";

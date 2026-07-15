@@ -25,8 +25,11 @@
     {
       "key": "shuffle_playback",
       "label": "Shuffle Playback",
-      "type": "toggle",
-      "default": "OFF"
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_shuffle_playback_options",
+      "default": "ask",
+      "description": "Play playlists in random order.\n[ASK] lets you choose each time a playlist starts."
     },
     {
       "key": "resume_playback",

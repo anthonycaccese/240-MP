@@ -11,11 +11,11 @@ FocusScope {
     property string itemTitle:   navParams.title    || ""
 
     property bool   overlayVisible:      false
-    property int    savedPositionMs:     0
-    property int    savedPlaylistPos:    -1
     property int    choiceIndex:         0
+    // Overlay choices, each { label, startMs, plPos, shuffle } — executed via play()
+    property var    choices:             []
     property bool   loopOn:              false
-    property bool   shuffleOn:           false
+    property string shuffleSetting:      "ask"
     property string resumeSetting:       "ask"
     property string subtitleMode:        "forced"
     property var    subtitleLangs:       []
@@ -41,16 +41,15 @@ FocusScope {
                 goBack()
                 event.accepted = true
             } else if (event.key === Qt.Key_Up) {
-                choiceIndex = 0
+                if (choiceIndex > 0) choiceIndex--
                 event.accepted = true
             } else if (event.key === Qt.Key_Down) {
-                choiceIndex = 1
+                if (choiceIndex < choices.length - 1) choiceIndex++
                 event.accepted = true
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                var startMs    = choiceIndex === 0 ? savedPositionMs  : 0
-                var startPlPos = choiceIndex === 0 ? savedPlaylistPos : -1
+                var choice = choices[choiceIndex]
                 overlayVisible = false
-                mpvController.loadAndPlay(filePath, startMs / 1000.0, 0, subFlag, [], subtitleLangs, loopOn, startPlPos, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
+                play(choice.startMs, choice.plPos, choice.shuffle)
                 event.accepted = true
             }
         } else {
@@ -127,11 +126,13 @@ FocusScope {
     Component.onCompleted: {
         if (filePath === "") return
         loopOn        = !!appCore.get_setting(moduleRoot.moduleId, "loop_playback")
-        shuffleOn     = !!appCore.get_setting(moduleRoot.moduleId, "shuffle_playback")
-        // Some fancy logic to honor the old boolean setting until it gets updated to the new format
+        // Some fancy logic to honor the old boolean settings until they get updated to the new format
+        var shufRaw   = appCore.get_setting(moduleRoot.moduleId, "shuffle_playback")
+        shuffleSetting = (typeof shufRaw === "boolean") ? (shufRaw ? "yes" : "no") : (shufRaw || "ask")
         var autoSubs  = appCore.get_setting(moduleRoot.moduleId, "auto_subtitles")
         subtitleMode  = (typeof autoSubs === "boolean") ? ((autoSubs === true) ? "on" : "forced") : (autoSubs || "forced")
-        resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        var resRaw    = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
+        resumeSetting = (resRaw === "yes" || resRaw === "no") ? resRaw : "ask"
         var imgDur = parseFloat(appCore.get_setting(moduleRoot.moduleId, "image_duration"))
         imageDurationSec = isNaN(imgDur) ? 5 : imgDur
 
@@ -151,42 +152,63 @@ FocusScope {
             subtitleLangs.push(subLangString)
         }
 
-        // Shuffle wins: a shuffled playlist starts fresh & random; resume position
-        // (a sequential item index) is meaningless once order is randomized.
-        if (shuffleOn && isPlaylist(filePath)) {
-            mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", true, [], imageDurationSec, imageContent)
+        // Shuffle only applies to playlists; "Always" wins over resume: a shuffled
+        // playlist starts fresh & random; resume position (a sequential item index)
+        // is meaningless once order is randomized.
+        var canShuffle = isPlaylist(filePath)
+        if (canShuffle && shuffleSetting === "yes") {
+            play(0, -1, true)
             return
         }
 
         // A standalone image has no meaningful playback position, so it bypasses
         // resume entirely (no saved-position lookup, no "RESUME PLAYBACK?" overlay).
         // Images inside a playlist still resume via the playlist's item index below.
-        if (!isPlaylist(filePath) && isImage(filePath)) {
-            mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
+        if (!canShuffle && isImage(filePath)) {
+            play(0, -1, false)
             return
         }
 
-        if (resumeSetting === "no") {
-            mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
+        var askShuffle = canShuffle && shuffleSetting === "ask"
+
+        var savedPos = 0
+        var savedPl  = -1
+        if (resumeSetting !== "no") {
+            var saved = localFilesBackend.getSavedPosition(filePath)
+            savedPos  = saved.pos || 0
+            savedPl   = (saved.plPos !== undefined && saved.plPos !== null) ? saved.plPos : -1
+        }
+
+        if (resumeSetting === "yes" && !askShuffle) {
+            play(savedPos > 0 ? savedPos : 0, savedPos > 0 ? savedPl : -1, false)
             return
         }
 
-        var saved    = localFilesBackend.getSavedPosition(filePath)
-        var savedPos = saved.pos   || 0
-        var savedPl  = (saved.plPos !== undefined && saved.plPos !== null) ? saved.plPos : -1
+        var opts = []
+        if (savedPos > 0) {
+            opts.push({ label: savedPl >= 0
+                            ? "Resume video " + (savedPl + 1) + " at " + formatTime(savedPos)
+                            : "Resume from " + formatTime(savedPos),
+                        startMs: savedPos, plPos: savedPl, shuffle: false })
+            if (resumeSetting === "ask")
+                opts.push({ label: "Start from the beginning", startMs: 0, plPos: -1, shuffle: false })
+        } else if (askShuffle) {
+            opts.push({ label: "Play in order", startMs: 0, plPos: -1, shuffle: false })
+        }
+        if (askShuffle)
+            opts.push({ label: "Shuffle", startMs: 0, plPos: -1, shuffle: true })
 
-        if (resumeSetting === "yes") {
-            mpvController.loadAndPlay(filePath, savedPos > 0 ? savedPos / 1000.0 : 0.0,
-                                      0, subFlag, [], subtitleLangs, loopOn, savedPos > 0 ? savedPl : -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
+        if (opts.length > 1) {
+            choices        = opts
+            choiceIndex    = 0
+            overlayVisible = true
         } else {
-            if (savedPos > 0) {
-                savedPositionMs  = savedPos
-                savedPlaylistPos = savedPl
-                overlayVisible   = true
-            } else {
-                mpvController.loadAndPlay(filePath, 0.0, 0, subFlag, [], subtitleLangs, loopOn, -1, 0.0, "", false, "", false, [], imageDurationSec, imageContent)
-            }
+            play(0, -1, false)
         }
+    }
+
+    function play(startMs, plPos, shuffle) {
+        mpvController.loadAndPlay(filePath, startMs > 0 ? startMs / 1000.0 : 0.0, 0, subFlag, [], subtitleLangs, loopOn, plPos, 0.0, "", false, "", shuffle, [], imageDurationSec, imageContent)
     }
 
     Rectangle {
@@ -204,7 +226,7 @@ FocusScope {
             color: root.surfaceColor
             anchors.centerIn: parent
             width: root.sw * 0.76875 //492
-            height: root.sh * 0.2833333 //136
+            height: root.sh * (0.2833333 + Math.max(0, choices.length - 2) * 0.0583333) //136 for 2 rows + 28 per extra row
 
             Column {
                 id: dialogColumn
@@ -212,7 +234,9 @@ FocusScope {
                 spacing: root.sh * 0.05 //24
 
                 Text {
-                    text: "RESUME PLAYBACK?"
+                    // Generic title whenever a Shuffle choice is offered; the classic
+                    // resume-only dialog keeps its original wording.
+                    text: choices.some(function(c) { return c.shuffle }) ? "START PLAYBACK?" : "RESUME PLAYBACK?"
                     color: root.secondaryColor
                     font.family: root.globalFont
                     font.pixelSize: root.sh * 0.0333333 //16
@@ -221,12 +245,7 @@ FocusScope {
 
                 Column {
                     Repeater {
-                        model: [
-                            savedPlaylistPos >= 0
-                                ? "Resume video " + (savedPlaylistPos + 1) + " at " + formatTime(savedPositionMs)
-                                : "Resume from " + formatTime(savedPositionMs),
-                            "Start from the beginning"
-                        ]
+                        model: choices
                         delegate: Item {
                             width: dialogColumn.width
                             height: root.sh * 0.0583333 //28
@@ -241,7 +260,7 @@ FocusScope {
                                 id: delegateText
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                text: modelData
+                                text: modelData.label
                                 color: index === choiceIndex ? root.surfaceColor : root.primaryColor
                                 font.family: root.globalFont
                                 font.capitalization: Font.AllUppercase
