@@ -21,8 +21,15 @@ public:
     Q_INVOKABLE void check_auth();
     Q_INVOKABLE void logout();
 
-    // Username/password sign-in — Emby has no Quick Connect equivalent.
+    // Username/password sign-in — direct to a single server.
     Q_INVOKABLE void authenticate(const QString &serverUrl, const QString &username, const QString &password);
+
+    // Emby Connect — cloud account linking (Emby's equivalent of a "connect
+    // once, pick your server" flow). Three steps: authenticate against
+    // connect.emby.media, list the account's servers, then exchange the chosen
+    // server's access key for a local server token.
+    Q_INVOKABLE void connect_authenticate(const QString &usernameOrEmail, const QString &password);
+    Q_INVOKABLE void connect_select_server(const QString &serverUrl, const QString &accessKey);
 
     // Browse
     Q_INVOKABLE void load_libraries();
@@ -88,6 +95,12 @@ signals:
     void logoutComplete();
     void authRevoked();
 
+    // Emby Connect: emitted with the list of servers on the account when more
+    // than one is available so the UI can present a picker. Each entry is a map
+    // of {name, address, localAddress, remoteAddress, accessKey, systemId}.
+    void connectServersReady(const QVariantList &servers);
+    void connectFailed(const QString &message);
+
     // Emitted when server-side language preferences are loaded
     void serverLanguagePreferencesReady(const QString &audioLanguage, const QString &subtitleLanguage, const QString &subtitleMode);
 
@@ -107,6 +120,8 @@ private:
     QString m_userId;
     QString m_userName;
     QString m_serverName;
+    QString m_connectUserId;      // Emby Connect account user id (cloud)
+    QString m_connectAccessToken; // Emby Connect account token (cloud)
     QString m_currentPlaySessionId;
     QString m_currentPlayMethod; // "DirectPlay" or "Transcode" — for /Sessions reporting
     QString m_deviceId;
@@ -123,6 +138,10 @@ private:
 
     // Lightweight "does this list have any items?" probe (GET with limit=1).
     void probeHasItems(const QUrl &url, std::function<void(bool)> cb);
+
+    // Emby Connect helpers (step 2 of the flow, and post-exchange persistence).
+    void fetchConnectServers();
+    void persistConnectAuthAndFinish();
 
     QVariantMap formatItem(const QJsonObject &item) const;
 

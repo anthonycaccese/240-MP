@@ -34,6 +34,14 @@ static QString authHeaderValue(const QString &token, const QString &deviceId) {
     return auth;
 }
 
+// X-Application header the Emby Connect cloud service (connect.emby.media)
+// expects — "AppName/AppVersion".
+static QString connectAppHeader() {
+    return QStringLiteral("240-MP/%1").arg(QCoreApplication::applicationVersion());
+}
+
+static const QString kConnectBaseUrl = QStringLiteral("https://connect.emby.media/service");
+
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
@@ -108,6 +116,8 @@ void EmbyBackend::clearAuthState() {
     m_userId.clear();
     m_userName.clear();
     m_serverName.clear();
+    m_connectUserId.clear();
+    m_connectAccessToken.clear();
     m_currentPlaySessionId.clear();
     // Sign out will wipe the auth file as the device is removed from access
     // on the server end as well. This will generate a fresh deviceId so any
@@ -374,6 +384,217 @@ void EmbyBackend::authenticate(const QString &serverUrl, const QString &username
 
         emit authStateChanged();
     });
+}
+
+// ---------------------------------------------------------------------------
+// Emby Connect (cloud account linking)
+//
+// Step 1: POST connect.emby.media/service/user/authenticate {nameOrEmail, rawpw}
+//         -> ConnectAccessToken + ConnectUserId
+// Step 2: GET  connect.emby.media/service/servers?userId={ConnectUserId}
+//         -> [{ Name, Url, LocalAddress, AccessKey, SystemId }]
+// Step 3: GET  {serverUrl}/Connect/Exchange?format=json&ConnectUserId={id}
+//         with X-MediaBrowser-Token: {AccessKey}
+//         -> LocalUserId + AccessToken (the normal per-server credentials)
+// ---------------------------------------------------------------------------
+
+void EmbyBackend::connect_authenticate(const QString &usernameOrEmail, const QString &password) {
+    if (usernameOrEmail.isEmpty()) {
+        emit connectFailed("EMBY CONNECT USERNAME REQUIRED");
+        return;
+    }
+
+    QUrl url(kConnectBaseUrl + "/user/authenticate");
+    QJsonObject body;
+    body["nameOrEmail"] = usernameOrEmail;
+    body["rawpw"]       = password;
+    QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("Accept", "application/json");
+    req.setRawHeader("X-Application", connectAppHeader().toLatin1());
+
+    // connect.emby.media has a valid public certificate — do NOT relax SSL here
+    // (ignoreSslErrors only relaxes for the configured local server host anyway).
+    auto *reply = m_nam->post(req, payload);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QByteArray respBody = reply->readAll();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            if (status == 401)
+                emit connectFailed("INCORRECT EMBY CONNECT USERNAME OR PASSWORD");
+            else if (status > 0)
+                emit connectFailed("EMBY CONNECT SIGN IN FAILED (HTTP " + QString::number(status) + ")");
+            else
+                emit connectFailed("CONNECTION FAILED: " + reply->errorString());
+            return;
+        }
+
+        QJsonObject data = QJsonDocument::fromJson(respBody).object();
+        // The service returns AccessToken + User.Id; some responses spell these
+        // ConnectAccessToken + ConnectUserId — accept either.
+        QString token = data["AccessToken"].toString();
+        if (token.isEmpty()) token = data["ConnectAccessToken"].toString();
+        QString connectUserId = data["User"].toObject()["Id"].toString();
+        if (connectUserId.isEmpty()) connectUserId = data["ConnectUserId"].toString();
+
+        if (token.isEmpty() || connectUserId.isEmpty()) {
+            emit connectFailed("INVALID EMBY CONNECT RESPONSE");
+            return;
+        }
+
+        m_connectAccessToken = token;
+        m_connectUserId      = connectUserId;
+        fetchConnectServers();
+    });
+}
+
+void EmbyBackend::fetchConnectServers() {
+    QUrl url(kConnectBaseUrl + "/servers");
+    { QUrlQuery q; q.addQueryItem("userId", m_connectUserId); url.setQuery(q); }
+
+    QNetworkRequest req(url);
+    req.setRawHeader("Accept", "application/json");
+    req.setRawHeader("X-Application", connectAppHeader().toLatin1());
+    req.setRawHeader("X-Connect-UserToken", m_connectAccessToken.toLatin1());
+
+    auto *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit connectFailed("FAILED TO LOAD SERVERS: " + reply->errorString());
+            return;
+        }
+
+        QJsonArray arr = QJsonDocument::fromJson(reply->readAll()).array();
+        QVariantList servers;
+        for (const QJsonValue &v : arr) {
+            QJsonObject s = v.toObject();
+            const QString local  = normalizeServerUrl(s["LocalAddress"].toString());
+            const QString remote = normalizeServerUrl(s["Url"].toString());
+            // Prefer the LAN address (a CRT device usually shares the network with
+            // its server); fall back to the remote/WAN address.
+            const QString address = !local.isEmpty() ? local : remote;
+            if (address.isEmpty())
+                continue;
+            servers.append(QVariantMap{
+                {"name",          s["Name"].toString()},
+                {"address",       address},
+                {"localAddress",  local},
+                {"remoteAddress", remote},
+                {"accessKey",     s["AccessKey"].toString()},
+                {"systemId",      s["SystemId"].toString()},
+            });
+        }
+
+        if (servers.isEmpty()) {
+            emit connectFailed("NO SERVERS LINKED TO THIS ACCOUNT");
+            return;
+        }
+        if (servers.size() == 1) {
+            // Only one server — skip the picker and exchange straight away.
+            const QVariantMap only = servers.first().toMap();
+            connect_select_server(only["address"].toString(), only["accessKey"].toString());
+            return;
+        }
+        emit connectServersReady(servers);
+    });
+}
+
+void EmbyBackend::connect_select_server(const QString &serverUrl, const QString &accessKey) {
+    const QString normalized = normalizeServerUrl(serverUrl);
+    if (normalized.isEmpty() || accessKey.isEmpty()) {
+        emit connectFailed("INVALID SERVER SELECTION");
+        return;
+    }
+
+    // Set the server URL up front so ignoreSslErrors() matches the exchange
+    // reply's host (self-signed LAN servers).
+    m_serverUrl = normalized;
+
+    QUrl url(normalized + "/Connect/Exchange");
+    { QUrlQuery q; q.addQueryItem("format", "json"); q.addQueryItem("ConnectUserId", m_connectUserId); url.setQuery(q); }
+
+    QNetworkRequest req(url);
+    req.setRawHeader("Accept", "application/json");
+    req.setRawHeader("X-Application", connectAppHeader().toLatin1());
+    req.setRawHeader("X-MediaBrowser-Token", accessKey.toLatin1());
+    req.setRawHeader("X-Emby-Token", accessKey.toLatin1());
+    req.setRawHeader("X-Emby-Authorization", authHeaderValue(QString(), m_deviceId).toLatin1());
+
+    auto *reply = m_nam->get(req);
+    ignoreSslErrors(reply);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit connectFailed("SERVER EXCHANGE FAILED (HTTP " + QString::number(status) + ")");
+            return;
+        }
+
+        QJsonObject data = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString localUserId = data["LocalUserId"].toString();
+        const QString token       = data["AccessToken"].toString();
+        if (localUserId.isEmpty() || token.isEmpty()) {
+            emit connectFailed("INVALID EXCHANGE RESPONSE");
+            return;
+        }
+
+        m_userId      = localUserId;
+        m_accessToken = token;
+        m_serverName  = m_serverUrl; // real name fetched in persistConnectAuthAndFinish
+        persistConnectAuthAndFinish();
+    });
+}
+
+void EmbyBackend::persistConnectAuthAndFinish() {
+    saveAuthState();
+
+    // Persist server_url like the direct sign-in path does.
+    QJsonObject cfg = loadConfig();
+    QJsonObject modules = cfg["modules"].toObject();
+    QJsonObject modCfg  = modules[kModuleId].toObject();
+    modCfg["server_url"] = m_serverUrl;
+    modules[kModuleId] = modCfg;
+    cfg["modules"] = modules;
+    saveConfig(cfg);
+
+    // Fetch the display name of the local user (the exchange only returns an id).
+    {
+        QUrl userUrl(m_serverUrl + "/Users/" + m_userId);
+        auto *userReply = embyGet(userUrl);
+        connect(userReply, &QNetworkReply::finished, this, [this, userReply]() {
+            userReply->deleteLater();
+            if (userReply->error() == QNetworkReply::NoError) {
+                QString name = QJsonDocument::fromJson(userReply->readAll()).object()["Name"].toString();
+                if (!name.isEmpty()) {
+                    m_userName = name;
+                    saveAuthState();
+                }
+            }
+        });
+    }
+
+    // Fetch the friendly server name for the header.
+    {
+        QUrl infoUrl(m_serverUrl + "/System/Info/Public");
+        auto *infoReply = embyGet(infoUrl);
+        connect(infoReply, &QNetworkReply::finished, this, [this, infoReply]() {
+            infoReply->deleteLater();
+            if (infoReply->error() == QNetworkReply::NoError) {
+                QString name = QJsonDocument::fromJson(infoReply->readAll()).object()["ServerName"].toString();
+                if (!name.isEmpty()) {
+                    m_serverName = name;
+                    saveAuthState();
+                }
+            }
+        });
+    }
+
+    emit authStateChanged();
 }
 
 // ---------------------------------------------------------------------------

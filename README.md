@@ -64,7 +64,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 ### Emby Module
 - Designed for CRT navigation (simple, fast, list browsing)
 - Supported library types: `movies, tvshows, homevideos, boxsets`
-- Username / password authentication
+- Username / password authentication, or Emby Connect (emby.media cloud account, with server picker)
 - Select specific libraries to display
 - Continue Watching, Next Up and Resume Playback
 - Autoplay next episode in a season (optional, off by default)

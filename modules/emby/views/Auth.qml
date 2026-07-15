@@ -17,7 +17,7 @@ FocusScope {
     property bool waiting: false
     property string errorMsg: ""
 
-    // Focus index: 0=server URL, 1=username, 2=password, 3=Sign In
+    // Focus index: 0=server URL, 1=username, 2=password, 3=Sign In, 4=Emby Connect
     property int focusIndex: 0
 
     Connections {
@@ -32,6 +32,17 @@ FocusScope {
         }
 
         function onErrorOccurred(msg) {
+            authRoot.waiting = false
+            authRoot.errorMsg = msg
+        }
+
+        // Emby Connect: more than one server on the account — let the user pick.
+        function onConnectServersReady(servers) {
+            authRoot.waiting = false
+            authRoot.navigateTo("ConnectServers.qml", { servers: servers }, {})
+        }
+
+        function onConnectFailed(msg) {
             authRoot.waiting = false
             authRoot.errorMsg = msg
         }
@@ -65,14 +76,16 @@ FocusScope {
             if (focusIndex > 0) focusIndex--
             event.accepted = true
         } else if (event.key === Qt.Key_Down) {
-            if (focusIndex < 3) focusIndex++
+            if (focusIndex < 4) focusIndex++
             event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            authRoot.submit()
+            if (focusIndex === 4) authRoot.submitConnect()
+            else authRoot.submit()
             event.accepted = true
         }
     }
 
+    // Direct sign-in against a single server (server URL + username + password).
     function submit() {
         if (waiting) return
         if (serverUrl === "") {
@@ -86,6 +99,20 @@ FocusScope {
         waiting = true
         errorMsg = ""
         embyBackend.authenticate(authRoot.serverUrl, authRoot.username, authRoot.password)
+    }
+
+    // Emby Connect: cloud sign-in with the emby.media account (username/email +
+    // password). The server URL field is ignored — servers are discovered from
+    // the account, and a picker appears if there is more than one.
+    function submitConnect() {
+        if (waiting) return
+        if (username === "") {
+            errorMsg = "Enter your Emby Connect username or email"
+            return
+        }
+        waiting = true
+        errorMsg = ""
+        embyBackend.connect_authenticate(authRoot.username, authRoot.password)
     }
 
     // ---
@@ -201,6 +228,38 @@ FocusScope {
                 font.capitalization: Font.AllUppercase
                 font.pixelSize: root.sh * 0.0375 //18
             }
+        }
+
+        // Emby Connect button (cloud account — server URL not required)
+        Rectangle {
+            width: root.sw * 0.234375 //150
+            height: root.sh * 0.0583333 //28
+            color: focusIndex === 4 ? root.accentColor : root.surfaceColor
+            border.color: focusIndex === 4 ? root.accentColor : root.tertiaryColor
+            border.width: root.sh * 0.003125 //2
+            anchors.horizontalCenter: parent.horizontalCenter
+
+            Text {
+                anchors.centerIn: parent
+                text: "Emby Connect"
+                color: focusIndex === 4 ? root.surfaceColor : root.primaryColor
+                font.family: root.globalFont
+                font.capitalization: Font.AllUppercase
+                font.pixelSize: root.sh * 0.0375 //18
+            }
+        }
+
+        // Caption clarifying the Emby Connect option
+        Text {
+            text: "Emby Connect uses your emby.media account"
+            color: root.tertiaryColor
+            font.family: root.globalFont
+            font.capitalization: Font.AllUppercase
+            horizontalAlignment: Text.AlignHCenter
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: root.sw * 0.5
+            wrapMode: Text.WordWrap
+            font.pixelSize: root.sh * 0.025 //12
         }
 
         // Loading indicator
