@@ -1,8 +1,8 @@
 import QtQuick
 import Components
 
-// Channel list for a group. Selecting a channel hands its stream URL to the
-// live player.
+// Channel list for a group, with now/next guide info (when an XMLTV EPG is
+// configured). Selecting a channel hands its stream URL to the live player.
 FocusScope {
     id: channelsRoot
 
@@ -18,6 +18,25 @@ FocusScope {
     property var channels: []
     property bool loading: true
 
+    // Wall-clock in epoch-ms, ticked so the "now" progress bars advance while the
+    // list is on screen.
+    property double nowMs: 0
+
+    Timer {
+        interval: 30000
+        repeat: true
+        running: true
+        onTriggered: channelsRoot.nowMs = Date.now()
+    }
+
+    function progressFor(item) {
+        var start = item.nowStartMs || 0
+        var stop = item.nowStopMs || 0
+        if (stop <= start) return -1
+        var f = (channelsRoot.nowMs - start) / (stop - start)
+        return Math.max(0, Math.min(1, f))
+    }
+
     Connections {
         target: iptvBackend
 
@@ -30,7 +49,10 @@ FocusScope {
         }
     }
 
-    Component.onCompleted: iptvBackend.load_channels(group)
+    Component.onCompleted: {
+        nowMs = Date.now()
+        iptvBackend.load_channels(group)
+    }
 
     focus: true
 
@@ -71,9 +93,10 @@ FocusScope {
         anchors.topMargin: root.sh * 0.25
         anchors.leftMargin: root.sw * 0.115625
         width: root.sw * 0.76875
-        height: root.sh * 0.525
+        height: root.sh * 0.55
         clip: true
         focus: true
+        spacing: root.sh * 0.0083333
 
         Keys.onUpPressed: if (currentIndex > 0) currentIndex--
         Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
@@ -83,7 +106,9 @@ FocusScope {
             if (!ch || !ch.url) return
             channelsRoot.navigateTo("Player.qml", {
                 streamUrl: ch.url,
-                title: ch.name
+                title: ch.name,
+                nowTitle: ch.nowTitle || "",
+                nextTitle: ch.nextTitle || ""
             }, { currentIndex: channelList.currentIndex })
         }
 
@@ -95,49 +120,61 @@ FocusScope {
         }
 
         delegate: Item {
+            id: chRow
             width: channelList.width
-            height: root.sh * 0.0583333
+            height: nowLine.visible ? root.sh * 0.09 : root.sh * 0.0583333
+            property bool selected: channelList.currentIndex === index
 
-            Item {
-                id: textClip
-                width: Math.min(rowText.implicitWidth, channelList.width)
-                height: parent.height
-                clip: true
+            Rectangle {
+                anchors.fill: parent
+                color: root.accentColor
+                visible: chRow.selected
+            }
 
-                Rectangle {
-                    color: root.accentColor
-                    anchors.fill: rowText
-                    visible: channelList.currentIndex === index
+            Column {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: root.sw * 0.009375
+                anchors.rightMargin: root.sw * 0.009375
+                spacing: root.sh * 0.004
+
+                Text {
+                    text: modelData.name || modelData.url || ""
+                    color: chRow.selected ? root.surfaceColor : root.primaryColor
+                    font.family: root.globalFont
+                    font.capitalization: Font.AllUppercase
+                    font.pixelSize: root.sh * 0.0416667
+                    elide: Text.ElideRight
+                    width: parent.width
                 }
 
                 Text {
-                    id: rowText
-                    text: modelData.name || modelData.url || ""
-                    color: channelList.currentIndex === index ? root.surfaceColor : root.primaryColor
+                    id: nowLine
+                    visible: (modelData.nowTitle || modelData.nextTitle || "") !== ""
+                    text: modelData.nowTitle
+                          ? "NOW · " + modelData.nowTitle
+                          : (modelData.nextTitle ? "NEXT · " + modelData.nextTitle : "")
+                    color: chRow.selected ? root.surfaceColor : root.tertiaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: 0
-                    topPadding: root.sh * 0.0041667
-                    leftPadding: root.sw * 0.009375
-                    rightPadding: root.sw * 0.009375
-                    bottomPadding: root.sh * 0.00625
-                    font.pixelSize: root.sh * 0.05
+                    font.pixelSize: root.sh * 0.0270833
+                    elide: Text.ElideRight
+                    width: parent.width
                 }
 
-                SequentialAnimation {
-                    running: (channelList.currentIndex === index) &&
-                             (rowText.implicitWidth > textClip.width)
-                    loops: Animation.Infinite
-                    onRunningChanged: if (!running) rowText.x = 0
-                    PauseAnimation { duration: 1500 }
-                    NumberAnimation {
-                        target: rowText; property: "x"
-                        to: textClip.width - rowText.implicitWidth
-                        duration: Math.abs(to) * 20
+                // Progress through the current programme.
+                Rectangle {
+                    visible: channelsRoot.progressFor(modelData) >= 0
+                    width: parent.width
+                    height: root.sh * 0.005
+                    color: chRow.selected ? Qt.rgba(1,1,1,0.35) : root.surfaceColor
+
+                    Rectangle {
+                        height: parent.height
+                        width: parent.width * Math.max(0, channelsRoot.progressFor(modelData))
+                        color: chRow.selected ? root.surfaceColor : root.accentColor
                     }
-                    PauseAnimation { duration: 2000 }
-                    PropertyAction { target: rowText; property: "x"; value: 0 }
                 }
             }
         }

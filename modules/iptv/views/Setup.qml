@@ -1,8 +1,8 @@
 import QtQuick
 import Components
 
-// Playlist setup: enter an M3U URL (or a local file path). Saved to
-// modules.<id>.m3u_url; the backend fetches + parses it on load.
+// Playlist setup: an M3U URL (or local file path) plus an optional XMLTV EPG
+// URL for the now/next guide. Saved to modules.<id>.m3u_url / .epg_url.
 FocusScope {
     focus: true
     id: setupRoot
@@ -14,16 +14,20 @@ FocusScope {
     signal goBack()
 
     property string m3uUrl: appCore.get_setting(moduleRoot.moduleId, "m3u_url") || ""
+    property string epgUrl: appCore.get_setting(moduleRoot.moduleId, "epg_url") || ""
     property bool waiting: false
     property string errorMsg: ""
+
+    // Focus index: 0=M3U URL, 1=EPG URL, 2=Load
+    property int focusIndex: 0
 
     Connections {
         target: iptvBackend
 
         function onGroupsLoaded(groups) {
-            // Playlist parsed successfully — remember it and enter the guide.
             setupRoot.waiting = false
             appCore.save_setting(moduleRoot.moduleId, "m3u_url", setupRoot.m3uUrl)
+            appCore.save_setting(moduleRoot.moduleId, "epg_url", setupRoot.epgUrl)
             setupRoot.replaceWith("Groups.qml", {})
         }
 
@@ -48,7 +52,13 @@ FocusScope {
             event.accepted = true
             return
         }
-        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+        if (event.key === Qt.Key_Up) {
+            if (focusIndex > 0) focusIndex--
+            event.accepted = true
+        } else if (event.key === Qt.Key_Down) {
+            if (focusIndex < 2) focusIndex++
+            event.accepted = true
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             setupRoot.submit()
             event.accepted = true
         }
@@ -64,6 +74,7 @@ FocusScope {
         errorMsg = ""
         // Persist first so the backend reads the new source, then load.
         appCore.save_setting(moduleRoot.moduleId, "m3u_url", m3uUrl)
+        appCore.save_setting(moduleRoot.moduleId, "epg_url", epgUrl)
         iptvBackend.load_groups(true)
     }
 
@@ -83,13 +94,19 @@ FocusScope {
         anchors.centerIn: parent
         spacing: root.sh * 0.0333333
 
-        Column {
+        // Reusable labelled field (keys forwarded up to setupRoot.Keys).
+        component Field: Column {
+            property alias label: fieldLabel.text
+            property alias text: fieldInput.text
+            property int index: 0
+            signal edited(string value)
+
             spacing: root.sh * 0.0166667
             width: root.sw * 0.6
             anchors.horizontalCenter: parent.horizontalCenter
 
             Text {
-                text: "M3U Playlist URL"
+                id: fieldLabel
                 color: root.secondaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
@@ -100,26 +117,55 @@ FocusScope {
                 width: parent.width
                 height: root.sh * 0.075
                 color: root.surfaceColor
-                border.color: root.accentColor
+                border.color: setupRoot.focusIndex === index ? root.accentColor : root.tertiaryColor
                 border.width: root.sh * 0.003125
 
                 TextInput {
-                    id: urlInput
+                    id: fieldInput
                     anchors.fill: parent
                     anchors.margins: root.sh * 0.0166667
-                    text: setupRoot.m3uUrl
                     color: root.primaryColor
                     font.family: root.globalFont
                     font.pixelSize: root.sh * 0.0375
                     clip: true
-                    focus: true
+                    focus: setupRoot.focusIndex === index
 
-                    onTextChanged: { setupRoot.m3uUrl = text }
-
-                    Keys.onPressed: function(event) {
-                        event.accepted = false
-                    }
+                    onTextChanged: edited(text)
+                    Keys.onPressed: function(event) { event.accepted = false }
                 }
+            }
+        }
+
+        Field {
+            label: "M3U Playlist URL"
+            index: 0
+            text: setupRoot.m3uUrl
+            onEdited: function(value) { setupRoot.m3uUrl = value }
+        }
+
+        Field {
+            label: "XMLTV Guide URL (optional)"
+            index: 1
+            text: setupRoot.epgUrl
+            onEdited: function(value) { setupRoot.epgUrl = value }
+        }
+
+        // Load button
+        Rectangle {
+            width: root.sw * 0.234375
+            height: root.sh * 0.0583333
+            color: focusIndex === 2 ? root.accentColor : root.surfaceColor
+            border.color: focusIndex === 2 ? root.accentColor : root.tertiaryColor
+            border.width: root.sh * 0.003125
+            anchors.horizontalCenter: parent.horizontalCenter
+
+            Text {
+                anchors.centerIn: parent
+                text: "Load"
+                color: focusIndex === 2 ? root.surfaceColor : root.primaryColor
+                font.family: root.globalFont
+                font.capitalization: Font.AllUppercase
+                font.pixelSize: root.sh * 0.0375
             }
         }
 
@@ -149,7 +195,7 @@ FocusScope {
 
     // Footer
     Text {
-        text: root.hints.back + ":BACK " + root.hints.select + ":LOAD"
+        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":LOAD"
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom
