@@ -58,6 +58,7 @@ add_executable(240mp
     src/input/IdleTracker.cpp
     src/update/UpdateManager.cpp
     $<$<BOOL:${APPLE}>:src/macos_utils.mm>
+    $<$<NOT:$<BOOL:${APPLE}>>:src/linux_audio_utils.cpp>
 )
 
 target_compile_definitions(240mp PRIVATE APP_VERSION="${APP_VERSION}")

@@ -1,9 +1,11 @@
 #include "AmbientModeBackend.h"
+#include "../../linux_audio_utils.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QDebug>
 
 static const QStringList kVideoExts = {
@@ -72,9 +74,16 @@ QVariantList AmbientModeBackend::getAudioFiles() const
     return scanFiles(kAudioExts);
 }
 
-void AmbientModeBackend::startAudio(const QString &path)
+void AmbientModeBackend::startAudio(const QStringList &paths, bool shuffle)
 {
+    m_audioStopRequested = true; // covers the stopAudio() call below
     stopAudio();
+
+    if (paths.isEmpty())
+        return;
+
+    m_audioPaths   = paths;
+    m_audioShuffle = shuffle;
 
 #ifdef Q_OS_MACOS
     {
@@ -94,19 +103,33 @@ void AmbientModeBackend::startAudio(const QString &path)
     }
 
     QStringList args;
-    args << path
+    args << paths
          << QStringLiteral("--no-video")
-         << QStringLiteral("--loop-playlist=inf")
-         << QStringLiteral("--no-terminal")
+         << QStringLiteral("--loop-playlist=inf");
+    if (shuffle)
+        args << QStringLiteral("--shuffle");
+#ifdef Q_OS_LINUX
+    {
+        const QString audioDevice = detectAlsaAudioDevice();
+        if (!audioDevice.isEmpty())
+            args << QStringLiteral("--audio-device=%1").arg(audioDevice);
+    }
+#endif
+    args << QStringLiteral("--no-terminal")
          << QStringLiteral("--really-quiet");
 
     m_audioProcess = new QProcess(this);
+    connect(m_audioProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, &AmbientModeBackend::onAudioProcessFinished);
     m_audioProcess->start(bin, args);
-    qDebug("[AmbientMode] audio process started: %s", qPrintable(path));
+    m_audioStopRequested = false;
+    qDebug("[AmbientMode] audio process started: %d track(s), shuffle=%d", paths.size(), shuffle);
 }
 
 void AmbientModeBackend::stopAudio()
 {
+    m_audioStopRequested = true;
+    m_audioRespawnCount  = 0;
     if (!m_audioProcess)
         return;
     if (m_audioProcess->state() != QProcess::NotRunning) {
@@ -116,6 +139,30 @@ void AmbientModeBackend::stopAudio()
     m_audioProcess->deleteLater();
     m_audioProcess = nullptr;
     qDebug("[AmbientMode] audio process stopped");
+}
+
+// The companion audio track has no video fallback to lean on, so if its mpv
+// process dies on its own (an ALSA hiccup, a transient device stall), the
+// screen keeps playing but goes silent with nothing to notice or recover.
+// Mirrors NfcReaderBackend's bounded-respawn watchdog for the same class of
+// "external process wedged/died mid-session" failure.
+static constexpr int kMaxAudioRespawns = 5;
+
+void AmbientModeBackend::onAudioProcessFinished()
+{
+    if (m_audioStopRequested || m_audioPaths.isEmpty())
+        return;
+
+    if (m_audioRespawnCount >= kMaxAudioRespawns) {
+        qWarning("[AmbientMode] audio process keeps dying, giving up until next playback session");
+        return;
+    }
+    m_audioRespawnCount++;
+    qWarning("[AmbientMode] audio process exited unexpectedly, restarting (attempt %d/%d)",
+              m_audioRespawnCount, kMaxAudioRespawns);
+    const QStringList paths = m_audioPaths;
+    const bool shuffle = m_audioShuffle;
+    QTimer::singleShot(1000, this, [this, paths, shuffle]() { startAudio(paths, shuffle); });
 }
 
 void AmbientModeBackend::onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value)

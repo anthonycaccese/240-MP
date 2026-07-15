@@ -1,5 +1,6 @@
 #include "MpvController.h"
 #include "../AppCore.h"
+#include "../linux_audio_utils.h"
 #include <QDir>
 #include <QFile>
 #include <QProcessEnvironment>
@@ -210,6 +211,16 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             args << QString("--script=%1").arg(ssScript);
         }
     }
+
+#ifdef Q_OS_LINUX
+    // Skip when muted (e.g. ambient mode's companion audio track is playing
+    // the audio instead), no audio device is opened either way.
+    if (!muteAudio) {
+        const QString audioDevice = detectAlsaAudioDevice();
+        if (!audioDevice.isEmpty())
+            args << QStringLiteral("--audio-device=%1").arg(audioDevice);
+    }
+#endif
 
     // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
     // primary plane between two consecutive same-size/format stills, so a photo
