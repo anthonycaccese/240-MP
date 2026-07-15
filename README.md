@@ -64,6 +64,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 ### Live TV Module (IPTV)
 - Designed for CRT navigation (simple, fast, list browsing)
 - Point it at an M3U playlist (remote URL or local file)
+- Optional XMLTV guide URL for now/next info — current programme, a progress bar per channel, and a now/next info bar on tune-in
 - Channels grouped by category (`group-title`), plus an "All Channels" shelf
 - Streams handed straight to mpv (HLS/TS/UDP) — no auth, transcode, or DRM
 - Change the playlist any time from the "Change Playlist" entry
