@@ -18,11 +18,46 @@ FocusScope {
     property int videoIndex: 0
     property int audioIndex: 0   // 0 = "Video Audio"; 1+ = audioFiles[audioIndex - 1]
 
+    property bool shuffleVideo: false
+    property bool shuffleAudio: false
+    property bool autoLaunch: false
+
     focus: true
+
+    function launchPlayer(videoPath, audioPath) {
+        navigateTo("Player.qml", {
+            videoPath: videoPath,
+            audioPath: audioPath,
+            shuffleVideo: shuffleVideo,
+            shuffleAudio: shuffleAudio,
+            videoPaths: videoFiles.map(function(f) { return f.path }),
+            audioPaths: audioFiles.map(function(f) { return f.path })
+        }, { returnedFromPlayer: true })
+    }
 
     Component.onCompleted: {
         videoFiles = ambientModeBackend.getVideoFiles()
         audioFiles = ambientModeBackend.getAudioFiles()
+        shuffleVideo = !!appCore.get_setting(moduleRoot.moduleId, "shuffle_video")
+        shuffleAudio = !!appCore.get_setting(moduleRoot.moduleId, "shuffle_audio")
+        autoLaunch   = !!appCore.get_setting(moduleRoot.moduleId, "auto_launch")
+
+        // Auto-launch skips this screen and starts playback on a fresh entry (e.g.
+        // this module set as the app's startup module), independent of shuffle,
+        // it's its own opt-in so the default "land here, press START" flow never
+        // changes under anyone who hasn't asked for it. Skipped when we're only
+        // back here because the player exited, or ESC would relaunch forever with
+        // no way to reach this screen.
+        if (autoLaunch && videoFiles.length > 0 && !navListState.returnedFromPlayer) {
+            var startIdx = shuffleVideo ? Math.floor(Math.random() * videoFiles.length) : videoIndex
+            var autoAudioPath = (shuffleAudio && audioFiles.length > 0) ? audioFiles[Math.floor(Math.random() * audioFiles.length)].path : ""
+            // Deferred: this fires while the Loader that owns this item is still
+            // wiring up (Root.qml's Connections re-binds to internalLoader.item
+            // one tick after onCompleted), so emitting navigateTo synchronously
+            // here can go out before anything is listening. Qt.callLater pushes
+            // it past that settling point.
+            Qt.callLater(function() { launchPlayer(videoFiles[startIdx].path, autoAudioPath) })
+        }
     }
 
     Keys.onPressed: function(event) {
@@ -50,7 +85,7 @@ FocusScope {
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (focusRow === 2 && videoFiles.length > 0) {
                 var audioPath = audioIndex > 0 ? audioFiles[audioIndex - 1].path : ""
-                navigateTo("Player.qml", { videoPath: videoFiles[videoIndex].path, audioPath: audioPath }, {})
+                launchPlayer(videoFiles[videoIndex].path, audioPath)
             }
             event.accepted = true
         }

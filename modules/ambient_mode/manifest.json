@@ -15,6 +15,24 @@
       "label": "Media Directory",
       "type": "directory_browser",
       "default": ""
+    },
+    {
+      "key": "shuffle_video",
+      "label": "Shuffle Video Playback",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "shuffle_audio",
+      "label": "Shuffle Audio Playback",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "auto_launch",
+      "label": "Auto-Launch Playback",
+      "type": "toggle",
+      "default": "OFF"
     }
   ]
 }
