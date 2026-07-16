@@ -225,7 +225,7 @@ Window {
                         params: root.appCurrentParams,
                         listState: {}
                     })
-                    moduleLoader.setSource(entryPoint, { "navParams": {} })
+                    moduleLoader.setSource(entryPoint, { "navParams": { fromAppStartup: true } })
                 }
             }
         }

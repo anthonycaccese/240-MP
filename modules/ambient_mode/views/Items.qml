@@ -42,13 +42,12 @@ FocusScope {
         shuffleAudio = !!appCore.get_setting(moduleRoot.moduleId, "shuffle_audio")
         autoLaunch   = !!appCore.get_setting(moduleRoot.moduleId, "auto_launch")
 
-        // Auto-launch skips this screen and starts playback on a fresh entry (e.g.
-        // this module set as the app's startup module), independent of shuffle,
-        // it's its own opt-in so the default "land here, press START" flow never
-        // changes under anyone who hasn't asked for it. Skipped when we're only
-        // back here because the player exited, or ESC would relaunch forever with
-        // no way to reach this screen.
-        if (autoLaunch && videoFiles.length > 0 && !navListState.returnedFromPlayer) {
+        // Auto-launch only fires when the app booted straight into this module
+        // (it's the configured startup module), not when someone navigates here
+        // from the main menu, that screen still has to be reachable to change
+        // video/audio/shuffle. Also skipped when we're only back here because
+        // the player exited, or ESC would relaunch forever with no way out.
+        if (autoLaunch && videoFiles.length > 0 && navParams.fromAppStartup && !navListState.returnedFromPlayer) {
             var startIdx = shuffleVideo ? Math.floor(Math.random() * videoFiles.length) : videoIndex
             var autoAudioPath = (shuffleAudio && audioFiles.length > 0) ? audioFiles[Math.floor(Math.random() * audioFiles.length)].path : ""
             // Deferred: this fires while the Loader that owns this item is still

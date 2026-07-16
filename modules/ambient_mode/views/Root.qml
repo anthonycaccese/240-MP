@@ -54,5 +54,5 @@ FocusScope {
         }
     }
 
-    Component.onCompleted: navigateTo("Items.qml", {})
+    Component.onCompleted: navigateTo("Items.qml", navParams)
 }
