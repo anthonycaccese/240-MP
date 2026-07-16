@@ -11,6 +11,7 @@
 #include <QHash>
 #include <QXmlStreamReader>
 #include <QDateTime>
+#include <QTimeZone>
 #include <QDebug>
 #include <algorithm>
 
@@ -331,7 +332,7 @@ static qint64 parseXmltvTime(const QString &raw) {
         return 0;
     // The 14-digit stamp is wall-clock time in the trailing offset; interpret it
     // as UTC first, then subtract the offset to get true UTC.
-    dt.setTimeSpec(Qt::UTC);
+    dt.setTimeZone(QTimeZone::UTC);
 
     int offsetSec = 0;
     const QString rest = s.mid(14).trimmed(); // e.g. "+0000" / "-0500"
