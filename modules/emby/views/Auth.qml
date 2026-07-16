@@ -78,6 +78,12 @@ FocusScope {
         } else if (event.key === Qt.Key_Down) {
             if (focusIndex < 4) focusIndex++
             event.accepted = true
+        } else if (event.key === Qt.Key_Tab) {
+            focusIndex = (focusIndex + 1) % 5
+            event.accepted = true
+        } else if (event.key === Qt.Key_Backtab) { // Shift+Tab
+            focusIndex = (focusIndex + 4) % 5
+            event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (focusIndex === 4) authRoot.submitConnect()
             else authRoot.submit()
@@ -130,10 +136,13 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125 //80
     }
 
-    // Body
+    // Body — anchored below the AppBar (not centered): this form is tall enough
+    // that vertical centering pushes its top row up into the header.
     Column {
-        anchors.centerIn: parent
-        spacing: root.sh * 0.0333333 //16
+        anchors.top: parent.top
+        anchors.topMargin: root.sh * 0.195
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: root.sh * 0.02
 
         // Reusable labelled text field. Up/Down navigation and Enter/Escape are
         // handled by authRoot.Keys — each TextInput forwards keys up by not
@@ -170,8 +179,9 @@ FocusScope {
                     anchors.margins: root.sh * 0.0166667 //8
                     color: root.primaryColor
                     font.family: root.globalFont
-                    // Passwords keep their real case; other fields render uppercase.
-                    font.capitalization: masked ? Font.MixedCase : Font.AllUppercase
+                    // Inputs render exactly as typed — an uppercase-forced display
+                    // reads as "my input was mangled" when entering emails/usernames.
+                    font.capitalization: Font.MixedCase
                     font.pixelSize: root.sh * 0.0375 //18
                     clip: true
                     echoMode: masked ? TextInput.Password : TextInput.Normal
@@ -249,42 +259,22 @@ FocusScope {
             }
         }
 
-        // Caption clarifying the Emby Connect option
+        // Single status line: connecting > error > Emby Connect caption. Merged
+        // into one slot so the column keeps a fixed height and never runs into
+        // the footer hints.
         Text {
-            text: "Emby Connect uses your emby.media account"
-            color: root.tertiaryColor
+            text: waiting ? "CONNECTING..."
+                : (errorMsg !== "" ? errorMsg
+                : "Emby Connect uses your emby.media account")
+            color: errorMsg !== "" && !waiting ? root.accentColor : root.tertiaryColor
             font.family: root.globalFont
             font.capitalization: Font.AllUppercase
             horizontalAlignment: Text.AlignHCenter
             anchors.horizontalCenter: parent.horizontalCenter
             width: root.sw * 0.5
-            wrapMode: Text.WordWrap
-            font.pixelSize: root.sh * 0.025 //12
-        }
-
-        // Loading indicator
-        Text {
-            visible: waiting
-            text: "CONNECTING..."
-            color: root.tertiaryColor
-            font.family: root.globalFont
-            font.capitalization: Font.AllUppercase
-            anchors.horizontalCenter: parent.horizontalCenter
-            font.pixelSize: root.sh * 0.0333333 //16
-        }
-
-        // Error message
-        Text {
-            visible: errorMsg !== ""
-            text: errorMsg
-            color: root.accentColor
-            font.family: root.globalFont
-            font.capitalization: Font.AllUppercase
-            horizontalAlignment: Text.AlignHCenter
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: root.sw * 0.5
-            wrapMode: Text.WordWrap
-            font.pixelSize: root.sh * 0.0333333 //16
+            elide: Text.ElideRight
+            maximumLineCount: 1
+            font.pixelSize: root.sh * 0.0291667 //14
         }
     }
 
