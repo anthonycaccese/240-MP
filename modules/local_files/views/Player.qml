@@ -108,8 +108,15 @@ FocusScope {
             var plPos = lastKnownPlaylistPos
 
             if (isPlaylist(filePath)) {
-                // Always save playlist state — skip completion detection
-                if (pos > 0 || plPos >= 0)
+                // The per-item duration can't tell "finished the list" from
+                // "finished one video of it", but the exit reason can: mpv only
+                // ends with "eof" when the final item played to its end (a quit
+                // mid-list leaves a trailing quit/stop end-file event). A
+                // completed playlist clears its resume point like a completed
+                // single video; anything else saves item + timecode.
+                if (reason === "eof")
+                    localFilesBackend.clearPosition(filePath)
+                else if (pos > 0 || plPos >= 0)
                     localFilesBackend.savePosition(filePath, pos, plPos)
             } else if (!isImage(filePath)) {
                 // Single file: clear if near completion, save otherwise.

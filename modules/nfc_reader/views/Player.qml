@@ -158,10 +158,15 @@ FocusScope {
             var dur   = lastKnownDurationMs || finalDurationMs
             var plPos = lastKnownPlaylistPos
             if (isPlaylist(videoPath)) {
-                // Always save playlist state — duration is per-item, so the
-                // single-file completion rule below can't tell "finished the
-                // list" from "finished one video of it".
-                if (pos > 0 || plPos >= 0)
+                // The per-item duration can't tell "finished the list" from
+                // "finished one video of it", but the exit reason can: mpv only
+                // ends with "eof" when the final item played to its end (a quit
+                // mid-list leaves a trailing quit/stop end-file event). A
+                // completed playlist clears its resume point like a completed
+                // single video; anything else saves item + timecode.
+                if (reason === "eof")
+                    nfcReaderBackend.clearPosition(videoPath)
+                else if (pos > 0 || plPos >= 0)
                     nfcReaderBackend.savePosition(videoPath, pos, plPos)
             } else {
                 // Same completion rule as local_files: near the end clears the
