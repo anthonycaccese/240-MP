@@ -52,7 +52,7 @@ public:
     Q_INVOKABLE void setModuleActive(bool active);
 
     Q_INVOKABLE QVariantMap getSavedPosition(const QString &videoPath);
-    Q_INVOKABLE void        savePosition(const QString &videoPath, int positionMs);
+    Q_INVOKABLE void        savePosition(const QString &videoPath, int positionMs, int playlistPos);
     Q_INVOKABLE void        clearPosition(const QString &videoPath);
     Q_INVOKABLE void        get_resume_playback_options();
     Q_INVOKABLE void        get_auto_subtitles_options();

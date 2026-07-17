@@ -392,9 +392,10 @@ void NfcReaderBackend::resetAfterPlayback() {
     qDebug("[NfcReader] Playback ended - ready for next card");
 }
 
-// Resume history — same shape as local_files: a JSON map of path → {pos}.
-// Keyed by the mapped video path (not the card UID) so remapping a card to a
-// different video doesn't inherit the old video's resume point.
+// Resume history — same shape as local_files: a JSON map of path → {pos, plPos}.
+// plPos is the playlist item index for .m3u / YouTube-playlist mappings, -1 for
+// single items. Keyed by the mapped video path (not the card UID) so remapping
+// a card to a different video doesn't inherit the old video's resume point.
 QString NfcReaderBackend::historyFilePath() const {
     return m_dataRoot + "/nfc_reader_history.json";
 }
@@ -417,13 +418,16 @@ QVariantMap NfcReaderBackend::getSavedPosition(const QString &videoPath) {
     const QVariant val = loadHistory().value(videoPath);
     if (!val.canConvert<QVariantMap>())
         return {};
-    return val.toMap();
+    QVariantMap entry = val.toMap();
+    if (!entry.contains("plPos")) entry["plPos"] = -1;
+    return entry;
 }
 
-void NfcReaderBackend::savePosition(const QString &videoPath, int positionMs) {
+void NfcReaderBackend::savePosition(const QString &videoPath, int positionMs, int playlistPos) {
     QVariantMap history = loadHistory();
     QVariantMap entry;
-    entry["pos"] = positionMs;
+    entry["pos"]   = positionMs;
+    entry["plPos"] = playlistPos;
     history[videoPath] = entry;
     saveHistory(history);
 }
