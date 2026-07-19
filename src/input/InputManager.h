@@ -72,7 +72,11 @@ private slots:
     void onRepeatTick();
     void onDataDirChanged(const QString &path);
     void onAppSettingChanged(const QString &key, const QString &value);
+#ifdef Q_OS_LINUX
+    // Defined in the Q_OS_LINUX section of InputManager.cpp; the ifdef keeps
+    // moc from emitting a metacall reference to it on other platforms.
     void onConsumerControlReadable();
+#endif
 
 private:
     enum class Action { None, Up, Down, Left, Right, Select, Back, PlayPause };
@@ -84,7 +88,9 @@ private:
     void loadDefaultMapping();
     void loadUserMapping();
     void loadKeyRemap();
+#ifdef Q_OS_LINUX
     void openConsumerControlDevice();
+#endif
     static QString evdevKeyName(int linuxCode);
     static QString mouseButtonName(int qtButton);
     void noteActiveController(SDL_JoystickID which);
