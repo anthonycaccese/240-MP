@@ -46,6 +46,16 @@ public:
     // the remap screen to show what's currently bound. Used from QML.
     Q_INVOKABLE QString keyDisplayName(int qtKey) const;
 
+    // Remap-capture mode, held on by the remap screen while its "press a
+    // button" overlay is up. While active, remap delivery is suspended and
+    // every real input — keyboard key, Consumer Control button, mouse button —
+    // is reported through auxButtonPressed() instead of acting, so the overlay
+    // sees the physical input itself even when it's already bound to an action
+    // (the eventFilter would otherwise consume it and synthesize that action's
+    // default key). Synthesized gamepad key events keep flowing to QML so a
+    // pad's Back button can still cancel the overlay.
+    Q_INVOKABLE void setRemapCapture(bool active);
+
 signals:
     void gamepadConnectedChanged();
     void lastInputDeviceChanged();
@@ -54,13 +64,12 @@ signals:
     // (fullscreen mpv holds OS focus on macOS, which clears QML active focus).
     // main.cpp connects this to MpvController::sendKey.
     void mpvKeyRequested(const QString &key);
-    // A raw press on the auxiliary "Consumer Control" input device (Linux
-    // only, see openConsumerControlDevice()) that Qt's own key event delivery
-    // never sees, e.g. a remote's Home/Back/Menu/colored/zoom buttons. Carries
-    // an opaque extended key id (keyDisplayName() and the remote_keymap.*
-    // settings both accept it the same as a real Qt::Key). The remap capture
-    // screen listens for this alongside Keys.onPressed so those buttons are
-    // bindable too.
+    // Capture-mode reporting (see setRemapCapture): a raw press on any of the
+    // three remappable input paths — a real keyboard key (its Qt::Key), a
+    // Consumer Control button (kEvdevKeyBase + Linux KEY_* code; Linux only,
+    // see openConsumerControlDevice()), or a mouse button (kMouseButtonBase +
+    // Qt::MouseButton). keyDisplayName() and the remote_keymap.* settings
+    // accept all three id spaces alike. Only emitted while capture is active.
     void auxButtonPressed(int extendedKeyId);
 
 protected:
@@ -97,6 +106,7 @@ private:
     void handleButton(SDL_JoystickID which, Uint8 button, bool pressed);
     void handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value);
     void pressAction(Action a);
+    void beginPress(Action a);
     void releaseAction(Action a);
     void deliverPress(Action a, bool autoRepeat);
     void postKey(int qtKey, QEvent::Type type, bool autoRepeat);
@@ -132,6 +142,7 @@ private:
     QHash<int, Action> m_keyRemap;                   // Qt::Key or extended evdev id → Action
     SDL_JoystickID m_lastActiveController = -1;      // labels follow the pad last touched
     Action m_heldDirection = Action::None;
+    bool m_remapCapture = false;                     // see setRemapCapture()
 
 #ifdef Q_OS_LINUX
     int m_consumerFd = -1;

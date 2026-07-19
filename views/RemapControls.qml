@@ -30,16 +30,27 @@ FocusScope {
     property bool capturing: false
     property int captureIndex: -1
 
+    // While capturing, InputManager suspends remap delivery and reports every
+    // real input (keyboard key, Consumer Control button, mouse button) through
+    // auxButtonPressed instead — without this, a key that's already bound
+    // would be consumed by the remap filter and captured as its action's
+    // default key rather than as itself, and capturing a bound mouse/remote
+    // button would fire the action on the same press that bound it.
+    onCapturingChanged: inputManager.setRemapCapture(capturing)
+    Component.onDestruction: inputManager.setRemapCapture(false)
+
     function buildRows() {
         var list = []
         for (var i = 0; i < actions.length; i++) {
             var a = actions[i]
             var stored = appCore.get_setting("", "remote_keymap." + a.id)
-            var hasCustom = stored !== undefined && stored !== "" && stored !== 0
+            // A never-written key arrives as undefined or null depending on
+            // the Qt version's invalid-QVariant conversion — check both.
+            var hasCustom = stored !== undefined && stored !== null && stored !== "" && stored !== 0
             list.push({
                 id: a.id,
                 label: a.label,
-                value: hasCustom ? ("+ " + inputManager.keyDisplayName(stored)) : "(default only)"
+                value: hasCustom ? ("default + " + inputManager.keyDisplayName(stored)) : "default"
             })
         }
         list.push({ id: "reset", label: "Reset to Defaults", isReset: true })
@@ -54,8 +65,18 @@ FocusScope {
     }
 
     function finishCapture(qtKey) {
-        if (captureIndex >= 0 && captureIndex < actions.length)
+        if (captureIndex >= 0 && captureIndex < actions.length) {
+            // One physical button, one action: InputManager's remap table is
+            // keyed by the button, so a key left bound to two actions would
+            // silently fire only one of them while both rows claim it. Clear
+            // it from any other action before saving.
+            for (var i = 0; i < actions.length; i++) {
+                if (i !== captureIndex
+                        && appCore.get_setting("", "remote_keymap." + actions[i].id) === qtKey)
+                    appCore.save_setting("", "remote_keymap." + actions[i].id, 0)
+            }
             appCore.save_setting("", "remote_keymap." + actions[captureIndex].id, qtKey)
+        }
         capturing = false
         captureIndex = -1
         buildRows()
@@ -79,23 +100,27 @@ FocusScope {
         rowList.forceActiveFocus()
     }
 
-    // Buttons on the auxiliary "Consumer Control" input device (Home, Back,
-    // Menu, colored buttons, zoom, etc. on some remotes) never generate a Qt
-    // key event at all, so the capture overlay's Keys.onPressed can't see
-    // them, this is the other half of that capture, fed by InputManager
-    // reading the device directly. See InputManager::openConsumerControlDevice.
+    // The single capture feed: while capturing, InputManager reports every
+    // real input — keyboard key, Consumer Control button, mouse button —
+    // through this one signal (see setRemapCapture). Back-family keys cancel
+    // instead of binding, so there is always a guaranteed way out.
     Connections {
         target: inputManager
         function onAuxButtonPressed(extendedKeyId) {
-            if (remapRoot.capturing)
+            if (!remapRoot.capturing)
+                return
+            if (extendedKeyId === Qt.Key_Escape || extendedKeyId === Qt.Key_Backspace
+                    || extendedKeyId === Qt.Key_Back)
+                remapRoot.cancelCapture()
+            else
                 remapRoot.finishCapture(extendedKeyId)
         }
     }
 
     // Header
     AppBar {
-        iconSource: "../../assets/images/settings.svg"
-        title: "Remote Controls"
+        iconSource: "../../assets/images/keyboard.svg"
+        title: "Controls"
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.125 //60
@@ -178,7 +203,7 @@ FocusScope {
         height: root.sh * 0.0583333 //28
         clip: true
         Text {
-            text: "Adds an extra button for that action, the default key keeps working"
+            text: "Map one additional button for each action\n(the default button will continue to function)"
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: root.sh * 0.0291667 //14
@@ -210,22 +235,17 @@ FocusScope {
         visible: remapRoot.capturing
         focus: remapRoot.capturing
 
-        // Any key other than Back/Escape becomes the new binding; Back always
-        // cancels rather than being bindable, so there's always a guaranteed
-        // way out of this screen. Autorepeat is ignored: the same physical
-        // press that opened this overlay is often still held when OS repeat
-        // kicks in, and without this check that repeat immediately "finishes"
-        // capture with the very key that started it.
+        // Real keys never reach here while capturing — InputManager swallows
+        // them and reports through auxButtonPressed (see the Connections
+        // above). What still arrives is the synthesized default-key events a
+        // gamepad produces: let its Back button cancel, and swallow the rest
+        // so a pad press can't bind its synthesized key or leak into the list
+        // underneath. Autorepeat is ignored: the press that opened this
+        // overlay may still be held when repeat kicks in.
         Keys.onPressed: function(event) {
-            if (event.isAutoRepeat) {
-                event.accepted = true
-                return
-            }
-            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+            if (!event.isAutoRepeat
+                    && (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back))
                 remapRoot.cancelCapture()
-            } else {
-                remapRoot.finishCapture(event.key)
-            }
             event.accepted = true
         }
 
@@ -235,7 +255,7 @@ FocusScope {
 
             Text {
                 text: remapRoot.captureIndex >= 0
-                      ? ("PRESS A BUTTON FOR " + remapRoot.actions[remapRoot.captureIndex].label.toUpperCase())
+                      ? ("PRESS A NEW BUTTON FOR [" + remapRoot.actions[remapRoot.captureIndex].label.toUpperCase() + "]")
                       : ""
                 color: root.accentColor
                 font.family: root.globalFont

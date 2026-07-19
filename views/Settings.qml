@@ -144,17 +144,17 @@ FocusScope {
         items.push({ type: "section", label: "Application" })
         items.push({
             type: "submenu",
-            key: "remote_controls",
-            label: "Remote Controls",
+            key: "remap_controls",
+            label: "Controls",
             moduleId: ""
         })
         items.push({
             type: "submenu",
             key: "software_update",
-            label: "Update 240-MP",
+            label: "Update",
             moduleId: ""
         })
-        items.push({ type: "quit", label: "Quit 240-MP" })
+        items.push({ type: "quit", label: "Quit" })
 
         settingsItems = items
 
@@ -261,7 +261,7 @@ FocusScope {
             if (row && row.type === "submenu") {
                 if (row.key === "software_update")
                     settingsRoot.navigateTo("views/Update.qml", {}, { currentIndex: settingsList.currentIndex })
-                else if (row.key === "remote_controls")
+                else if (row.key === "remap_controls")
                     settingsRoot.navigateTo("views/RemapControls.qml", {}, { currentIndex: settingsList.currentIndex })
                 else
                     settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
