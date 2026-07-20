@@ -277,11 +277,32 @@ void EmbyBackend::check_auth() {
 }
 
 void EmbyBackend::logout() {
-    // Revoke the access token server-side so it can't be reused
+    // Revoke the access token server-side so it can't be reused, and drop the
+    // device registration. /Sessions/Logout alone leaves the device listed under
+    // Dashboard > Devices (Jellyfin removes it), so signing out in 240-MP would
+    // otherwise leave a stale entry behind on every sign-out — and since
+    // clearAuthState() regenerates m_deviceId, the next sign-in registers a new
+    // one rather than reusing it. DELETE /Devices takes either the reported
+    // device id or Emby's internal numeric id; we only know the former.
     if (has_auth()) {
-        QUrl url(m_serverUrl + "/Sessions/Logout");
-        auto *reply = m_nam->post(embyRequest(url), QByteArray());
-        connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+        // Build both requests up front, while the token is still valid.
+        QUrl devUrl(m_serverUrl + "/Devices");
+        { QUrlQuery dq; dq.addQueryItem("Id", m_deviceId); devUrl.setQuery(dq); }
+        const QNetworkRequest deviceReq = embyRequest(devUrl);
+        const QNetworkRequest logoutReq = embyRequest(QUrl(m_serverUrl + "/Sessions/Logout"));
+
+        // Deauth the device first, then revoke the token — the other order would
+        // 401 the delete.
+        auto *devReply = m_nam->deleteResource(deviceReq);
+        ignoreSslErrors(devReply);
+        connect(devReply, &QNetworkReply::finished, this, [this, devReply, logoutReq]() {
+            devReply->deleteLater();
+            if (devReply->error() != QNetworkReply::NoError)
+                qWarning("[Emby] device deauth failed: %s", qPrintable(devReply->errorString()));
+            auto *reply = m_nam->post(logoutReq, QByteArray());
+            ignoreSslErrors(reply);
+            connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+        });
     }
     clearAuthState();
     emit logoutComplete();
@@ -736,8 +757,12 @@ void EmbyBackend::load_libraries() {
 
         // Prepend the Continue Watching / Up Next shelves, but only when they
         // actually have content. Probe each (limit=1) before emitting the list.
+        // mediaTypes is required: Emby's Resume returns an empty list (HTTP 200,
+        // TotalRecordCount 0) without a media-type or item-type filter, however
+        // many resume points exist. Jellyfin needs no such filter.
         QUrl resumeUrl(m_serverUrl + "/Users/" + m_userId + "/Items/Resume");
-        { QUrlQuery rq; rq.addQueryItem("limit", "1"); resumeUrl.setQuery(rq); }
+        { QUrlQuery rq; rq.addQueryItem("mediaTypes", "Video");
+                        rq.addQueryItem("limit", "1"); resumeUrl.setQuery(rq); }
         QUrl nextUrl(m_serverUrl + "/Shows/NextUp");
         { QUrlQuery nq; nq.addQueryItem("userId", m_userId); nq.addQueryItem("limit", "1"); nextUrl.setQuery(nq); }
 
@@ -755,12 +780,20 @@ void EmbyBackend::load_libraries() {
 }
 
 void EmbyBackend::probeHasItems(const QUrl &url, std::function<void(bool)> cb) {
+    const QString probePath = url.path();
     auto *reply = embyGet(url);
-    connect(reply, &QNetworkReply::finished, this, [reply, cb]() {
+    connect(reply, &QNetworkReply::finished, this, [reply, cb, probePath]() {
         reply->deleteLater();
         bool has = false;
-        if (reply->error() == QNetworkReply::NoError)
+        if (reply->error() == QNetworkReply::NoError) {
             has = !QJsonDocument::fromJson(reply->readAll()).object()["Items"].toArray().isEmpty();
+        } else {
+            // A failed probe hides the shelf exactly like an empty one, so warn —
+            // otherwise a broken request is indistinguishable from "nothing to
+            // resume" and stays invisible (as the missing mediaTypes=Video did).
+            qWarning("[Emby] shelf probe failed (%s): %s",
+                     qPrintable(probePath), qPrintable(reply->errorString()));
+        }
         cb(has);
     });
 }
@@ -987,7 +1020,9 @@ void EmbyBackend::load_episodes(const QString &seriesId, const QString &seasonId
     q.addQueryItem("fields", "MediaSources,MediaStreams,Overview,Genres,UserData");
     q.addQueryItem("enableUserData", "true");
     q.addQueryItem("limit", "500");
-    q.addQueryItem("sortBy", "AiredEpisodeOrder");
+    // No sortBy: Emby accepts the param but has no aired-order sort value, and
+    // "AiredEpisodeOrder" (a Jellyfin sort name) makes it 500 with a
+    // SQLiteException. Emby returns season episodes in index order natively.
     url.setQuery(q);
     // [dev] qDebug("[EmbyBackend] load_episodes series=%s season=%s", qPrintable(seriesId), qPrintable(seasonId));
 
@@ -1015,6 +1050,7 @@ void EmbyBackend::load_continue_watching() {
 
     QUrl url(m_serverUrl + "/Users/" + m_userId + "/Items/Resume");
     QUrlQuery q;
+    q.addQueryItem("mediaTypes", "Video");   // required on Emby — see load_libraries
     q.addQueryItem("limit", "20");
     q.addQueryItem("fields", "MediaSources,MediaStreams,Overview,Genres,UserData");
     url.setQuery(q);
@@ -1128,8 +1164,9 @@ void EmbyBackend::get_playback_url(const QString &itemId, const QString &mediaSo
     // subtitle format (including PGS/VOBSUB), so the server knows we handle
     // them client-side and won't force a transcode.  Pass the user's actual
     // selection (or omit if off) so the static stream includes all tracks.
-    // Hardcoding -1 here caused newer Emby servers to strip sub tracks
+    // Hardcoding -1 here caused newer *Jellyfin* servers to strip sub tracks
     // from the stream, breaking both --sid for image subs and sidecar URLs.
+    // Carried over from the Jellyfin module; not verified against Emby.
     if (subtitleStreamIndex >= 0)
         body["SubtitleStreamIndex"] = subtitleStreamIndex;
     if (maxBitrate > 0) body["MaxStreamingBitrate"] = maxBitrate;
@@ -1193,11 +1230,22 @@ void EmbyBackend::get_playback_url(const QString &itemId, const QString &mediaSo
         addBurnin("dvdsub");
     }
     profile["SubtitleProfiles"] = subtitleProfiles;
+
+    // Emby applies a default streaming bitrate cap when the profile doesn't
+    // declare one, and silently refuses direct play for any source above it —
+    // SupportsDirectPlay=0 / SupportsDirectStream=0 with no TranscodeReasons.
+    // Anything much past a couple of Mbps is denied, which is most real media.
+    // Advertise an effectively unlimited cap for direct play; the quality tiers
+    // keep their own cap so the server still sizes the transcode correctly.
+    profile["MaxStreamingBitrate"] = maxBitrate > 0 ? maxBitrate : 2000000000;
+
     QJsonArray directPlayProfiles;
     if (directPlay) {
         // mpv plays virtually anything, so advertise a match-all profile —
         // omitted Container/VideoCodec/AudioCodec fields match every value in
-        // Emby's profile matcher. A codec whitelist here silently forced
+        // Emby's profile matcher too (verified against Emby 4.9.5.0: mkv/mp4/avi
+        // with h264/hevc/vc1/mpeg2 all direct-play through this wildcard).
+        // A codec whitelist here silently forced
         // transcodes on exact-name misses (pcm_s16le vs pcm, webvtt vs vtt, …).
         // If mpv truly can't play a file, the transcode retry in Player.qml
         // onPlaybackEnded is the safety net. An empty array (transcode mode)
@@ -1369,14 +1417,14 @@ void EmbyBackend::load_next_episode(const QString &currentItemId) {
             return;
         }
 
-        // Step 2: fetch all episodes for the series, sorted by air order
+        // Step 2: fetch all episodes for the series. No sortBy — see load_episodes;
+        // the scan below picks by season/index number, so order doesn't matter here.
         QUrl epUrl(m_serverUrl + "/Shows/" + seriesId + "/Episodes");
         QUrlQuery epQ;
         epQ.addQueryItem("userId", m_userId);
         epQ.addQueryItem("fields", "MediaSources,MediaStreams,Overview,Genres,UserData");
         epQ.addQueryItem("enableUserData", "true");
         epQ.addQueryItem("limit", "500");
-        epQ.addQueryItem("sortBy", "AiredEpisodeOrder");
         epUrl.setQuery(epQ);
 
         auto *epReply = embyGet(epUrl);
