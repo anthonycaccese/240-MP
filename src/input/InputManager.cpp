@@ -201,6 +201,7 @@ void InputManager::closeController(SDL_JoystickID instanceId) {
     if (m_heldDirection != Action::None)
         releaseAction(m_heldDirection);
     m_axisState.clear();
+    m_heldActions.clear();   // no stuck "held" action if a device drops mid-press
     if (m_lastActiveController == instanceId) {
         m_lastActiveController = -1;
         updateHints();
@@ -602,6 +603,15 @@ void InputManager::pressAction(Action a) {
 // button repeats through the same timers a held d-pad does. Remapped keyboard
 // keys don't come through here: the OS supplies their repeat.
 void InputManager::beginPress(Action a) {
+    // Drop a press for an action already held. The Steam Deck reports one
+    // physical press from two SDL devices (built-in + Steam Input virtual pad),
+    // which would otherwise double every navigation. Genuine repeat still comes
+    // from the timers below; a real double-tap alternates held state so both taps
+    // register.
+    if (m_heldActions.contains(a))
+        return;
+    m_heldActions.insert(a);
+
     deliverPress(a, false);
 
     if (isDirectional(a)) {
@@ -614,6 +624,10 @@ void InputManager::beginPress(Action a) {
 
 void InputManager::releaseAction(Action a) {
     if (a == Action::None)
+        return;
+    // Ignore a release for an action that isn't held — the mirror device's
+    // duplicate release, or a stray release with no matching press.
+    if (!m_heldActions.remove(a))
         return;
     if (m_heldDirection == a) {
         m_heldDirection = Action::None;

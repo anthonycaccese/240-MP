@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QHash>
 #include <QPair>
+#include <QSet>
 #include <QDateTime>
 #include <QVariantMap>
 #include <QFileSystemWatcher>
@@ -142,6 +143,12 @@ private:
     QHash<int, Action> m_keyRemap;                   // Qt::Key or extended evdev id → Action
     SDL_JoystickID m_lastActiveController = -1;      // labels follow the pad last touched
     Action m_heldDirection = Action::None;
+
+    // Actions currently held down, for idempotent press/release. On the Steam
+    // Deck, SDL exposes both the built-in "Steam Deck" controller and Steam
+    // Input's "Steam Virtual Gamepad", so one physical press arrives from two
+    // devices — the duplicate is dropped here rather than doubling navigation.
+    QSet<Action> m_heldActions;
     bool m_remapCapture = false;                     // see setRemapCapture()
 
 #ifdef Q_OS_LINUX
