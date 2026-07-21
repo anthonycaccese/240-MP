@@ -187,6 +187,7 @@ void InputManager::openController(int deviceIndex) {
     SDL_JoystickID id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(gc));
     m_controllers.insert(id, gc);
     qInfo("[input] controller added: %s", SDL_GameControllerName(gc));
+    recomputeSuppressedDevices();
     emit gamepadConnectedChanged();
 }
 
@@ -202,8 +203,7 @@ void InputManager::closeController(SDL_JoystickID instanceId) {
         releaseAction(m_heldDirection);
     m_axisState.clear();
     m_heldActions.clear();   // no stuck "held" action if a device drops mid-press
-    if (m_inputDevice == instanceId)
-        m_inputDevice = -1;  // let the next controller claim the input lock
+    recomputeSuppressedDevices();   // built-in may have unplugged → unsuppress
     if (m_lastActiveController == instanceId) {
         m_lastActiveController = -1;
         updateHints();
@@ -553,30 +553,34 @@ void InputManager::noteActiveController(SDL_JoystickID which) {
     updateHints();
 }
 
-// Accept input from a single controller at a time. The Steam Deck presents its
-// built-in pad AND Steam Input's virtual gamepad as two SDL devices mirroring
-// the same physical press — staggered by a few ms, so per-action idempotency
-// can't collapse them. Locking to one device rejects the mirror outright; the
-// lock moves to another controller only after the current one has been quiet
-// for kInputSwitchIdleMs, so a genuine controller swap still works. Only call
-// on meaningful input (a mapped button, a real axis engage/release) so idle
-// stick jitter can't hold or steal the lock.
-bool InputManager::acceptInputFrom(SDL_JoystickID which) {
-    static constexpr quint32 kInputSwitchIdleMs = 250;
-    const quint32 now = SDL_GetTicks();
-    if (m_inputDevice == -1 || (now - m_inputDeviceLastTick) > kInputSwitchIdleMs)
-        m_inputDevice = which;
-    if (which != m_inputDevice)
-        return false;
-    m_inputDeviceLastTick = now;   // only the accepted device refreshes the lock
-    return true;
+// The Steam Deck presents its built-in pad ("Steam Deck") AND Steam Input's
+// "Steam Virtual Gamepad" as two SDL devices. The virtual one mirrors the
+// built-in with ~0.5s of lag, so a single physical press registers twice.
+// Timing-based de-dup can't beat a variable half-second gap, so reject the
+// mirror by identity: when the low-latency built-in is connected, suppress the
+// virtual duplicate. Gaming Mode exposes only the virtual pad (no built-in), so
+// nothing is suppressed there. Recomputed whenever the device set changes.
+void InputManager::recomputeSuppressedDevices() {
+    m_suppressedDevices.clear();
+    auto nameIs = [](SDL_GameController *gc, const char *want) {
+        const char *n = SDL_GameControllerName(gc);
+        return n && qstrcmp(n, want) == 0;
+    };
+    bool hasBuiltin = false;
+    for (SDL_GameController *gc : std::as_const(m_controllers))
+        if (nameIs(gc, "Steam Deck")) { hasBuiltin = true; break; }
+    if (!hasBuiltin)
+        return;
+    for (auto it = m_controllers.cbegin(); it != m_controllers.cend(); ++it)
+        if (nameIs(it.value(), "Steam Virtual Gamepad"))
+            m_suppressedDevices.insert(it.key());
 }
 
 void InputManager::handleButton(SDL_JoystickID which, Uint8 button, bool pressed) {
+    if (m_suppressedDevices.contains(which))
+        return;
     const Action a = m_buttonMap.value(button, Action::None);
     if (a == Action::None)
-        return;
-    if (!acceptInputFrom(which))
         return;
     noteActiveController(which);
     if (pressed)
@@ -586,6 +590,8 @@ void InputManager::handleButton(SDL_JoystickID which, Uint8 button, bool pressed
 }
 
 void InputManager::handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value) {
+    if (m_suppressedDevices.contains(which))
+        return;
     const auto it = m_axisMap.constFind(axis);
     if (it == m_axisMap.constEnd())
         return;
@@ -601,10 +607,6 @@ void InputManager::handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value) {
         if (value > -kAxisRelease)      now = (value >= kAxisEngage) ? +1 : 0;
     }
     if (now == old)
-        return;
-    // Reject the Steam Deck mirror device before mutating shared state (checked
-    // here, past the jitter filter above, so only a real engage/release counts).
-    if (!acceptInputFrom(which))
         return;
     m_axisState[axis] = now;
 
