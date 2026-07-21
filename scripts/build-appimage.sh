@@ -42,7 +42,9 @@ CONFIGURE=0
 # mounting via FUSE — avoids a libfuse2 dependency on the build host (and CI).
 export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"
 
-log() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+# Diagnostics go to stderr so they never pollute a function's captured stdout
+# (fetch_tool below is used in command substitution).
+log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 
 # ── 1. Fetch the AppImage tooling (cached) ────────────────────────────────────
 # linuxdeploy bundles the app's libraries and patches rpaths; the qt plugin adds
