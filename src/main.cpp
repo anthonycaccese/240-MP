@@ -57,11 +57,11 @@ int main(int argc, char *argv[]) {
     app.setApplicationName("240-MP");
     app.setApplicationVersion(QStringLiteral(APP_VERSION));
 
-    // Hide cursor — 240-MP is keyboard-only so the cursor serves no purpose.
-    // On Linux, only hide on headless EGLFS (not desktop X11/Wayland sessions).
+    // Hide cursor — 240-MP is keyboard/gamepad-only so the cursor serves no
+    // purpose. Hidden on all of Linux: headless EGLFS and desktop compositors
+    // (Steam Deck / RPi desktop) alike, since the app runs fullscreen kiosk-style.
 #ifdef Q_OS_LINUX
-    if (qgetenv("DISPLAY").isEmpty() && qgetenv("WAYLAND_DISPLAY").isEmpty())
-        QGuiApplication::setOverrideCursor(Qt::BlankCursor);
+    QGuiApplication::setOverrideCursor(Qt::BlankCursor);
 #endif
 #ifdef Q_OS_MAC
     QGuiApplication::setOverrideCursor(Qt::BlankCursor);

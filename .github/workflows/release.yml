@@ -202,12 +202,14 @@ jobs:
   # Linux x86_64 — self-contained AppImage for SteamDeck / Intel-AMD desktops.
   # Unlike the arm64 tarball (which relies on apt via install.sh), the AppImage
   # bundles Qt, SDL2 and mpv so it runs on immutable distros like SteamOS.
-  # Built on ubuntu-22.04 for broad glibc compatibility (newer glibc runs a
-  # 22.04-built binary; not the reverse).
+  # Built on ubuntu-24.04: its apt mpv (0.37) is new enough for the app's
+  # subtitle options, with no PPA needed. This sets the glibc floor at 2.39
+  # (2.35's savoury1 path for a modern mpv is now gated behind a private PPA) —
+  # covers a current Steam Deck and modern distros; older ones can't run it.
   # ──────────────────────────────────────────────────────────────────────────────
   build-linux-x86_64:
     name: Linux x86_64 (AppImage)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout

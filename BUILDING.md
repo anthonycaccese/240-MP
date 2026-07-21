@@ -190,6 +190,8 @@ sudo apt-get install -y build-essential cmake \
 
 Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qml6-module-qtquick*`) or from the [Qt online installer](https://www.qt.io/download-qt-installer) (set `CMAKE_PREFIX_PATH` to it, matching CI's Qt 6.7).
 
+> **The host's `mpv` is what gets bundled**, so it must be reasonably modern — the app uses subtitle options added in **mpv 0.36**. Ubuntu 22.04's stock mpv (0.34.1) is too old and will fail with `Invalid parameter for subs-with-matching-audio`. Build on **Ubuntu 24.04+** (mpv 0.37, matching CI), or point `MPV_BIN` at a newer mpv. This also sets the AppImage's glibc floor, so a newer host raises the minimum target glibc.
+
 ### Build the AppImage
 
 ```bash
@@ -357,13 +359,13 @@ These build jobs run in parallel:
 |---|---|---|
 | `build-macos-arm64` | `macos-15` (Apple Silicon) | `240-MP-<tag>-macOS-arm64.dmg` |
 | `build-linux-arm64` | `ubuntu-24.04-arm` (native arm64) | `240-MP-<tag>-linux-arm64.tar.gz` |
-| `build-linux-x86_64` | `ubuntu-22.04` | `240-MP-<tag>-linux-x86_64.AppImage` |
+| `build-linux-x86_64` | `ubuntu-24.04` | `240-MP-<tag>-linux-x86_64.AppImage` |
 
 macOS job: installs Qt via the Qt CDN, builds, runs `macdeployqt` to embed Qt frameworks (including `libSDL2.dylib`), ad-hoc codesign, package as `.dmg`. mpv is not bundled — users install it via `brew install mpv`.
 
 Linux arm64 job: installs Qt from apt, builds, package as `.tar.gz`. mpv and SDL2 are not bundled — end users install them via `apt install mpv libsdl2-2.0-0` or by running the `install.sh` that is bundled with each release where they are installed as part of the dependency list.
 
-Linux x86_64 job: installs Qt via the Qt CDN, builds, then runs `scripts/build-appimage.sh` to bundle Qt, SDL2 **and** mpv into a self-contained `.AppImage` (built on `ubuntu-22.04` for broad glibc compatibility). Nothing to install on the target — it runs on immutable distros like SteamOS.
+Linux x86_64 job: installs Qt via the Qt CDN, builds, then runs `scripts/build-appimage.sh` to bundle Qt, SDL2 **and** mpv into a self-contained `.AppImage`. Built on `ubuntu-24.04` because its apt mpv (0.37) is new enough for the app's subtitle options without a PPA; this sets a glibc 2.39 floor (a current Steam Deck and modern distros — not Ubuntu 22.04 / Debian 12 / older SteamOS). Nothing to install on the target — it runs on immutable distros like SteamOS.
 
 A final `release` job waits for all three build jobs, then creates a GitHub Release with all artifacts attached (including `install.sh`).
 
