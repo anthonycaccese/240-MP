@@ -88,9 +88,10 @@ rm -rf "$APPDIR"
 DESTDIR="$SRC_ROOT/$APPDIR" cmake --install "$BUILD_DIR" --prefix /usr
 
 # ── 4. Bundle mpv ─────────────────────────────────────────────────────────────
-# Stock SteamOS has no system mpv, so ship our own. AppRun (from the qt plugin)
-# prepends usr/bin to PATH, so QStandardPaths::findExecutable("mpv") in
-# MpvController picks this copy first. linuxdeploy pulls in mpv's own libraries.
+# Stock SteamOS has no system mpv, so ship our own next to the app binary
+# (usr/bin/mpv beside usr/bin/240mp). MpvController resolves mpv as a sibling of
+# its own executable first (linuxdeploy's AppRun does NOT add usr/bin to PATH,
+# so findExecutable alone would miss it). linuxdeploy pulls in mpv's own libs.
 MPV_BIN="${MPV_BIN:-$(command -v mpv || true)}"
 [ -x "$MPV_BIN" ] || { echo "ERROR: mpv not found — set MPV_BIN or install mpv" >&2; exit 1; }
 install -Dm755 "$MPV_BIN" "$APPDIR/usr/bin/mpv"

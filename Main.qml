@@ -9,6 +9,13 @@ Window {
     y:      Qt.platform.os === "osx" ? macScreenY      : Screen.virtualY
     width:  Qt.platform.os === "osx" ? macScreenWidth  : Screen.width
     height: Qt.platform.os === "osx" ? macScreenHeight : Screen.height
+    // macOS uses manual geometry + a native fullscreen call (see main.cpp) to
+    // keep the mpv-over-window layering intact. Everywhere else, request true
+    // fullscreen so a desktop compositor's panel/dock (KDE on the Steam Deck,
+    // labwc on the Pi) is covered rather than left stacked on top. Headless
+    // EGLFS is already fullscreen, so this is a no-op there.
+    visibility: Qt.platform.os === "osx" ? Window.AutomaticVisibility
+                                         : Window.FullScreen
     visible: true
     color: root.surfaceColor
 

@@ -1,7 +1,9 @@
 #include "MpvController.h"
 #include "../AppCore.h"
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -152,9 +154,18 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         }
     }
 #endif
-    const QString bin = QStandardPaths::findExecutable("mpv");
+    // Prefer an mpv bundled next to our own binary — inside the Linux AppImage,
+    // usr/bin/mpv sits beside usr/bin/240mp, and linuxdeploy's AppRun does not
+    // add usr/bin to PATH, so findExecutable() alone would miss it. Fall back to
+    // PATH for system installs (brew on macOS, apt on the Pi).
+    QString bin;
+    const QString siblingMpv = QCoreApplication::applicationDirPath() + "/mpv";
+    if (QFileInfo(siblingMpv).isExecutable())
+        bin = siblingMpv;
+    else
+        bin = QStandardPaths::findExecutable("mpv");
     if (bin.isEmpty()) {
-        qWarning("[MpvController] mpv not found in PATH");
+        qWarning("[MpvController] mpv not found (no bundled sibling, none on PATH)");
         QTimer::singleShot(0, this, [this]() {
             emit playbackEnded(0, 0, QStringLiteral("stopped"));
         });
@@ -401,13 +412,19 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         m_connectTimer->start();
     } else {
         // Desktop: X11 or Wayland compositor present.
-        // Remove WAYLAND_DISPLAY so mpv uses X11/Xwayland — the Wayland VO
-        // stalls waiting for wl_surface frame-done callbacks from labwc.
+        // Prefer X11/Xwayland for mpv — the Wayland VO stalls waiting for
+        // wl_surface frame-done callbacks from labwc (the Pi compositor). But
+        // only strip WAYLAND_DISPLAY when there is a DISPLAY to fall back to:
+        // on a pure-Wayland session with no Xwayland DISPLAY exported to us
+        // (e.g. the Steam Deck's KDE session launched from the file manager),
+        // removing it would leave mpv with no output at all and it exits
+        // instantly. In that case keep Wayland so mpv can open a window.
         // --no-native-fs avoids macOS Space-transition delays that can
         // prevent early OSD renders from appearing.
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("APP_ROOT", m_appRoot);
-        env.remove("WAYLAND_DISPLAY");
+        if (!qEnvironmentVariable("DISPLAY").trimmed().isEmpty())
+            env.remove("WAYLAND_DISPLAY");
 #ifdef Q_OS_LINUX
         const QString fcConf = writeFontconfigOverride(m_appRoot + "/assets/fonts");
         if (!fcConf.isEmpty())
