@@ -18,11 +18,21 @@ namespace {
 const QString kDefaultFeedUrl =
     QStringLiteral("https://api.github.com/repos/anthonycaccese/240-mp/releases/latest");
 
-#ifdef Q_OS_MAC
-const QString kAssetSuffix = QStringLiteral("-macOS-arm64.dmg");
+// Release asset this build looks for. On Linux the artifact depends on CPU arch:
+// arm64 (Raspberry Pi) ships a tarball the launcher swaps into /opt; x86_64
+// (SteamDeck / Intel/AMD desktop) ships a self-contained AppImage. Computed at
+// runtime because a single Linux binary could run on either arch.
+QString assetSuffix() {
+#if defined(Q_OS_MAC)
+    return QStringLiteral("-macOS-arm64.dmg");
+#elif defined(Q_OS_LINUX)
+    return QSysInfo::currentCpuArchitecture() == QStringLiteral("arm64")
+               ? QStringLiteral("-linux-arm64.tar.gz")
+               : QStringLiteral("-linux-x86_64.AppImage");
 #else
-const QString kAssetSuffix = QStringLiteral("-linux-arm64.tar.gz");
+    return QString();
 #endif
+}
 
 // "Apply & Restart" under the autostart service: 240mp-stop (scripts/install.sh)
 // treats exit 11 as a no-op so Restart=on-failure relaunches through the
@@ -90,6 +100,19 @@ void UpdateManager::evaluateApplyCapability() {
                                      "240-MP will quit and open the disk image for manual install.");
     }
 #else
+    // AppImage (x86_64 / SteamDeck): self-contained and mounted read-only at a
+    // random path, so there is no launcher to swap a staged tarball into place.
+    // Point the user at the Releases page to grab the new .AppImage. (In-place
+    // AppImage self-update is a planned follow-up.) AppRun exports APPIMAGE with
+    // the path of the running image.
+    if (qEnvironmentVariableIsSet("APPIMAGE")) {
+        m_canApply = false;
+        m_applyHint = QStringLiteral("Running as an AppImage — download the latest "
+                                     ".AppImage from the Releases page to update:\n"
+                                     "github.com/anthonycaccese/240-mp/releases/latest");
+        return;
+    }
+
     // The launcher exports MP240_LAUNCHER_API when it knows how to apply staged
     // updates (see scripts/install.sh). Older installs must re-run the installer
     // once; non-standard installs (dev builds, custom prefixes) are not managed.
@@ -193,10 +216,10 @@ void UpdateManager::handleReleaseInfo(const QByteArray &json) {
     }
 
 #ifndef Q_OS_MAC
-    if (QSysInfo::currentCpuArchitecture() != QStringLiteral("arm64")) {
+    const QString arch = QSysInfo::currentCpuArchitecture();
+    if (arch != QStringLiteral("arm64") && arch != QStringLiteral("x86_64")) {
         setState(QStringLiteral("error"),
-                 QStringLiteral("No update package for this architecture (%1).")
-                     .arg(QSysInfo::currentCpuArchitecture()));
+                 QStringLiteral("No update package for this architecture (%1).").arg(arch));
         return;
     }
 #endif
@@ -210,7 +233,7 @@ void UpdateManager::handleReleaseInfo(const QByteArray &json) {
     for (const QJsonValue &v : assets) {
         const QJsonObject asset = v.toObject();
         const QString name = asset.value(QStringLiteral("name")).toString();
-        if (name.endsWith(kAssetSuffix)) {
+        if (name.endsWith(assetSuffix())) {
             m_assetName = name;
             m_assetUrl = asset.value(QStringLiteral("browser_download_url")).toString();
             m_assetSize = asset.value(QStringLiteral("size")).toVariant().toLongLong();
@@ -355,7 +378,8 @@ void UpdateManager::clearStagingFiles() {
     dir.remove(QStringLiteral("staged.sha256"));
     // Plus whatever payload an older run left behind
     const QStringList leftovers =
-        dir.entryList({QStringLiteral("*.tar.gz"), QStringLiteral("*.dmg")}, QDir::Files);
+        dir.entryList({QStringLiteral("*.tar.gz"), QStringLiteral("*.dmg"),
+                       QStringLiteral("*.AppImage")}, QDir::Files);
     for (const QString &f : leftovers)
         dir.remove(f);
 }

@@ -275,3 +275,35 @@ Or manually:
 
 - Remove it just like you would any application on macOS
 - Remove the configuration files in `~/Library/Application Support/240-MP/`
+
+## On a Steam Deck / Linux x86_64
+
+For the **Steam Deck** and other Intel/AMD Linux machines, 240-MP ships as an **AppImage** — a single self-contained file. mpv is bundled, so there is nothing else to install; it runs on stock SteamOS without needing Desktop Mode package installs.
+
+### Requirements
+
+- A Steam Deck (any model) or an x86_64 Linux machine with a graphical desktop (X11 or Wayland)
+- Internet access
+
+### Steps (Steam Deck)
+
+1. Switch to **Desktop Mode** (hold the power button → *Switch to Desktop*).
+2. Download `240-MP-<version>-linux-x86_64.AppImage` from the [latest release](https://github.com/anthonycaccese/240-mp/releases/latest).
+3. In the file manager (Dolphin), right-click the file → **Properties → Permissions** → tick *Is executable* (or run `chmod +x` on it in Konsole).
+4. Double-click to launch. The Local Files module is enabled by default; open Settings to enable others (see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki).
+
+### Launching from Gaming Mode
+
+To run it from the Steam Deck's Gaming Mode like any other title:
+
+1. In Desktop Mode, open **Steam → Games → Add a Non-Steam Game to My Library**, click **Browse**, and select the AppImage.
+2. Back in Gaming Mode it appears in your library and launches full-screen under gamescope. Controllers work out of the box (see the gamepad notes in [BUILDING.md](BUILDING.md#gamepad-input-inputcfg)).
+
+### Update
+
+Open `Settings → Update 240-MP` to check for a newer version. Because the AppImage is self-contained, updating means downloading the new `.AppImage` from the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) and replacing your copy — the update screen shows this reminder. *(Automatic in-place AppImage updating is planned for a future release.)* Your settings in `~/.local/share/240-MP/` are retained.
+
+### Uninstall
+
+- Delete the `.AppImage` file (and remove it from Steam if you added it as a non-Steam game)
+- Remove the configuration files in `~/.local/share/240-MP/`

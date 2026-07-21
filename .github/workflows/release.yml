@@ -199,11 +199,81 @@ jobs:
           if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────────────
+  # Linux x86_64 — self-contained AppImage for SteamDeck / Intel-AMD desktops.
+  # Unlike the arm64 tarball (which relies on apt via install.sh), the AppImage
+  # bundles Qt, SDL2 and mpv so it runs on immutable distros like SteamOS.
+  # Built on ubuntu-22.04 for broad glibc compatibility (newer glibc runs a
+  # 22.04-built binary; not the reverse).
+  # ──────────────────────────────────────────────────────────────────────────────
+  build-linux-x86_64:
+    name: Linux x86_64 (AppImage)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.*'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
+
+      - name: Install build + bundling dependencies
+        run: |
+          # Drop the flaky Microsoft/azure apt repos (they intermittently serve
+          # broken signatures), then install toolchain, the app's non-Qt deps,
+          # mpv (bundled into the AppImage), and the X11/GL/xkb libs the Qt
+          # platform plugins pull in at deploy time.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/azure-cli.*
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libdrm-dev \
+            libssl-dev \
+            libsdl2-dev \
+            libpcsclite-dev \
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libxcb-cursor0 \
+            mpv
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
+            -DAPP_VERSION="${{ github.ref_name }}"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Build AppImage
+        env:
+          # Extract-and-run the linuxdeploy/appimagetool AppImages instead of
+          # requiring FUSE on the runner.
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          QMAKE: ${{ env.QT_ROOT_DIR }}/bin/qmake
+          VERSION: ${{ github.ref_name }}
+        run: scripts/build-appimage.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: appimage-linux-x86_64
+          path: "240-MP-*-linux-x86_64.AppImage"
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────────────────────────────────────
   # Publish GitHub Release
   # ──────────────────────────────────────────────────────────────────────────────
   release:
     name: Publish Release
-    needs: [build-macos-arm64, build-linux-arm64]
+    needs: [build-macos-arm64, build-linux-arm64, build-linux-x86_64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -223,7 +293,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum dmg-arm64/*.dmg tarball-linux-arm64/*.tar.gz \
+          sha256sum dmg-arm64/*.dmg tarball-linux-arm64/*.tar.gz appimage-linux-x86_64/*.AppImage \
             | sed 's|  .*/|  |' > SHA256SUMS
 
       - name: Publish
@@ -236,6 +306,7 @@ jobs:
           files: |
             artifacts/dmg-arm64/*.dmg
             artifacts/tarball-linux-arm64/*.tar.gz
+            artifacts/appimage-linux-x86_64/*.AppImage
             artifacts/SHA256SUMS
             scripts/install.sh
           body: |

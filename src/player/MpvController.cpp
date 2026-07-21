@@ -691,11 +691,19 @@ void MpvController::appendVideoArgs(QStringList &args) const {
             args << "--vo=drm" << "--hwdec=auto-safe";
         }
     } else {
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS)
         // Apple Silicon: enable VideoToolbox HW decode (mpv's default is none).
         args << "--hwdec=videotoolbox";
+#elif defined(Q_OS_LINUX)
+        // Desktop compositor (SteamDeck gamescope / KDE, x86_64 Intel/AMD): mpv
+        // sets no hwdec by default, so decode falls back to software. auto-safe
+        // lets mpv pick VA-API on the AMD APU / Intel/AMD GPUs while skipping
+        // decoders with known correctness issues. Degrades gracefully to software
+        // when no HW decoder is present (e.g. an RPi desktop dev run). Fully
+        // overridable via the mpv_video_args setting handled above.
+        args << "--hwdec=auto-safe";
 #endif
-        // Other desktop (X11/Wayland dev): leave mpv's defaults untouched.
+        // Any other desktop: leave mpv's defaults untouched.
     }
 }
 

@@ -92,6 +92,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 ## Install
 - [On a Raspberry Pi](INSTALL.md#on-a-raspberry-pi)
 - [On macOS (ARM)](INSTALL.md#on-macos-arm)
+- [On a Steam Deck / Linux x86_64](INSTALL.md#on-a-steam-deck--linux-x86_64) (self-contained AppImage)
 
 ## Hardware Testing
 - [Raspberry Pi 3B](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#raspberry-pi-3b)
