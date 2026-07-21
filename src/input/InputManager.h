@@ -104,6 +104,7 @@ private:
     static QString evdevKeyName(int linuxCode);
     static QString mouseButtonName(int qtButton);
     void noteActiveController(SDL_JoystickID which);
+    bool acceptInputFrom(SDL_JoystickID which);
     void handleButton(SDL_JoystickID which, Uint8 button, bool pressed);
     void handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value);
     void pressAction(Action a);
@@ -144,10 +145,15 @@ private:
     SDL_JoystickID m_lastActiveController = -1;      // labels follow the pad last touched
     Action m_heldDirection = Action::None;
 
-    // Actions currently held down, for idempotent press/release. On the Steam
-    // Deck, SDL exposes both the built-in "Steam Deck" controller and Steam
-    // Input's "Steam Virtual Gamepad", so one physical press arrives from two
-    // devices — the duplicate is dropped here rather than doubling navigation.
+    // Steam Deck mirror de-dup: SDL exposes both the built-in "Steam Deck" pad
+    // and Steam Input's "Steam Virtual Gamepad", which report the same physical
+    // press (staggered, not overlapping), doubling navigation. acceptInputFrom()
+    // binds input to one device at a time, switching only after it goes idle.
+    SDL_JoystickID m_inputDevice = -1;
+    quint32 m_inputDeviceLastTick = 0;
+
+    // Actions currently held down — idempotent press/release hygiene (a device
+    // can't re-fire a press it's already holding).
     QSet<Action> m_heldActions;
     bool m_remapCapture = false;                     // see setRemapCapture()
 
