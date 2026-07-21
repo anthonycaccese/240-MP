@@ -553,26 +553,27 @@ void InputManager::noteActiveController(SDL_JoystickID which) {
     updateHints();
 }
 
-// The Steam Deck presents its built-in pad ("Steam Deck") AND Steam Input's
-// "Steam Virtual Gamepad" as two SDL devices. The virtual one mirrors the
-// built-in with ~0.5s of lag, so a single physical press registers twice.
-// Timing-based de-dup can't beat a variable half-second gap, so reject the
-// mirror by identity: when the low-latency built-in is connected, suppress the
-// virtual duplicate. Gaming Mode exposes only the virtual pad (no built-in), so
-// nothing is suppressed there. Recomputed whenever the device set changes.
+// When Steam Input is active it presents a managed "Steam Virtual Gamepad"
+// alongside the raw controllers it mirrors — on the Steam Deck that's the
+// built-in "Steam Deck" pad; on a desktop running Steam it's whatever pad is
+// attached. The raw device echoes each press with ~0.5s of lag, so one physical
+// press registers twice. The virtual pad is the low-latency one to use (it's
+// also the device Gaming Mode drives), so whenever it is present, suppress every
+// other controller. With no virtual pad (Steam not running), nothing is
+// suppressed and raw controllers work normally. Recomputed on connect/disconnect.
 void InputManager::recomputeSuppressedDevices() {
     m_suppressedDevices.clear();
-    auto nameIs = [](SDL_GameController *gc, const char *want) {
+    auto isVirtual = [](SDL_GameController *gc) {
         const char *n = SDL_GameControllerName(gc);
-        return n && qstrcmp(n, want) == 0;
+        return n && qstrcmp(n, "Steam Virtual Gamepad") == 0;
     };
-    bool hasBuiltin = false;
+    bool hasVirtual = false;
     for (SDL_GameController *gc : std::as_const(m_controllers))
-        if (nameIs(gc, "Steam Deck")) { hasBuiltin = true; break; }
-    if (!hasBuiltin)
+        if (isVirtual(gc)) { hasVirtual = true; break; }
+    if (!hasVirtual)
         return;
     for (auto it = m_controllers.cbegin(); it != m_controllers.cend(); ++it)
-        if (nameIs(it.value(), "Steam Virtual Gamepad"))
+        if (!isVirtual(it.value()))
             m_suppressedDevices.insert(it.key());
 }
 

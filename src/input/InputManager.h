@@ -145,10 +145,11 @@ private:
     SDL_JoystickID m_lastActiveController = -1;      // labels follow the pad last touched
     Action m_heldDirection = Action::None;
 
-    // Steam Deck mirror de-dup: in Desktop Mode SDL exposes both the built-in
-    // "Steam Deck" pad and Steam Input's "Steam Virtual Gamepad", which mirrors
-    // it ~0.5s later — doubling navigation. When the built-in is present, ignore
-    // input from the virtual duplicate. Recomputed on connect/disconnect.
+    // Steam Input mirror de-dup: it presents a managed "Steam Virtual Gamepad"
+    // plus the raw controllers it mirrors (the Deck's built-in pad, etc.); the
+    // raw device echoes each press ~0.5s later → double/late input. The virtual
+    // pad is the low-latency one (and what Gaming Mode uses), so when it's
+    // present we suppress the rest. Recomputed on connect/disconnect.
     QSet<SDL_JoystickID> m_suppressedDevices;
 
     // Actions currently held down — idempotent press/release hygiene (a device
