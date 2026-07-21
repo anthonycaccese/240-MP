@@ -202,10 +202,12 @@ jobs:
   # Linux x86_64 — self-contained AppImage for SteamDeck / Intel-AMD desktops.
   # Unlike the arm64 tarball (which relies on apt via install.sh), the AppImage
   # bundles Qt, SDL2 and mpv so it runs on immutable distros like SteamOS.
-  # Built on ubuntu-24.04: its apt mpv (0.37) is new enough for the app's
-  # subtitle options, with no PPA needed. This sets the glibc floor at 2.39
-  # (2.35's savoury1 path for a modern mpv is now gated behind a private PPA) —
-  # covers a current Steam Deck and modern distros; older ones can't run it.
+  # Built on ubuntu-24.04. apt's mpv is 0.37, one release short of the app's
+  # --subs-with-matching-audio=forced option (added in mpv 0.38), so we build
+  # mpv 0.40 from source against 24.04's stock FFmpeg 6.1 (see build-mpv.sh) —
+  # no PPA, no FFmpeg compile. Sets the glibc floor at 2.39 (2.35's savoury1
+  # path for a modern mpv is now gated behind a private PPA): covers a current
+  # Steam Deck and modern distros; older ones can't run it.
   # ──────────────────────────────────────────────────────────────────────────────
   build-linux-x86_64:
     name: Linux x86_64 (AppImage)
@@ -227,9 +229,11 @@ jobs:
       - name: Install build + bundling dependencies
         run: |
           # Drop the flaky Microsoft/azure apt repos (they intermittently serve
-          # broken signatures), then install toolchain, the app's non-Qt deps,
-          # mpv (bundled into the AppImage), and the X11/GL/xkb libs the Qt
-          # platform plugins pull in at deploy time.
+          # broken signatures), then install: the app toolchain + non-Qt deps and
+          # the X11/GL/xkb libs the Qt plugins pull in at deploy time; plus the
+          # deps to build mpv from source (meson + the FFmpeg 6.1 -dev set,
+          # libass/libplacebo/lua/vaapi and the Wayland/X11/EGL/DRM dev libs).
+          # We build mpv (0.40) rather than apt's 0.37 — see scripts/build-mpv.sh.
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/azure-cli.*
           sudo apt-get update
           sudo apt-get install -y \
@@ -242,7 +246,38 @@ jobs:
             libgl1-mesa-dev \
             libxkbcommon-dev \
             libxcb-cursor0 \
-            mpv
+            meson \
+            ninja-build \
+            pkg-config \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswscale-dev \
+            libavfilter-dev \
+            libswresample-dev \
+            libass-dev \
+            libplacebo-dev \
+            liblua5.2-dev \
+            libva-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxpresent-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libgbm-dev \
+            libegl-dev \
+            libpulse-dev \
+            libasound2-dev \
+            libpipewire-0.3-dev \
+            libjpeg-dev \
+            liblcms2-dev \
+            libuchardet-dev \
+            libzimg-dev
+
+      - name: Build mpv (0.40 from source — apt's 0.37 is too old)
+        run: |
+          echo "MPV_BIN=$(scripts/build-mpv.sh)" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
@@ -261,6 +296,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           QMAKE: ${{ env.QT_ROOT_DIR }}/bin/qmake
           VERSION: ${{ github.ref_name }}
+          # MPV_BIN was exported by the "Build mpv" step above.
         run: scripts/build-appimage.sh
 
       - name: Upload artifact

@@ -190,7 +190,13 @@ sudo apt-get install -y build-essential cmake \
 
 Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qml6-module-qtquick*`) or from the [Qt online installer](https://www.qt.io/download-qt-installer) (set `CMAKE_PREFIX_PATH` to it, matching CI's Qt 6.7).
 
-> **The host's `mpv` is what gets bundled**, so it must be reasonably modern — the app uses subtitle options added in **mpv 0.36**. Ubuntu 22.04's stock mpv (0.34.1) is too old and will fail with `Invalid parameter for subs-with-matching-audio`. Build on **Ubuntu 24.04+** (mpv 0.37, matching CI), or point `MPV_BIN` at a newer mpv. This also sets the AppImage's glibc floor, so a newer host raises the minimum target glibc.
+> **The bundled `mpv` must be modern (≥ 0.38)** — the app's "forced subtitles only" option (`--subs-with-matching-audio=forced`) was added in mpv 0.38, and distro packages are often older (Ubuntu 24.04 ships 0.37, 22.04 ships 0.34.1). If your distro's mpv is too old, build one first and point `MPV_BIN` at it:
+>
+> ```bash
+> MPV_BIN=$(scripts/build-mpv.sh) scripts/build-appimage.sh --configure
+> ```
+>
+> `scripts/build-mpv.sh` compiles mpv 0.40 against your system FFmpeg (needs the meson + FFmpeg/libass/libplacebo/lua/vaapi `-dev` packages — see the CI job). If your distro already ships mpv ≥ 0.38, you can skip it and `build-appimage.sh` uses the system mpv. Note the build host sets the AppImage's glibc floor.
 
 ### Build the AppImage
 
@@ -365,7 +371,7 @@ macOS job: installs Qt via the Qt CDN, builds, runs `macdeployqt` to embed Qt fr
 
 Linux arm64 job: installs Qt from apt, builds, package as `.tar.gz`. mpv and SDL2 are not bundled — end users install them via `apt install mpv libsdl2-2.0-0` or by running the `install.sh` that is bundled with each release where they are installed as part of the dependency list.
 
-Linux x86_64 job: installs Qt via the Qt CDN, builds, then runs `scripts/build-appimage.sh` to bundle Qt, SDL2 **and** mpv into a self-contained `.AppImage`. Built on `ubuntu-24.04` because its apt mpv (0.37) is new enough for the app's subtitle options without a PPA; this sets a glibc 2.39 floor (a current Steam Deck and modern distros — not Ubuntu 22.04 / Debian 12 / older SteamOS). Nothing to install on the target — it runs on immutable distros like SteamOS.
+Linux x86_64 job: installs Qt via the Qt CDN, builds the app, builds **mpv 0.40 from source** (`scripts/build-mpv.sh`, against 24.04's stock FFmpeg 6.1 — apt's mpv 0.37 is one release too old for the app's forced-subtitle option, and the savoury1 PPA for a newer one is now gated), then runs `scripts/build-appimage.sh` to bundle Qt, SDL2 **and** that mpv into a self-contained `.AppImage`. Built on `ubuntu-24.04`, which sets a glibc 2.39 floor (a current Steam Deck and modern distros — not Ubuntu 22.04 / Debian 12 / older SteamOS). Nothing to install on the target — it runs on immutable distros like SteamOS.
 
 A final `release` job waits for all three build jobs, then creates a GitHub Release with all artifacts attached (including `install.sh`).
 

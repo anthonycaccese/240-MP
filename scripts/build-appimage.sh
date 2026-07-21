@@ -92,8 +92,11 @@ DESTDIR="$SRC_ROOT/$APPDIR" cmake --install "$BUILD_DIR" --prefix /usr
 # (usr/bin/mpv beside usr/bin/240mp). MpvController resolves mpv as a sibling of
 # its own executable first (linuxdeploy's AppRun does NOT add usr/bin to PATH,
 # so findExecutable alone would miss it). linuxdeploy pulls in mpv's own libs.
+# MPV_BIN should point at a modern mpv (>= 0.38); CI builds one with
+# scripts/build-mpv.sh because distro packages are often too old. Falls back to
+# the system mpv for local builds on a distro that already ships a recent one.
 MPV_BIN="${MPV_BIN:-$(command -v mpv || true)}"
-[ -x "$MPV_BIN" ] || { echo "ERROR: mpv not found — set MPV_BIN or install mpv" >&2; exit 1; }
+[ -x "$MPV_BIN" ] || { echo "ERROR: mpv not found — set MPV_BIN (e.g. \$(scripts/build-mpv.sh)) or install mpv >= 0.38" >&2; exit 1; }
 install -Dm755 "$MPV_BIN" "$APPDIR/usr/bin/mpv"
 
 # ── 5. Deploy Qt + libraries (no packaging yet) ───────────────────────────────
