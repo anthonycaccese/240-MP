@@ -1151,8 +1151,15 @@ void EmbyBackend::get_playback_url(const QString &itemId, const QString &mediaSo
     const bool directPlay = !forceTranscode
                           && (moduleConfig()["video_quality"].toString("auto")
                               == QLatin1String("auto"));
-    const int maxBitrate = videoQualityBitrate();
-    const int maxHeight  = videoQualityMaxHeight();
+    int maxBitrate = videoQualityBitrate();
+    int maxHeight  = videoQualityMaxHeight();
+    // Dolby Vision → SDR re-request: cap an otherwise-uncapped ("auto") transcode
+    // to 1080p/20Mbps so the server can start it promptly and keep up in real time.
+    if (m_forceSdrTranscodeCap) {
+        if (maxBitrate <= 0) maxBitrate = 20000000;
+        if (maxHeight  <= 0) maxHeight  = 1080;
+        m_forceSdrTranscodeCap = false;
+    }
 
     QUrl url(m_serverUrl + "/Items/" + itemId + "/PlaybackInfo");
     QJsonObject body;
@@ -1188,25 +1195,39 @@ void EmbyBackend::get_playback_url(const QString &itemId, const QString &mediaSo
     profile["TranscodingProfiles"] = transcodingProfiles;
     QJsonArray subtitleProfiles;
     if (directPlay) {
-        // Direct play serves the original file whole and mpv renders embedded
-        // subtitles itself. Advertise Embed (not Encode) so the server doesn't
-        // force a transcode just to burn in / convert the selected subtitle.
-        auto addEmbed = [&](const char *fmt) {
+        // Direct play serves the original file whole; the video stream is never
+        // touched. How the *subtitle* reaches mpv depends on its kind, and the
+        // Method we advertise per format has to match — otherwise Emby, unlike
+        // Jellyfin, refuses direct play the moment a subtitle is selected and
+        // falls back to a full transcode (SubtitleMethod=Encode / burn-in).
+        //
+        //   Text subs (subrip/ass/vtt/…): the client fetches them as a sidecar
+        //   file (see subUrl in extract_item_detail) and hands them to mpv as
+        //   --sub-file. That is External delivery, so advertise Method=External.
+        //   Advertising only Embed (as the Jellyfin port did) is why Emby
+        //   transcoded on every subtitle-on: it couldn't embed the selected sub
+        //   into a *static* stream and had no permitted alternative, so it burnt
+        //   it in. Jellyfin defaults external text subs to External regardless;
+        //   Emby honours only what the profile declares.
+        //
+        //   Image subs (PGS/VOBSUB): no text sidecar exists, so mpv selects them
+        //   from the embedded stream via --sid. That is Embed delivery.
+        auto addSub = [&](const char *fmt, const char *method) {
             QJsonObject s;
             s["Format"] = QString::fromLatin1(fmt);
-            s["Method"] = QStringLiteral("Embed");
+            s["Method"] = QString::fromLatin1(method);
             subtitleProfiles.append(s);
         };
-        addEmbed("subrip");
-        addEmbed("srt");
-        addEmbed("ass");
-        addEmbed("ssa");
-        addEmbed("vtt");
-        addEmbed("webvtt");
-        addEmbed("mov_text");
-        addEmbed("pgssub");
-        addEmbed("dvbsub");
-        addEmbed("dvdsub");
+        addSub("subrip",   "External");
+        addSub("srt",      "External");
+        addSub("ass",      "External");
+        addSub("ssa",      "External");
+        addSub("vtt",      "External");
+        addSub("webvtt",   "External");
+        addSub("mov_text", "External");
+        addSub("pgssub",   "Embed");
+        addSub("dvbsub",   "Embed");
+        addSub("dvdsub",   "Embed");
     } else {
         // Transcode: burn the selected subtitle into the video (like the Plex
         // module). Soft HLS subtitle renditions are unreliable in mpv — they
@@ -1275,6 +1296,47 @@ void EmbyBackend::get_playback_url(const QString &itemId, const QString &mediaSo
         }
 
         QJsonObject source = sources[0].toObject();
+
+        // Dolby Vision won't render. mpv on our targets (macOS videotoolbox, Pi)
+        // can't play the DV enhancement layer — it decodes the file but bails at
+        // video output ("Dolby Vision enhancement-layer playback is not supported"),
+        // so a DV title direct-plays for a moment then exits. Force an SDR H.264
+        // transcode instead: the server tone-maps DV→SDR (what Plex/Jellyfin do),
+        // and a CRT is SDR anyway. Done client-side off the response's reported
+        // range because a DeviceProfile CodecProfile rejecting VideoRangeType=DOVI
+        // was verified to be ignored by Emby 4.9.5.0 (the wildcard DirectPlay
+        // profile still won). forceTranscode=true on the re-request means directPlay
+        // is false there, so this never recurses.
+        if (directPlay) {
+            QString videoRange;
+            for (const QJsonValue &sv : source["MediaStreams"].toArray()) {
+                const QJsonObject st = sv.toObject();
+                if (st["Type"].toString() == QLatin1String("Video")) {
+                    videoRange = st["VideoRange"].toString();
+                    if (videoRange.isEmpty())
+                        videoRange = st["VideoRangeType"].toString();
+                    break;
+                }
+            }
+            if (videoRange.contains(QLatin1String("dolby"), Qt::CaseInsensitive)
+                || videoRange.compare(QLatin1String("DOVI"), Qt::CaseInsensitive) == 0) {
+                qInfo("[Emby] Dolby Vision source (range=%s) — forcing SDR transcode; mpv can't render the DV enhancement layer",
+                      qPrintable(videoRange));
+                // Drop the subtitle on the re-request. The transcode path burns
+                // the selected sub in (SubtitleMethod=Encode), and this server
+                // 500s on burn-in for every subrip tested — SDR files included —
+                // so a burned sub means no playback at all. A DV title auto-picks
+                // its container-default sub, which would otherwise take the whole
+                // transcode down. DV therefore plays as SDR without a burned-in
+                // subtitle for now. (Proper fix: deliver subs as a sidecar over
+                // the transcode instead of Encode — a broader transcode-path
+                // change that also fixes quality-tier transcode + subtitle.)
+                m_forceSdrTranscodeCap = true;
+                get_playback_url(itemId, mediaSourceId, audioStreamIndex,
+                                 /*subtitleStreamIndex=*/-1, /*forceTranscode=*/true);
+                return;
+            }
+        }
 
         // Direct play when requested AND the server confirms the source is
         // compatible. Serves the original file via /Videos/{id}/stream?static=true;

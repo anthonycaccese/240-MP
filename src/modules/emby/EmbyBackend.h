@@ -124,6 +124,11 @@ private:
     QString m_connectAccessToken; // Emby Connect account token (cloud)
     QString m_currentPlaySessionId;
     QString m_currentPlayMethod; // "DirectPlay" or "Transcode" — for /Sessions reporting
+    // One-shot: set when re-requesting a Dolby Vision source as an SDR transcode
+    // so the profile caps it to 1080p/20Mbps (a full-4K/uncapped transcode is too
+    // heavy to start promptly, and the display targets are SDR anyway). Consumed
+    // and cleared by the next get_playback_url profile build.
+    bool m_forceSdrTranscodeCap = false;
     QString m_deviceId;
     QString m_lastAudioLang;
     QString m_lastSubLang;

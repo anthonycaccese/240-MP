@@ -352,24 +352,25 @@ FocusScope {
     }
 
     function buildSubArgs() {
+        // Only hand mpv the *selected* sidecar — never preload every text track.
+        // Each sidecar URL makes Emby extract that subtitle on the fly, and mpv
+        // loads --sub-file synchronously at startup, so preloading them stalled
+        // playback for ~20-30s *per track* even with subs off (a file with many
+        // embedded subs looked like it wouldn't play at all). Subs off now starts
+        // instantly; turning one on costs a single extraction, not all of them.
+        // Non-selected embedded subs remain reachable in mpv via --sid (they ride
+        // along in the direct-play stream); non-selected external subs simply
+        // aren't offered mid-playback, which the pre-launch UI already covers.
         var pairs = []
-        for (var i = 0; i < subtitleStreams.length; i++) {
-            var s = subtitleStreams[i]
-            if (s && s.subUrl)
-                pairs.push({ url: s.subUrl, title: subLabel(s) })
-        }
         var selectedSub = subtitleIdx >= 0 ? subtitleStreams[subtitleIdx] : null
         var selectedSubUrl = selectedSub ? (selectedSub.subUrl || "") : ""
-        // Put the selected sidecar first so mpv auto-selects it (subTrack 0).
-        if (selectedSubUrl && pairs.length > 1) {
-            pairs = pairs.filter(function(p) { return p.url !== selectedSubUrl })
-            pairs.unshift({ url: selectedSubUrl, title: subLabel(selectedSub) })
-        }
+        if (selectedSubUrl)
+            pairs.push({ url: selectedSubUrl, title: subLabel(selectedSub) })
         var subTrack
         if (subtitleIdx < 0)
             subTrack = -2                 // off → --sid=no
         else if (selectedSubUrl)
-            subTrack = 0                  // selected sidecar is the first loaded sub-file
+            subTrack = 0                  // selected sidecar is the only loaded sub-file
         else
             subTrack = subtitleIdx + 1    // embedded/image sub → mpv 1-based --sid
         return {
