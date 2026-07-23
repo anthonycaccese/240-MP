@@ -148,6 +148,12 @@ FocusScope {
     Keys.onUpPressed: {
         if (isLaunching) return
         if (focusRow > 0) focusRow--
+        else if (detail) {
+            var maxRow = 0
+            if (detail.audioStreams && detail.audioStreams.length > 0) maxRow = 1
+            if (detail.subtitleStreams && detail.subtitleStreams.length > 0) maxRow = 2
+            focusRow = maxRow
+        }
     }
     Keys.onDownPressed: {
         if (isLaunching) return
@@ -156,6 +162,7 @@ FocusScope {
             if (detail.audioStreams && detail.audioStreams.length > 0) maxRow = 1
             if (detail.subtitleStreams && detail.subtitleStreams.length > 0) maxRow = 2
             if (focusRow < maxRow) focusRow++
+            else focusRow = 0
         }
     }
     // Debounce: batch rapid arrow-key changes into a single backend save
