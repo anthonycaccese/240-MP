@@ -8,7 +8,6 @@ FocusScope {
     property var navParams: ({})
 
     signal navigateTo(string path, var params, var listState)
-    signal replaceWith(string path, var params)
     signal goBack()
 
     property string serverUrl: appCore.get_setting(moduleRoot.moduleId, "server_url") || ""
@@ -24,11 +23,11 @@ FocusScope {
         target: embyBackend
 
         function onAuthStateChanged() {
-            if (embyBackend.get_auth_state() === "authed") {
+            // Root.qml owns post-auth routing and server_url persistence (the single
+            // funnel for both direct and Emby Connect sign-in); here we just drop the
+            // connecting spinner.
+            if (embyBackend.get_auth_state() === "authed")
                 authRoot.waiting = false
-                appCore.save_setting(moduleRoot.moduleId, "server_url", authRoot.serverUrl)
-                authRoot.replaceWith("Libraries.qml", {})
-            }
         }
 
         function onErrorOccurred(msg) {

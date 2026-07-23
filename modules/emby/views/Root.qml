@@ -100,6 +100,10 @@ FocusScope {
         function onAuthStateChanged() {
             var state = embyBackend.get_auth_state()
             if (state === "authed") {
+                // Single post-auth funnel for both direct sign-in and Emby Connect:
+                // persist the server URL the backend actually authenticated against
+                // (the Connect flow picks it from the account, not the Auth field).
+                appCore.save_setting(moduleId, "server_url", embyBackend.get_server_url())
                 moduleRoot.navStack = []
                 moduleRoot.replaceWith("Libraries.qml", {})
             } else {

@@ -144,15 +144,6 @@ QJsonObject EmbyBackend::loadConfig() const {
     return {};
 }
 
-void EmbyBackend::saveConfig(const QJsonObject &cfg) const {
-    QFile f(m_dataRoot + "/config.json");
-    if (!f.open(QIODevice::WriteOnly)) {
-        qWarning("[EmbyBackend] Could not write config.json: %s", qPrintable(f.errorString()));
-        return;
-    }
-    f.write(QJsonDocument(cfg).toJson(QJsonDocument::Indented));
-}
-
 QJsonObject EmbyBackend::moduleConfig() const {
     return loadConfig()["modules"].toObject()[kModuleId].toObject();
 }
@@ -219,10 +210,14 @@ static QList<QSslError> filterExpectedSslErrors(const QList<QSslError> &errors) 
 }
 
 void EmbyBackend::ignoreSslErrors(QNetworkReply *reply) const {
-    connect(reply, &QNetworkReply::sslErrors, reply, [this, reply](const QList<QSslError> &errors) {
+    // Snapshot the configured host now, while the request is issued — the async
+    // sslErrors callback fires later, and logout() clears m_serverUrl the moment
+    // it kicks off its device-deauth/logout requests, so reading it live would
+    // fail the host match and refuse to relax self-signed LAN certs.
+    const QString serverHost = QUrl(m_serverUrl).host();
+    connect(reply, &QNetworkReply::sslErrors, reply, [reply, serverHost](const QList<QSslError> &errors) {
         // Only relax for the configured Emby server — typical of self-signed LAN certs
-        QUrl serverUrl(m_serverUrl);
-        if (reply->url().host() != serverUrl.host())
+        if (reply->url().host() != serverHost)
             return;
         QList<QSslError> allowed = filterExpectedSslErrors(errors);
         if (!allowed.isEmpty())
@@ -395,14 +390,9 @@ void EmbyBackend::authenticate(const QString &serverUrl, const QString &username
 
         saveAuthState();
 
-        QJsonObject cfg = loadConfig();
-        QJsonObject modules = cfg["modules"].toObject();
-        QJsonObject modCfg  = modules[kModuleId].toObject();
-        modCfg["server_url"] = m_serverUrl;
-        modules[kModuleId] = modCfg;
-        cfg["modules"] = modules;
-        saveConfig(cfg);
-
+        // server_url is persisted to config.json by Root.qml (via appCore.save_setting)
+        // once authStateChanged routes to Libraries — the single funnel for both the
+        // direct and Emby Connect sign-in paths.
         emit authStateChanged();
     });
 }
@@ -574,14 +564,8 @@ void EmbyBackend::connect_select_server(const QString &serverUrl, const QString 
 void EmbyBackend::persistConnectAuthAndFinish() {
     saveAuthState();
 
-    // Persist server_url like the direct sign-in path does.
-    QJsonObject cfg = loadConfig();
-    QJsonObject modules = cfg["modules"].toObject();
-    QJsonObject modCfg  = modules[kModuleId].toObject();
-    modCfg["server_url"] = m_serverUrl;
-    modules[kModuleId] = modCfg;
-    cfg["modules"] = modules;
-    saveConfig(cfg);
+    // server_url is persisted to config.json by Root.qml (via appCore.save_setting)
+    // on authStateChanged — same funnel as the direct sign-in path.
 
     // Fetch the display name of the local user (the exchange only returns an id).
     {

@@ -59,6 +59,7 @@ public:
 
     // URL helpers for QML
     Q_INVOKABLE QString get_access_token() const { return m_accessToken; }
+    Q_INVOKABLE QString get_server_url() const { return m_serverUrl; }
 
     // Settings
     Q_INVOKABLE QString get_auth_state();
@@ -157,7 +158,6 @@ private:
     void clearAuthState();
 
     QJsonObject loadConfig() const;
-    void saveConfig(const QJsonObject &cfg) const;
 
     int videoQualityBitrate() const;
     int videoQualityMaxHeight() const;
