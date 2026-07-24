@@ -452,7 +452,7 @@ void EmbyBackend::connect_authenticate(const QString &usernameOrEmail, const QSt
 
         if (reply->error() != QNetworkReply::NoError) {
             if (status == 401)
-                emit connectFailed("INCORRECT EMBY CONNECT USERNAME OR PASSWORD");
+                emit connectFailed("INCORRECT EMBY CONNECT EMAIL OR PASSWORD");
             else if (status > 0)
                 emit connectFailed("EMBY CONNECT SIGN IN FAILED (HTTP " + QString::number(status) + ")");
             else
@@ -1229,26 +1229,42 @@ void EmbyBackend::get_playback_url(const QString &itemId, const QString &mediaSo
         addSub("dvbsub",   "Embed");
         addSub("dvdsub",   "Embed");
     } else {
-        // Transcode: burn the selected subtitle into the video (like the Plex
-        // module). Soft HLS subtitle renditions are unreliable in mpv — they
-        // report as selected but frequently never render, especially after a
-        // seek — so we always burn here. The server bakes SubtitleMethod=Encode
-        // into TranscodingUrl from this profile + the body's SubtitleStreamIndex.
-        auto addBurnin = [&](const char *fmt) {
+        // Transcode: text subs are delivered as a sidecar, exactly as they are
+        // for direct play — only image subs are burnt in.
+        //
+        // Burning text subs in (Method=Encode) is what the Plex module does and
+        // what this module used to do, but it makes the server re-encode the
+        // video with the subtitle painted on, and Emby 500s on that for every
+        // subrip tested here, SDR sources included. A burnt-in sub therefore
+        // meant no playback at all on the transcode path.
+        //
+        // External is safe because it is NOT the soft HLS subtitle rendition
+        // that mpv renders unreliably after a seek: the sidecar is a separate
+        // /Videos/.../Subtitles/{i}/Stream.srt fetch, independent of the HLS
+        // video, and Player.qml hands the selected one to mpv as --sub-file on
+        // the transcode path too (see doStartPlayback). Verified
+        // against Emby 4.9.5.0: with Method=External the returned
+        // TranscodingUrl carries no SubtitleMethod and no SubtitleStreamIndex,
+        // so the video transcodes untouched.
+        //
+        // Image subs (PGS/VOBSUB) have no text sidecar and cannot ride along in
+        // an HLS rendition, so burn-in stays their only option.
+        auto addSub = [&](const char *fmt, const char *method) {
             QJsonObject s;
             s["Format"] = QString::fromLatin1(fmt);
-            s["Method"] = QStringLiteral("Encode");
+            s["Method"] = QString::fromLatin1(method);
             subtitleProfiles.append(s);
         };
-        addBurnin("subrip");
-        addBurnin("srt");
-        addBurnin("ass");
-        addBurnin("ssa");
-        addBurnin("vtt");
-        addBurnin("mov_text");
-        addBurnin("pgssub");
-        addBurnin("dvbsub");
-        addBurnin("dvdsub");
+        addSub("subrip",   "External");
+        addSub("srt",      "External");
+        addSub("ass",      "External");
+        addSub("ssa",      "External");
+        addSub("vtt",      "External");
+        addSub("webvtt",   "External");
+        addSub("mov_text", "External");
+        addSub("pgssub",   "Encode");
+        addSub("dvbsub",   "Encode");
+        addSub("dvdsub",   "Encode");
     }
     profile["SubtitleProfiles"] = subtitleProfiles;
 

@@ -371,6 +371,11 @@ FocusScope {
             subTrack = -2                 // off → --sid=no
         else if (selectedSubUrl)
             subTrack = 0                  // selected sidecar is the only loaded sub-file
+        else if (isTranscoding)
+            // Image sub (PGS/VOBSUB) on the transcode path: it has no sidecar,
+            // so the server burnt it into the video. There is no soft track to
+            // select, and the HLS stream carries no embedded subs to index into.
+            subTrack = -2
         else
             subTrack = subtitleIdx + 1    // embedded/image sub → mpv 1-based --sid
         return {
@@ -383,12 +388,16 @@ FocusScope {
     function doStartPlayback(offsetMs) {
         var embyToken = embyBackend.get_access_token()
         if (isTranscoding) {
-            // HLS manifest bakes in the selected audio, and the chosen subtitle is
-            // burned into the video — so there's no soft sub track for mpv to pick
-            // (subTrack -2 = --sid=no, a no-op when nothing soft exists).
+            // HLS manifest bakes in the selected audio. Subtitles do NOT ride in
+            // the stream: text subs are delivered as a sidecar (the profile
+            // advertises Method=External, so the server leaves the video alone)
+            // and have to be handed to mpv as --sub-file exactly as they are for
+            // direct play. Only image subs are burnt in, and buildSubArgs returns
+            // --sid=no for those.
+            var tsub = buildSubArgs()
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                       -1, -2, [], [], false, -1, 0.0, "",
-                                       false, "", false, [], 0.0, false, [], embyToken)
+                                       -1, tsub.track, tsub.urls, [], false, -1, 0.0, "",
+                                       false, "", false, tsub.titles, 0.0, false, [], embyToken)
         } else {
             // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
             // --aid; subtitles come from buildSubArgs (sidecars + --sid).
