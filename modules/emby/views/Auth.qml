@@ -181,7 +181,7 @@ FocusScope {
         // Tightened from the pre-method-row values (134 / 36): the extra
         // method row made the form tall enough that the Sign In button ran
         // into the footer hints.
-        anchors.topMargin: root.sh * 0.2083333 //100
+        anchors.topMargin: root.sh * 0.25 //120
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: root.sh * 0.05 //24
 
@@ -245,7 +245,7 @@ FocusScope {
             readonly property bool selected: authRoot.method === value
             readonly property bool rowFocused: authRoot.focusIndex === authRoot.idxMethod
 
-            width: root.sw * 0.346875 //222
+            width: root.sw * 0.321875 //218
             height: root.sh * 0.0583333 //28
             color: selected && rowFocused ? root.accentColor : root.surfaceColor
             border.color: selected ? root.accentColor : root.tertiaryColor
@@ -265,68 +265,71 @@ FocusScope {
         // Group 1 — inputs (method, then the credentials that method needs)
         Column {
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: root.sh * 0.0333333 //16
+            spacing: root.sh * 0.05 //24
 
             // Sign-in method — first, because it decides everything below it
             Column {
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: root.sh * 0.0166667 //8
-
-                Text {
-                    text: "Sign-in Method:"
-                    color: root.secondaryColor
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.0291667 //14
-                }
 
                 Row {
                     spacing: root.sw * 0.025 //16
-                    MethodOption { label: "Server (Local)"; value: 0 }
+                    MethodOption { label: "Local Server"; value: 0 }
+                    Text {
+                        text: "OR"
+                        color: root.tertiaryColor
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.0291667 //14
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                     MethodOption { label: "Emby Connect";   value: 1 }
                 }
             }
-
-            // Server URL — direct sign-in only; Emby Connect resolves the
-            // server from the account, so showing it there would imply it
-            // matters. Column positioners skip invisible children, so the row
-            // collapses rather than leaving a gap.
-            Field {
-                visible: authRoot.method === 0
-                label: "Server URL:"
-                index: authRoot.idxServer
-                text: authRoot.serverUrl
-                width: root.sw * 0.71875 //460
+            Column {
                 anchors.horizontalCenter: parent.horizontalCenter
-                onEdited: function(value) { authRoot.serverUrl = value }
-            }
+                spacing: root.sh * 0.033 //16
 
-            Row {
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: root.sw * 0.0375 //24
-
-                // Username field — half of the Server URL width (minus the Row
-                // spacing) so the two fields together line up with the field above.
+                // Server URL — direct sign-in only; Emby Connect resolves the
+                // server from the account, so showing it there would imply it
+                // matters. Column positioners skip invisible children, so the row
+                // collapses rather than leaving a gap.
                 Field {
-                    // Direct sign-in takes the server account username; Emby
-                    // Connect takes the emby.media email. The method is already
-                    // chosen by the time this is reached, so the label is
-                    // always the one that will actually work.
-                    label: authRoot.method === 1 ? "Email:" : "Username:"
-                    index: authRoot.idxUser
-                    text: authRoot.username
-                    width: root.sw * 0.340625 //218
-                    onEdited: function(value) { authRoot.username = value }
+                    visible: authRoot.method === 0
+                    label: "Server URL:"
+                    index: authRoot.idxServer
+                    text: authRoot.serverUrl
+                    width: root.sw * 0.71875 //460
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    onEdited: function(value) { authRoot.serverUrl = value }
                 }
 
-                // Password field
-                Field {
-                    label: "Password:"
-                    index: authRoot.idxPass
-                    masked: true
-                    text: authRoot.password
-                    width: root.sw * 0.340625 //218
-                    onEdited: function(value) { authRoot.password = value }
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: root.sw * 0.0375 //24
+
+                    // Username field — half of the Server URL width (minus the Row
+                    // spacing) so the two fields together line up with the field above.
+                    Field {
+                        // Direct sign-in takes the server account username; Emby
+                        // Connect takes the emby.media email. The method is already
+                        // chosen by the time this is reached, so the label is
+                        // always the one that will actually work.
+                        label: authRoot.method === 1 ? "Email:" : "Username:"
+                        index: authRoot.idxUser
+                        text: authRoot.username
+                        width: root.sw * 0.340625 //218
+                        onEdited: function(value) { authRoot.username = value }
+                    }
+
+                    // Password field
+                    Field {
+                        label: "Password:"
+                        index: authRoot.idxPass
+                        masked: true
+                        text: authRoot.password
+                        width: root.sw * 0.340625 //218
+                        onEdited: function(value) { authRoot.password = value }
+                    }
                 }
             }
         }
@@ -334,7 +337,7 @@ FocusScope {
         // Group 2 — actions (status line + Sign In / Emby Connect buttons)
         Column {
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: root.sh * 0.05 //24
+            spacing: root.sh * 0.025 //16
 
             // status line: connecting > error > guidance for the current step
             Text {
