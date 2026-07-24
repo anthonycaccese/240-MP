@@ -411,7 +411,7 @@ void EmbyBackend::authenticate(const QString &serverUrl, const QString &username
 
 void EmbyBackend::connect_authenticate(const QString &usernameOrEmail, const QString &password) {
     if (usernameOrEmail.isEmpty()) {
-        emit connectFailed("EMBY CONNECT USERNAME REQUIRED");
+        emit connectFailed("EMBY CONNECT EMAIL REQUIRED");
         return;
     }
 
