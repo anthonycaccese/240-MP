@@ -1338,18 +1338,37 @@ void EmbyBackend::get_playback_url(const QString &itemId, const QString &mediaSo
                 || videoRange.compare(QLatin1String("DOVI"), Qt::CaseInsensitive) == 0) {
                 qInfo("[Emby] Dolby Vision source (range=%s) — forcing SDR transcode; mpv can't render the DV enhancement layer",
                       qPrintable(videoRange));
-                // Drop the subtitle on the re-request. The transcode path burns
-                // the selected sub in (SubtitleMethod=Encode), and this server
-                // 500s on burn-in for every subrip tested — SDR files included —
-                // so a burned sub means no playback at all. A DV title auto-picks
-                // its container-default sub, which would otherwise take the whole
-                // transcode down. DV therefore plays as SDR without a burned-in
-                // subtitle for now. (Proper fix: deliver subs as a sidecar over
-                // the transcode instead of Encode — a broader transcode-path
-                // change that also fixes quality-tier transcode + subtitle.)
+                // Keep the selected subtitle if it can survive the transcode.
+                // This used to drop every subtitle, because the transcode path
+                // burnt the selected sub in (SubtitleMethod=Encode) and this
+                // server 500s on burn-in, so a burned sub meant no playback at
+                // all. Text subs are now delivered as a sidecar (Method=External
+                // in the transcode profile) and never touch the video, so there
+                // is nothing left to work around for them.
+                //
+                // Image subs (PGS/VOBSUB) have no sidecar and are still burnt in,
+                // which is exactly the case that takes the whole transcode down,
+                // so those are still dropped rather than losing playback.
+                int keptSubtitle = subtitleStreamIndex;
+                if (keptSubtitle >= 0) {
+                    bool isTextSub = false;
+                    for (const QJsonValue &sv : source["MediaStreams"].toArray()) {
+                        const QJsonObject st = sv.toObject();
+                        if (st["Type"].toString() == QLatin1String("Subtitle")
+                            && st["Index"].toInt() == keptSubtitle) {
+                            isTextSub = st["IsTextSubtitleStream"].toBool();
+                            break;
+                        }
+                    }
+                    if (!isTextSub) {
+                        qInfo("[Emby] DV transcode: dropping image subtitle %d (burn-in would fail)",
+                              keptSubtitle);
+                        keptSubtitle = -1;
+                    }
+                }
                 m_forceSdrTranscodeCap = true;
                 get_playback_url(itemId, mediaSourceId, audioStreamIndex,
-                                 /*subtitleStreamIndex=*/-1, /*forceTranscode=*/true);
+                                 keptSubtitle, /*forceTranscode=*/true);
                 return;
             }
         }
