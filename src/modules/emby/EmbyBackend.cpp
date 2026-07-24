@@ -56,6 +56,22 @@ EmbyBackend::EmbyBackend(const QString &appRoot, const QString &dataRoot, QObjec
     if (m_deviceId.isEmpty()) {
         m_deviceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     }
+    // Seed the change guard from the restored state so a token that is still
+    // valid at startup is not reported as a transition (see notifyAuthState).
+    m_lastAuthState = get_auth_state();
+}
+
+// authStateChanged drives navigation in Root.qml, so emitting it when nothing
+// actually changed reloads the current view on top of itself. check_auth()
+// re-validating a good token is the common case: Root has already shown
+// Libraries by then, and an unconditional emit loaded it a second time. Only
+// signal real transitions.
+void EmbyBackend::notifyAuthState() {
+    const QString state = get_auth_state();
+    if (state == m_lastAuthState)
+        return;
+    m_lastAuthState = state;
+    emit authStateChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +263,7 @@ QString EmbyBackend::get_auth_state() {
 
 void EmbyBackend::check_auth() {
     if (!has_auth()) {
-        emit authStateChanged();
+        notifyAuthState();
         return;
     }
 
@@ -260,14 +276,14 @@ void EmbyBackend::check_auth() {
             qWarning("[EmbyBackend] Token rejected — signing out");
             clearAuthState();
             emit authRevoked();
-            emit authStateChanged();
+            notifyAuthState();
             return;
         }
         if (reply->error() != QNetworkReply::NoError) {
             emit errorOccurred("AUTH CHECK FAILED: " + reply->errorString());
             return;
         }
-        emit authStateChanged();
+        notifyAuthState();
     });
 }
 
@@ -301,7 +317,7 @@ void EmbyBackend::logout() {
     }
     clearAuthState();
     emit logoutComplete();
-    emit authStateChanged();
+    notifyAuthState();
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +409,7 @@ void EmbyBackend::authenticate(const QString &serverUrl, const QString &username
         // server_url is persisted to config.json by Root.qml (via appCore.save_setting)
         // once authStateChanged routes to Libraries — the single funnel for both the
         // direct and Emby Connect sign-in paths.
-        emit authStateChanged();
+        notifyAuthState();
     });
 }
 
@@ -599,7 +615,7 @@ void EmbyBackend::persistConnectAuthAndFinish() {
         });
     }
 
-    emit authStateChanged();
+    notifyAuthState();
 }
 
 // ---------------------------------------------------------------------------

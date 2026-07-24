@@ -119,6 +119,9 @@ private:
     QString m_serverUrl;
     QString m_accessToken;
     QString m_userId;
+    // Last auth state broadcast to QML, so notifyAuthState() can suppress
+    // no-op signals that would re-navigate to the view already showing.
+    QString m_lastAuthState;
     QString m_userName;
     QString m_serverName;
     QString m_connectUserId;      // Emby Connect account user id (cloud)
@@ -156,6 +159,7 @@ private:
     void loadAuthState();
     void saveAuthState();
     void clearAuthState();
+    void notifyAuthState();
 
     QJsonObject loadConfig() const;
 

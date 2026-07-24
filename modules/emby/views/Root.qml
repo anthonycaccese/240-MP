@@ -89,14 +89,9 @@ FocusScope {
     // Handle auth state and logout from backend
     Connections {
         target: embyBackend
-        function onLogoutComplete() {
-            moduleRoot.navStack = []
-            moduleRoot.navigateTo("Auth.qml", {}, {})
-        }
-        function onAuthRevoked() {
-            moduleRoot.navStack = []
-            moduleRoot.navigateTo("Auth.qml", {}, {})
-        }
+        // Sign-out and token revocation both clear the auth state, so
+        // onAuthStateChanged below already routes back to Auth.qml for them.
+        // Navigating here as well loaded that view twice.
         function onAuthStateChanged() {
             var state = embyBackend.get_auth_state()
             if (state === "authed") {
