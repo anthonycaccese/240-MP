@@ -71,16 +71,17 @@ FocusScope {
             event.accepted = true
             return
         }
-        if (event.key === Qt.Key_Up) {
-            if (focusIndex > 0) focusIndex--
-            event.accepted = true
-        } else if (event.key === Qt.Key_Down) {
-            if (focusIndex < 4) focusIndex++
-            event.accepted = true
-        } else if (event.key === Qt.Key_Tab) {
+        // Every field/button is one linear sequence (Server URL, Username,
+        // Password, Sign In, Emby Connect) even though some sit side by side.
+        // Down/Right/Tab advance through it and Up/Left/Shift+Tab retreat,
+        // wrapping around at the ends — so all of them behave like Tab. (This
+        // means Left/Right no longer move the text cursor within a field.)
+        if (event.key === Qt.Key_Down || event.key === Qt.Key_Right
+            || event.key === Qt.Key_Tab) {
             focusIndex = (focusIndex + 1) % 5
             event.accepted = true
-        } else if (event.key === Qt.Key_Backtab) { // Shift+Tab
+        } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Left
+                   || event.key === Qt.Key_Backtab) { // Backtab = Shift+Tab
             focusIndex = (focusIndex + 4) % 5
             event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -135,13 +136,11 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125 //80
     }
 
-    // Body — anchored below the AppBar (not centered): this form is tall enough
-    // that vertical centering pushes its top row up into the header.
     Column {
         anchors.top: parent.top
-        anchors.topMargin: root.sh * 0.195
+        anchors.topMargin: root.sh * 0.2791667 //134
         anchors.horizontalCenter: parent.horizontalCenter
-        spacing: root.sh * 0.02
+        spacing: root.sh * 0.075 //36
 
         // Reusable labelled text field. Up/Down navigation and Enter/Escape are
         // handled by authRoot.Keys — each TextInput forwards keys up by not
@@ -152,10 +151,8 @@ FocusScope {
             property int index: 0
             property bool masked: false
             signal edited(string value)
-
             spacing: root.sh * 0.0166667 //8
             width: root.sw * 0.5 //320
-            anchors.horizontalCenter: parent.horizontalCenter
 
             Text {
                 id: fieldLabel
@@ -178,9 +175,6 @@ FocusScope {
                     anchors.margins: root.sh * 0.0166667 //8
                     color: root.primaryColor
                     font.family: root.globalFont
-                    // Inputs render exactly as typed — an uppercase-forced display
-                    // reads as "my input was mangled" when entering emails/usernames.
-                    font.capitalization: Font.MixedCase
                     font.pixelSize: root.sh * 0.0375 //18
                     clip: true
                     echoMode: masked ? TextInput.Password : TextInput.Normal
@@ -195,85 +189,120 @@ FocusScope {
             }
         }
 
-        // Server URL field
-        Field {
-            label: "Server URL"
-            index: 0
-            text: authRoot.serverUrl
-            onEdited: function(value) { authRoot.serverUrl = value }
-        }
-
-        // Username field
-        Field {
-            label: "Username"
-            index: 1
-            text: authRoot.username
-            onEdited: function(value) { authRoot.username = value }
-        }
-
-        // Password field
-        Field {
-            label: "Password"
-            index: 2
-            masked: true
-            text: authRoot.password
-            onEdited: function(value) { authRoot.password = value }
-        }
-
-        // Sign In button
-        Rectangle {
-            width: root.sw * 0.234375 //150
-            height: root.sh * 0.0583333 //28
-            color: focusIndex === 3 ? root.accentColor : root.surfaceColor
-            border.color: focusIndex === 3 ? root.accentColor : root.tertiaryColor
-            border.width: root.sh * 0.003125 //2
+        // Group 1 — inputs (Server URL, Username, Password)
+        Column {
             anchors.horizontalCenter: parent.horizontalCenter
+            spacing: root.sh * 0.0333333 //16
 
-            Text {
-                anchors.centerIn: parent
-                text: "Sign In"
-                color: focusIndex === 3 ? root.surfaceColor : root.primaryColor
-                font.family: root.globalFont
-                font.capitalization: Font.AllUppercase
-                font.pixelSize: root.sh * 0.0375 //18
+            // Server URL field
+            Field {
+                label: "Server URL:"
+                index: 0
+                text: authRoot.serverUrl
+                width: root.sw * 0.71875 //460
+                anchors.horizontalCenter: parent.horizontalCenter
+                onEdited: function(value) { authRoot.serverUrl = value }
+            }
+
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: root.sw * 0.0375 //24
+
+                // Username field — half of the Server URL width (minus the Row
+                // spacing) so the two fields together line up with the field above.
+                Field {
+                    label: "Username:"
+                    index: 1
+                    text: authRoot.username
+                    width: root.sw * 0.340625 //218
+                    onEdited: function(value) { authRoot.username = value }
+                }
+
+                // Password field
+                Field {
+                    label: "Password:"
+                    index: 2
+                    masked: true
+                    text: authRoot.password
+                    width: root.sw * 0.340625 //218
+                    onEdited: function(value) { authRoot.password = value }
+                }
             }
         }
 
-        // Emby Connect button (cloud account — server URL not required)
-        Rectangle {
-            width: root.sw * 0.234375 //150
-            height: root.sh * 0.0583333 //28
-            color: focusIndex === 4 ? root.accentColor : root.surfaceColor
-            border.color: focusIndex === 4 ? root.accentColor : root.tertiaryColor
-            border.width: root.sh * 0.003125 //2
+        // Group 2 — actions (status line + Sign In / Emby Connect buttons)
+        Column {
             anchors.horizontalCenter: parent.horizontalCenter
+            spacing: root.sh * 0.05 //24
 
+            // status line: connecting > error > Emby Connect caption
             Text {
-                anchors.centerIn: parent
-                text: "Emby Connect"
-                color: focusIndex === 4 ? root.surfaceColor : root.primaryColor
+                text: waiting ? "CONNECTING..."
+                    : (errorMsg !== "" ? errorMsg
+                    : "SIGN IN TO A SERVER, OR USE EMBY CONNECT")
+                color: errorMsg !== "" && !waiting ? root.accentColor : root.tertiaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
-                font.pixelSize: root.sh * 0.0375 //18
+                horizontalAlignment: Text.AlignHCenter
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: root.sw * 0.5
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                font.pixelSize: root.sh * 0.0291667 //14
             }
-        }
 
-        // Single status line: connecting > error > Emby Connect caption. Merged
-        // into one slot so the column keeps a fixed height and never runs into
-        // the footer hints.
-        Text {
-            text: waiting ? "CONNECTING..."
-                : (errorMsg !== "" ? errorMsg
-                : "Emby Connect uses your emby.media account")
-            color: errorMsg !== "" && !waiting ? root.accentColor : root.tertiaryColor
-            font.family: root.globalFont
-            font.capitalization: Font.AllUppercase
-            horizontalAlignment: Text.AlignHCenter
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: root.sw * 0.5
-            elide: Text.ElideRight
-            maximumLineCount: 1
-            font.pixelSize: root.sh * 0.0291667 //14
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: root.sw * 0.025 //16
+
+                // Sign In button
+                Rectangle {
+                    width: root.sw * 0.1875 //120
+                    height: root.sh * 0.0583333 //28
+                    color: focusIndex === 3 ? root.accentColor : root.surfaceColor
+                    border.color: focusIndex === 3 ? root.accentColor : root.tertiaryColor
+                    border.width: root.sh * 0.003125 //2
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Sign In"
+                        color: focusIndex === 3 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.0291667 //14
+                    }
+                }
+
+                // OR separator
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "OR"
+                    color: root.tertiaryColor
+                    font.family: root.globalFont
+                    font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.0291667 //14
+                }
+
+                // Emby Connect button (cloud account — server URL not required)
+                Rectangle {
+                    width: root.sw * 0.1875 //120
+                    height: root.sh * 0.0583333 //28
+                    color: focusIndex === 4 ? root.accentColor : root.surfaceColor
+                    border.color: focusIndex === 4 ? root.accentColor : root.tertiaryColor
+                    border.width: root.sh * 0.003125 //2
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Emby Connect"
+                        color: focusIndex === 4 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.0291667 //14
+                    }
+                }
+            }
         }
     }
 
