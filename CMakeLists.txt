@@ -54,6 +54,7 @@ add_executable(240mp
     src/modules/youtube/YouTubeBackend.cpp
     src/modules/nfc_reader/NfcReaderBackend.cpp
     src/player/MpvController.cpp
+    src/util/YtDlpLocator.cpp
     src/input/InputManager.cpp
     src/input/IdleTracker.cpp
     src/update/UpdateManager.cpp

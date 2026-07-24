@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
     AmbientModeBackend  ambientMode(dataRoot);
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
-    MpvController       mpvController(appRoot, &appCore);
+    MpvController       mpvController(appRoot, dataRoot, &appCore);
     InputManager        inputManager(dataRoot, &appCore);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
     UpdateManager       updateManager(appRoot, dataRoot);

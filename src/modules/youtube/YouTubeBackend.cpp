@@ -1,4 +1,5 @@
 #include "YouTubeBackend.h"
+#include "../../util/YtDlpLocator.h"
 
 #include <QDateTime>
 #include <QFile>
@@ -9,7 +10,6 @@
 #include <QNetworkRequest>
 #include <QProcess>
 #include <QRegularExpression>
-#include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
 #include <QXmlStreamReader>
@@ -379,22 +379,6 @@ void YouTubeBackend::load_playlist_videos(const QString &playlistId, bool forceR
     ensurePlaylistsFresh(forceRefresh);
 }
 
-// mpv resolves yt-dlp itself at playback time; this is for the app's own
-// browse-time subprocesses.
-static QString ytDlpExecutable() {
-#ifdef Q_OS_MACOS
-    // .app bundles launched via double-click get a minimal PATH that excludes
-    // Homebrew. Prepend known install locations so findExecutable works.
-    const QStringList extraPaths = { "/opt/homebrew/bin", "/usr/local/bin" };
-    const QStringList currentPath = qEnvironmentVariable("PATH").split(":");
-    for (const QString &p : extraPaths) {
-        if (!currentPath.contains(p))
-            qputenv("PATH", (p + ":" + qEnvironmentVariable("PATH")).toUtf8());
-    }
-#endif
-    return QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
-}
-
 void YouTubeBackend::ensurePlaylistsFresh(bool forceRefresh) {
     if (m_pendingPlaylists > 0)
         return; // refresh already in flight — the emit flags queue on it
@@ -427,7 +411,9 @@ void YouTubeBackend::ensurePlaylistsFresh(bool forceRefresh) {
         finishPlaylistAggregate(); // everything fresh — serve from cache
         return;
     }
-    if (ytDlpExecutable().isEmpty()) {
+    // Resolve the same user-updatable yt-dlp mpv's ytdl_hook will use at
+    // playback time (data-dir drop-in → sibling → PATH), so app and mpv agree.
+    if (ytdlp::locate(m_dataRoot).isEmpty()) {
         // Nothing can be fetched; report against whatever the cache holds.
         finishPlaylistAggregate();
         return;
@@ -438,7 +424,7 @@ void YouTubeBackend::ensurePlaylistsFresh(bool forceRefresh) {
 }
 
 void YouTubeBackend::spawnNextPlaylistFetch() {
-    const QString bin = ytDlpExecutable();
+    const QString bin = ytdlp::locate(m_dataRoot);
     while (m_activePlaylistFetches < kMaxConcurrentPlaylistFetches
            && !m_playlistFetchQueue.isEmpty()) {
         const QString playlistId = m_playlistFetchQueue.takeFirst();

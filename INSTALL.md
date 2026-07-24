@@ -299,6 +299,19 @@ To run it from the Steam Deck's Gaming Mode like any other title:
 1. In Desktop Mode, open **Steam → Games → Add a Non-Steam Game to My Library**, click **Browse**, and select the AppImage.
 2. Back in Gaming Mode it appears in your library and launches full-screen under gamescope. Controllers work out of the box (see the gamepad notes in [BUILDING.md](BUILDING.md#gamepad-input-inputcfg)).
 
+### YouTube (yt-dlp)
+
+The YouTube module needs `yt-dlp`, which is **not** bundled with the AppImage — YouTube breaks it every few weeks, so it has to be updatable independently of app releases. Because SteamOS is immutable (no `apt`/`pacman`), drop a single self-contained `yt-dlp` binary into the app's data directory and the app and its bundled mpv both use it automatically:
+
+```bash
+mkdir -p ~/.local/share/240-MP/bin
+wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+  -O ~/.local/share/240-MP/bin/yt-dlp
+chmod +x ~/.local/share/240-MP/bin/yt-dlp
+```
+
+Keep it current with `~/.local/share/240-MP/bin/yt-dlp -U` (no app reinstall needed). If you already have `yt-dlp` on your `PATH` (e.g. in `~/.local/bin`), that works too — the data-dir copy just takes precedence.
+
 ### Update
 
 Open `Settings → Update 240-MP` to check for a newer version. Because the AppImage is self-contained, updating means downloading the new `.AppImage` from the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) and replacing your copy — the update screen shows this reminder. *(Automatic in-place AppImage updating is planned for a future release.)* Your settings in `~/.local/share/240-MP/` are retained.

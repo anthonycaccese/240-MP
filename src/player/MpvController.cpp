@@ -1,5 +1,6 @@
 #include "MpvController.h"
 #include "../AppCore.h"
+#include "../util/YtDlpLocator.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -45,10 +46,12 @@ static QString writeFontconfigOverride(const QString &fontsDir) {
 }
 #endif
 
-MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *parent)
+MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
+                             AppCore *appCore, QObject *parent)
     : QObject(parent)
     , m_appCore(appCore)
     , m_appRoot(appRoot)
+    , m_dataRoot(dataRoot)
     , m_socketPath(QDir::tempPath() + "/240mp-mpv.sock")
     , m_inputConfPath(QDir::tempPath() + "/240mp-input.conf")
     , m_logFilePath(QDir::tempPath() + "/240mp-mpv.log")
@@ -262,6 +265,15 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (!subLangs.isEmpty())
         args << QString("--slang=%1").arg(subLangs.join(QStringLiteral(",")));
 
+    // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
+    // playback with spurious 401/400 errors — disabled unless the caller
+    // explicitly opts in via extraArgs (e.g. YouTube passes --ytdl=yes).
+    bool ytdlEnabled = false;
+    for (const QString &a : extraArgs) {
+        if (a == QLatin1String("--ytdl") || a.startsWith(QLatin1String("--ytdl=")))
+            ytdlEnabled = true;
+    }
+
     QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
@@ -292,6 +304,17 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             scriptOpts << QString("subinfo-file=%1").arg(m_subInfoPath);
         }
     }
+    // Point mpv's ytdl_hook at the same user-updatable yt-dlp the app resolves,
+    // so both agree on one copy even when it isn't on the global PATH (the
+    // SteamOS story). Merged into the single --script-opts below — a second
+    // --script-opts flag would replace, not append, clobbering the entries above.
+    // The comma guard mirrors the subinfo-file constraint (a path with a comma
+    // would break the join); realistically never hit.
+    if (ytdlEnabled) {
+        const QString ytdlPath = ytdlp::locate(m_dataRoot);
+        if (!ytdlPath.isEmpty() && !ytdlPath.contains(QLatin1Char(',')))
+            scriptOpts << QString("ytdl_hook-ytdl_path=%1").arg(ytdlPath);
+    }
     if (!scriptOpts.isEmpty())
         args << QString("--script-opts=%1").arg(scriptOpts.join(QStringLiteral(",")));
 
@@ -306,15 +329,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--image-display-duration=%1").arg(double(imageDurationSec), 0, 'f', 1);
     if (muteAudio)
         args << QStringLiteral("--no-audio");
-    // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
-    // playback with spurious 401/400 errors — disabled unless the caller
-    // explicitly opts in via extraArgs (e.g. YouTube passes --ytdl=yes).
-    bool ytdlOverridden = false;
-    for (const QString &a : extraArgs) {
-        if (a == QLatin1String("--ytdl") || a.startsWith(QLatin1String("--ytdl=")))
-            ytdlOverridden = true;
-    }
-    if (!ytdlOverridden)
+    // See ytdlEnabled above: default the hook off unless the caller opted in.
+    if (!ytdlEnabled)
         args << QStringLiteral("--ytdl=no");
     args << extraArgs;
     if (!plexToken.isEmpty()) {
