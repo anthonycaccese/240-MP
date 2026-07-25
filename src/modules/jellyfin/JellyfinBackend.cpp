@@ -149,7 +149,7 @@ QJsonObject JellyfinBackend::moduleConfig() const {
 
 int JellyfinBackend::videoQualityBitrate() const {
     QString quality = moduleConfig()["video_quality"].toString("auto");
-    if (quality == QLatin1String("auto"))  return 0; // direct play — no cap
+    if (quality == QLatin1String("auto"))  return 1000000000; // direct play — 1000 Mbps cap
     if (quality == QLatin1String("1080p")) return 10000000;
     if (quality == QLatin1String("720p"))  return 6000000;
     if (quality == QLatin1String("576p"))  return 4500000;
