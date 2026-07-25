@@ -55,6 +55,16 @@ QNetworkRequest githubRequest(const QUrl &url) {
     return req;
 }
 
+// Steam Gaming Mode / Big Picture runs the app under gamescope and owns the
+// process; a detached self-relaunch would escape that session (wrong compositor,
+// no Steam Input controller config), so after an AppImage swap we quit and let
+// Steam relaunch rather than relaunching ourselves. Desktop Mode has neither
+// signal set, so it self-relaunches normally.
+bool isGamingMode() {
+    return qEnvironmentVariableIsSet("SteamGamepadUI")
+        || qEnvironmentVariableIsSet("GAMESCOPE_WAYLAND_DISPLAY");
+}
+
 #ifdef Q_OS_MAC
 // Bundle root ("/Applications/240mp.app") when running from a bundle, else empty.
 QString macBundlePath() {
@@ -71,6 +81,14 @@ UpdateManager::UpdateManager(const QString &appRoot, const QString &dataRoot, QO
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot) {
     evaluateApplyCapability();
     reconcileStagingDir();
+    // If we are running as an AppImage, reaching this point means the current
+    // image launched successfully — so a .bak left by a previous self-update is
+    // the old version and can be swept (cheap local rollback insurance, spent).
+    if (qEnvironmentVariableIsSet("APPIMAGE")) {
+        const QString bak = qEnvironmentVariable("APPIMAGE") + QStringLiteral(".bak");
+        if (QFileInfo::exists(bak))
+            QFile::remove(bak);
+    }
 }
 
 QString UpdateManager::currentVersion() const {
@@ -100,16 +118,23 @@ void UpdateManager::evaluateApplyCapability() {
                                      "240-MP will quit and open the disk image for manual install.");
     }
 #else
-    // AppImage (x86_64 / SteamDeck): self-contained and mounted read-only at a
-    // random path, so there is no launcher to swap a staged tarball into place.
-    // Point the user at the Releases page to grab the new .AppImage. (In-place
-    // AppImage self-update is a planned follow-up.) AppRun exports APPIMAGE with
-    // the path of the running image.
+    // AppImage (x86_64 / SteamDeck): AppRun exports APPIMAGE with the path of the
+    // running image — a plain file in the user's home (not the immutable rootfs).
+    // Apply swaps the new image over it (see applyAppImage). Only offer that when
+    // the file and its directory are writable; otherwise degrade to the manual
+    // Releases-page path.
     if (qEnvironmentVariableIsSet("APPIMAGE")) {
-        m_canApply = false;
-        m_applyHint = QStringLiteral("Running as an AppImage — download the latest "
-                                     ".AppImage from the Releases page to update:\n"
-                                     "github.com/anthonycaccese/240-mp/releases/latest");
+        const QFileInfo image(qEnvironmentVariable("APPIMAGE"));
+        if (image.exists() && image.isWritable()
+            && QFileInfo(image.absolutePath()).isWritable()) {
+            m_canApply = true;
+        } else {
+            m_canApply = false;
+            m_applyHint = QStringLiteral("Running as an AppImage from a read-only "
+                                         "location — download the latest .AppImage "
+                                         "from the Releases page to update:\n"
+                                         "github.com/anthonycaccese/240-mp/releases/latest");
+        }
         return;
     }
 
@@ -397,7 +422,10 @@ void UpdateManager::applyAndRestart() {
 #ifdef Q_OS_MAC
     applyMacos();
 #else
-    applyLinux();
+    if (qEnvironmentVariableIsSet("APPIMAGE"))
+        applyAppImage();
+    else
+        applyLinux();
 #endif
 }
 
@@ -433,6 +461,88 @@ void UpdateManager::applyLinux() {
         QTimer::singleShot(0, qApp, []() { QCoreApplication::exit(kExitCodeUpdateRestart); });
     else
         QTimer::singleShot(0, qApp, &QCoreApplication::quit);
+}
+
+// In-place AppImage self-update. The staged image was SHA-256-verified at
+// download, so it is trusted here. Swapping it over the running $APPIMAGE is safe
+// even while executing — the process keeps the old inode (FUSE mount / already
+// extracted) until it exits. The swap runs in-process (not a fire-and-forget
+// helper) so a failure — permissions, cross-filesystem, disk full — can be
+// reported to the UI without quitting. A .bak is kept for cheap local recovery
+// (swept on the next successful start; see the constructor).
+void UpdateManager::applyAppImage() {
+    QFile marker(stagedJsonPath());
+    if (!marker.open(QIODevice::ReadOnly)) {
+        setState(QStringLiteral("error"), QStringLiteral("Staged update is missing — please download again."));
+        return;
+    }
+    const QJsonObject staged = QJsonDocument::fromJson(marker.readAll()).object();
+    marker.close();
+    const QString asset = staged.value(QStringLiteral("asset")).toString();
+    const QString stagedPath = updatesDir() + QStringLiteral("/") + asset;
+    if (asset.isEmpty() || !QFileInfo::exists(stagedPath)) {
+        clearStagingFiles();
+        setState(QStringLiteral("error"), QStringLiteral("Staged update is missing — please download again."));
+        return;
+    }
+
+    const QString target = qEnvironmentVariable("APPIMAGE");
+    if (target.isEmpty()) {   // canApply gates this, but be defensive
+        setState(QStringLiteral("error"), QStringLiteral("Could not locate the running AppImage."));
+        return;
+    }
+
+    const QFile::Permissions exec = QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                                  | QFile::ReadGroup | QFile::ExeGroup
+                                  | QFile::ReadOther | QFile::ExeOther;
+    QFile(stagedPath).setPermissions(exec);
+
+    // Back up the running image, then move the new one into its place. QFile::rename
+    // copies across filesystems when a plain rename fails, so the swap works whether
+    // updates/ and the AppImage share a mount or not. On any failure, restore.
+    const QString backup = target + QStringLiteral(".bak");
+    QFile::remove(backup);
+    if (!QFile::rename(target, backup)) {
+        setState(QStringLiteral("error"), QStringLiteral("Could not replace the AppImage — is it writable?"));
+        return;
+    }
+    if (!QFile::rename(stagedPath, target)) {
+        QFile::rename(backup, target);   // put the old image back
+        setState(QStringLiteral("error"), QStringLiteral("Could not install the update — restored the previous version."));
+        return;
+    }
+    QFile(target).setPermissions(exec);
+
+    // Committed — drop the staging markers so it is not re-applied on next launch.
+    QFile::remove(stagedJsonPath());
+    QFile::remove(stagedSha256Path());
+
+    // Desktop Mode: relaunch ourselves once we have exited. Gaming Mode: just quit
+    // (Steam relaunches; the file path is unchanged so its shortcut still works).
+    if (!isGamingMode()) {
+        static const char kHelper[] = R"HELPER(#!/bin/bash
+# apply-appimage.sh <pid> <appimage> — spawned detached by 240-MP before it quits.
+exec >>"$(dirname "$0")/apply.log" 2>&1
+echo "=== $(date) relaunch $2"
+PID="$1"; APP="$2"
+for i in $(seq 1 150); do kill -0 "$PID" 2>/dev/null || break; sleep 0.2; done
+exec "$APP"
+)HELPER";
+        const QString scriptPath = updatesDir() + QStringLiteral("/apply-appimage.sh");
+        QFile script(scriptPath);
+        if (script.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            script.write(kHelper);
+            script.close();
+            script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                                  | QFile::ReadGroup | QFile::ExeGroup);
+            QProcess::startDetached(QStringLiteral("/bin/bash"),
+                                    {scriptPath,
+                                     QString::number(QCoreApplication::applicationPid()),
+                                     target});
+        }
+    }
+    // Give any detached helper a beat to start before the app exits.
+    QTimer::singleShot(200, qApp, &QCoreApplication::quit);
 }
 
 void UpdateManager::applyMacos() {

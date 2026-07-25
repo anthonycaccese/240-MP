@@ -314,7 +314,9 @@ Keep it current with `~/.local/share/240-MP/bin/yt-dlp -U` (no app reinstall nee
 
 ### Update
 
-Open `Settings → Update 240-MP` to check for a newer version. Because the AppImage is self-contained, updating means downloading the new `.AppImage` from the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) and replacing your copy — the update screen shows this reminder. *(Automatic in-place AppImage updating is planned for a future release.)* Your settings in `~/.local/share/240-MP/` are retained.
+**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Relaunch. The app verifies the download, swaps the new `.AppImage` over your current one in place (keeping a `.bak` of the previous version until the new one launches cleanly), and — in **Desktop Mode** — reopens on the new version. In **Gaming Mode** the app closes after applying; relaunch it from your Steam library to pick up the new version (the file path is unchanged, so the shortcut still works). Your settings in `~/.local/share/240-MP/` are retained.
+
+If the app is stored in a read-only location the in-app update can't write to, the update screen falls back to pointing you at the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) to download and replace the `.AppImage` manually.
 
 ### Uninstall
 
