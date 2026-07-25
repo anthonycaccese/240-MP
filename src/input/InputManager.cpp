@@ -1,18 +1,42 @@
 #include "InputManager.h"
+#include "../AppCore.h"
 
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QInputMethodQueryEvent>
 #include <QQuickWindow>
 #include <QKeyEvent>
+#include <QKeySequence>
+#include <QMouseEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
+#ifdef Q_OS_LINUX
+#include <QSocketNotifier>
+#include <QDir>
+#include <linux/input.h>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#endif
 
 namespace {
 // Planted in nativeScanCode of synthesized events so the keyboard detector in
 // eventFilter() can tell our gamepad-originated key events from real key presses.
 constexpr quint32 kSyntheticScanCode = 0x240F00D;
+
+// Extended key ids for the Consumer Control evdev path (see
+// openConsumerControlDevice()) are stored in m_keyRemap as kEvdevKeyBase plus
+// the raw Linux KEY_* code. Qt::Key's own values (ASCII range, or the
+// "special key" range starting at 0x01000000) never reach this high, so the
+// two id spaces can share one QHash with no risk of collision.
+constexpr int kEvdevKeyBase = 0x02000000;
+
+// Same idea, for a mouse button (Qt::MouseButton), some "air mouse" remotes
+// wire their center/OK button as a literal left click rather than any kind of
+// key, so it never generates a QKeyEvent at all. Distinct base, same QHash.
+constexpr int kMouseButtonBase = 0x03000000;
 
 // Analog stick thresholds (of ±32768). Engage above one, release below the
 // other — the gap prevents flutter when the stick rests near the threshold.
@@ -50,8 +74,9 @@ bool textInputHasFocus() {
 }
 }
 
-InputManager::InputManager(const QString &dataRoot, QObject *parent)
+InputManager::InputManager(const QString &dataRoot, AppCore *appCore, QObject *parent)
     : QObject(parent)
+    , m_appCore(appCore)
     , m_dataRoot(dataRoot)
 {
     m_repeatDelayTimer.setSingleShot(true);
@@ -63,6 +88,14 @@ InputManager::InputManager(const QString &dataRoot, QObject *parent)
 
     rebuildMapping();
     initSdl();
+
+    loadKeyRemap();
+    if (m_appCore)
+        connect(m_appCore, &AppCore::appSettingChanged, this, &InputManager::onAppSettingChanged);
+
+#ifdef Q_OS_LINUX
+    openConsumerControlDevice();
+#endif
 
     // Watch the data dir (not the file) so input.cfg can appear later and so
     // replace-on-save editors are caught; mtime check filters unrelated writes
@@ -82,6 +115,10 @@ InputManager::~InputManager() {
     m_controllers.clear();
     if (m_sdlReady)
         SDL_Quit();
+#ifdef Q_OS_LINUX
+    if (m_consumerFd >= 0)
+        ::close(m_consumerFd);
+#endif
 }
 
 void InputManager::setTargetWindow(QQuickWindow *window) {
@@ -323,6 +360,175 @@ void InputManager::loadUserMapping() {
     qInfo("[input] input.cfg: applied %d binding(s)", applied);
 }
 
+// Keyboard/remote-button remap, config.json's app.remote_keymap.<action>,
+// each an int Qt::Key value (or unset/0, meaning "no extra key for this
+// action"). Set from Settings > Remote Controls (views/RemapControls.qml).
+// Unlike input.cfg's gamepad rebinds, this is additive: it never removes an
+// action's default key, it only adds one more physical key that also fires
+// it, so a bad remap can't lock the menus out from a plain keyboard.
+void InputManager::loadKeyRemap() {
+    m_keyRemap.clear();
+    if (!m_appCore)
+        return;
+    static const struct { const char *name; Action action; } kRemapActions[] = {
+        { "up",     Action::Up },
+        { "down",   Action::Down },
+        { "left",   Action::Left },
+        { "right",  Action::Right },
+        { "select", Action::Select },
+        { "back",   Action::Back },
+    };
+    for (const auto &entry : kRemapActions) {
+        bool ok = false;
+        const int qtKey = m_appCore->get_setting(QString(), QStringLiteral("remote_keymap.") + entry.name).toInt(&ok);
+        if (ok && qtKey != 0)
+            m_keyRemap[qtKey] = entry.action;
+    }
+}
+
+void InputManager::onAppSettingChanged(const QString &key, const QString &value) {
+    Q_UNUSED(value)
+    if (key.startsWith(QStringLiteral("remote_keymap.")))
+        loadKeyRemap();
+}
+
+void InputManager::setRemapCapture(bool active) {
+    m_remapCapture = active;
+}
+
+#ifdef Q_OS_LINUX
+// Some remote/keyboard USB combos expose their "Consumer Page" HID buttons
+// (Home, Back, Menu, colored buttons, zoom, media transport…) as a *separate*
+// /dev/input/eventN device from the plain keyboard interface, confirmed via
+// `cat /proc/bus/input/devices` showing three sibling interfaces (Keyboard,
+// Consumer Control, Mouse) off one USB composite device. Qt's EGLFS/libinput
+// backend doesn't classify "Consumer Control" as a keyboard, so those button
+// presses never reach QML as ordinary QKeyEvents no matter what the device is
+// capable of sending. This opens that device directly (read-only) and feeds
+// it into the same Action/remap system as everything else, bypassing Qt's
+// input pipeline entirely for this one device.
+//
+// Scanned once at startup, no hotplug, this is a fixed USB dongle here, not
+// something swapped mid-session. Harmless no-op on a machine with no such
+// device (nothing matches the name, nothing is opened).
+void InputManager::openConsumerControlDevice() {
+    QDir dir(QStringLiteral("/dev/input"));
+    const QStringList entries = dir.entryList(QStringList() << QStringLiteral("event*"), QDir::System);
+    for (const QString &entry : entries) {
+        const QString path = dir.filePath(entry);
+        const int fd = ::open(path.toUtf8().constData(), O_RDONLY | O_NONBLOCK);
+        if (fd < 0)
+            continue;
+        char name[256] = {0};
+        const bool isConsumerControl = ioctl(fd, EVIOCGNAME(sizeof(name)), name) >= 0
+            && QString::fromUtf8(name).contains(QStringLiteral("Consumer Control"), Qt::CaseInsensitive);
+        if (isConsumerControl) {
+            m_consumerFd = fd;
+            m_consumerNotifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
+            connect(m_consumerNotifier, &QSocketNotifier::activated, this, &InputManager::onConsumerControlReadable);
+            qInfo("[input] Consumer Control device found: %s (%s)", name, qPrintable(path));
+            return;
+        }
+        ::close(fd);
+    }
+    qInfo("[input] no Consumer Control device found, remote's extra buttons (if any) won't be remappable");
+}
+
+void InputManager::onConsumerControlReadable() {
+    struct input_event ev;
+    for (;;) {
+        const ssize_t n = ::read(m_consumerFd, &ev, sizeof(ev));
+        if (n != ssize_t(sizeof(ev))) {
+            if (n < 0 && errno == EINTR)
+                continue;
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                break;   // drained
+            // EOF or a hard error (ENODEV once the dongle is unplugged): tear
+            // the notifier down, or it keeps firing on the dead fd and
+            // busy-spins the event loop.
+            qWarning("[input] Consumer Control device lost — disabling");
+            m_consumerNotifier->setEnabled(false);
+            m_consumerNotifier->deleteLater();
+            m_consumerNotifier = nullptr;
+            ::close(m_consumerFd);
+            m_consumerFd = -1;
+            return;
+        }
+        if (ev.type != EV_KEY || ev.value == 2)   // ignore autorepeat and non-key events
+            continue;
+        const int extendedId = kEvdevKeyBase + ev.code;
+
+        if (m_remapCapture) {
+            // Capture mode: report the button, never act on it. Acting is what
+            // must not happen here — finishing a capture writes the binding
+            // into m_keyRemap before this function resumes, so a lookup after
+            // the emit would fire the action on the very press that bound it.
+            if (ev.value == 1)
+                emit auxButtonPressed(extendedId);
+            continue;
+        }
+
+        const Action a = m_keyRemap.value(extendedId, Action::None);
+        if (a == Action::None)
+            continue;
+        if (ev.value == 1)
+            beginPress(a);
+        else
+            releaseAction(a);
+    }
+}
+#endif
+
+// Display name for a Consumer Control button (extendedId - kEvdevKeyBase is
+// the raw Linux KEY_* code). Covers the codes an ordinary remote is likely to
+// send; anything else falls back to "Button <code>" rather than nothing.
+QString InputManager::evdevKeyName(int linuxCode) {
+#ifndef Q_OS_LINUX
+    // The Consumer Control evdev path only exists on Linux (see
+    // openConsumerControlDevice()); nothing ever stores a code in this range
+    // on other platforms, but the function still has to compile everywhere.
+    return QStringLiteral("Button %1").arg(linuxCode);
+#else
+    switch (linuxCode) {
+    case KEY_HOMEPAGE:    return QStringLiteral("Home");
+    case KEY_BACK:        return QStringLiteral("Back");
+    case KEY_MENU:        return QStringLiteral("Menu");
+    case KEY_INFO:        return QStringLiteral("Info");
+    case KEY_EXIT:        return QStringLiteral("Exit");
+    case KEY_SEARCH:      return QStringLiteral("Search");
+    case KEY_WWW:         return QStringLiteral("WWW");
+    case KEY_MAIL:        return QStringLiteral("Mail");
+    case KEY_RED:         return QStringLiteral("Red");
+    case KEY_GREEN:       return QStringLiteral("Green");
+    case KEY_YELLOW:      return QStringLiteral("Yellow");
+    case KEY_BLUE:        return QStringLiteral("Blue");
+    case KEY_ZOOMIN:      return QStringLiteral("Zoom In");
+    case KEY_ZOOMOUT:     return QStringLiteral("Zoom Out");
+    case KEY_ZOOMRESET:   return QStringLiteral("Zoom Reset");
+    case KEY_PLAY:        return QStringLiteral("Play");
+    case KEY_PLAYPAUSE:   return QStringLiteral("Play/Pause");
+    case KEY_PAUSE:       return QStringLiteral("Pause");
+    case KEY_STOP:        return QStringLiteral("Stop");
+    case KEY_REWIND:      return QStringLiteral("Rewind");
+    case KEY_FASTFORWARD: return QStringLiteral("Fast Forward");
+    case KEY_NEXTSONG:    return QStringLiteral("Next");
+    case KEY_PREVIOUSSONG:return QStringLiteral("Previous");
+    case KEY_RECORD:      return QStringLiteral("Record");
+    case KEY_VOLUMEUP:    return QStringLiteral("Volume Up");
+    case KEY_VOLUMEDOWN:  return QStringLiteral("Volume Down");
+    case KEY_MUTE:        return QStringLiteral("Mute");
+    case KEY_CHANNELUP:   return QStringLiteral("Channel Up");
+    case KEY_CHANNELDOWN: return QStringLiteral("Channel Down");
+    case KEY_BUTTONCONFIG:return QStringLiteral("Tools");
+    case KEY_CONFIG:      return QStringLiteral("Config");
+    case KEY_SELECT:      return QStringLiteral("Select");
+    case KEY_POWER:       return QStringLiteral("Power");
+    case KEY_SLEEP:       return QStringLiteral("Sleep");
+    default:              return QStringLiteral("Button %1").arg(linuxCode);
+    }
+#endif
+}
+
 void InputManager::onDataDirChanged(const QString &) {
     const QFileInfo cfg(m_dataRoot + "/input.cfg");
     const QDateTime modified = cfg.exists() ? cfg.lastModified() : QDateTime();
@@ -387,6 +593,15 @@ void InputManager::pressAction(Action a) {
     if (a == Action::None)
         return;
     setLastInputDevice(QStringLiteral("gamepad"));
+    beginPress(a);
+}
+
+// Deliver a press and arm the held-direction auto-repeat. Shared by gamepad
+// buttons/axes and remapped consumer-control/mouse inputs — the evdev path
+// filters out autorepeat (and many remotes never send it), so a held direction
+// button repeats through the same timers a held d-pad does. Remapped keyboard
+// keys don't come through here: the OS supplies their repeat.
+void InputManager::beginPress(Action a) {
     deliverPress(a, false);
 
     if (isDirectional(a)) {
@@ -487,6 +702,27 @@ bool InputManager::isDirectional(Action a) {
     return a == Action::Up || a == Action::Down || a == Action::Left || a == Action::Right;
 }
 
+QString InputManager::keyDisplayName(int qtKey) const {
+    if (qtKey == 0)
+        return QString();
+    if (qtKey >= kMouseButtonBase)
+        return mouseButtonName(qtKey - kMouseButtonBase);
+    if (qtKey >= kEvdevKeyBase)
+        return evdevKeyName(qtKey - kEvdevKeyBase);
+    return QKeySequence(qtKey).toString(QKeySequence::NativeText);
+}
+
+QString InputManager::mouseButtonName(int qtButton) {
+    switch (Qt::MouseButton(qtButton)) {
+    case Qt::LeftButton:    return QStringLiteral("Mouse: Left Click");
+    case Qt::RightButton:   return QStringLiteral("Mouse: Right Click");
+    case Qt::MiddleButton:  return QStringLiteral("Mouse: Middle Click");
+    case Qt::BackButton:    return QStringLiteral("Mouse: Back");
+    case Qt::ForwardButton: return QStringLiteral("Mouse: Forward");
+    default:                return QStringLiteral("Mouse Button %1").arg(qtButton);
+    }
+}
+
 // HID media keys are a separate concern from navigation actions — they always
 // target mpv, never QML — so they bypass the Action enum and map straight to the
 // canonical mpv key names media-keys.lua binds.
@@ -512,11 +748,44 @@ QString InputManager::mpvKeyForMediaEvent(const QKeyEvent *ke) {
 bool InputManager::eventFilter(QObject *obj, QEvent *event) {
     Q_UNUSED(obj)
     const QEvent::Type type = event->type();
+
+    // Some remotes wire their center/OK button as a literal mouse click (see
+    // openConsumerControlDevice()'s comment for the sibling-devices story).
+    // Qt still delivers that as an ordinary QMouseEvent regardless of what
+    // libinput thinks the device is, so no raw evdev reader is needed here,
+    // just the same remap table and capture signal as everything else.
+    if (type == QEvent::MouseButtonPress || type == QEvent::MouseButtonDblClick
+        || type == QEvent::MouseButtonRelease) {
+        const auto *me = static_cast<QMouseEvent *>(event);
+        // A fast second press arrives as DblClick instead of Press — for a
+        // remapped button it must count as a press, or every other click
+        // leaks into the UI as a real one.
+        const bool isPress = type != QEvent::MouseButtonRelease;
+        const int extendedId = kMouseButtonBase + int(me->button());
+
+        if (m_remapCapture) {
+            if (isPress)
+                emit auxButtonPressed(extendedId);
+            return true;
+        }
+
+        const Action remapped = m_keyRemap.value(extendedId, Action::None);
+        if (remapped != Action::None) {
+            if (isPress)
+                beginPress(remapped);
+            else
+                releaseAction(remapped);
+            return true;
+        }
+        return false;
+    }
+
     if (type != QEvent::KeyPress && type != QEvent::KeyRelease)
         return false;
     const auto *ke = static_cast<QKeyEvent *>(event);
+    const bool synthetic = ke->nativeScanCode() == kSyntheticScanCode;
 
-    if (type == QEvent::KeyPress && ke->nativeScanCode() != kSyntheticScanCode)
+    if (type == QEvent::KeyPress && !synthetic)
         setLastInputDevice(QStringLiteral("keyboard"));
 
     // Right shift acts as Back so the keyboard works one-handed: reuse the
@@ -541,6 +810,41 @@ bool InputManager::eventFilter(QObject *obj, QEvent *event) {
                 releaseAction(Action::Back);
         }
         return true;
+    }
+
+    // Capture mode (see setRemapCapture): swallow every real key and report
+    // presses through auxButtonPressed instead of letting them reach QML.
+    // Going through the signal rather than key delivery is what lets an
+    // already-remapped key be captured as itself — the remap branch below
+    // would otherwise consume it and hand the overlay its action's default
+    // key. Sits after the right-shift block so that alias still cancels the
+    // overlay via its normal Back path.
+    if (m_remapCapture && !synthetic) {
+        if (type == QEvent::KeyPress && !ke->isAutoRepeat())
+            emit auxButtonPressed(ke->key());
+        return true;
+    }
+
+    // Custom remote/keyboard remap (Settings > Remote Controls): an extra
+    // physical key that also fires one of the six actions, delivered the same
+    // way a gamepad press is: a synthesized key event carrying that action's
+    // *default* Qt key, so every existing Keys.onPressed handler sees exactly
+    // what it always has. The default key itself is untouched (this table is
+    // additive), so remapping can't remove the app's own keyboard controls.
+    // Skipped for our own synthesized events (nativeScanCode check) so two
+    // remapped keys can never feed into each other, and skipped while a text
+    // field has focus so typing a remapped character still works normally
+    // (the hash miss is checked first — it's cheap, while textInputHasFocus
+    // is a synchronous input-method query and shouldn't run per keystroke).
+    if (!synthetic) {
+        const Action remapped = m_keyRemap.value(ke->key(), Action::None);
+        if (remapped != Action::None && !textInputHasFocus()) {
+            if (type == QEvent::KeyPress)
+                deliverPress(remapped, ke->isAutoRepeat());
+            else
+                releaseAction(remapped);
+            return true;
+        }
     }
 
     // HID media keys drive mpv directly over IPC (sendKey no-ops when mpv isn't

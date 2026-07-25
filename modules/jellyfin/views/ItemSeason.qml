@@ -32,6 +32,7 @@ FocusScope {
             if (loadedItems.length > 0) {
                 var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
                 episodeList.currentIndex = Math.min(restore, loadedItems.length - 1)
+                if (navListState.focusRow === 1) focusRow = 1
                 episodeList.positionViewAtIndex(episodeList.currentIndex, ListView.Contain)
             }
         }
@@ -67,17 +68,28 @@ FocusScope {
     }
 
     Keys.onUpPressed: {
-        if (focusRow === 1) {
-            if (episodeList.currentIndex > 0) episodeList.currentIndex--
-            else focusRow = 0
+        if (focusRow === 0) {
+            episodeList.currentIndex = episodes.length-1
+            focusRow = 1
+        } else {
+            if (episodes.length === 0) return
+            if (focusRow === 1) {
+                if (episodeList.currentIndex > 0) episodeList.currentIndex--
+                else focusRow = 0
+            }
         }
+        episodeList.positionViewAtIndex(episodeList.currentIndex, ListView.Contain)
     }
     Keys.onDownPressed: {
         if (focusRow === 0) {
+            episodeList.currentIndex = 0
             if (episodes.length > 0) focusRow = 1
         } else {
+            if (episodes.length === 0) return
             if (episodeList.currentIndex < episodes.length - 1) episodeList.currentIndex++
+            else episodeList.currentIndex = focusRow = 0
         }
+        episodeList.positionViewAtIndex(episodeList.currentIndex, ListView.Contain)
     }
     Keys.onReturnPressed: {
         if (focusRow === 0) {
@@ -88,7 +100,7 @@ FocusScope {
             seasonRoot.navigateTo("Item.qml", {
                 item: ep,
                 libraryName: libraryName
-            }, { currentIndex: episodeList.currentIndex })
+            }, { currentIndex: episodeList.currentIndex, focusRow: 1 })
         }
     }
     Keys.onPressed: function(event) {

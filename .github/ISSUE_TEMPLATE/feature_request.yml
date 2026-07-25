@@ -14,9 +14,12 @@ body:
       options:
         - Local Files module
         - Plex module
+        - Jellyfin module
+        - YouTube module
         - Ambient Mode module
+        - NFC Reader module
+        - App shell / general (browsing, settings, navigation)
         - A new module
-        - App shell / general
     validations:
       required: true
   - type: textarea

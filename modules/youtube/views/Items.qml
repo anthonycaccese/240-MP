@@ -148,6 +148,16 @@ FocusScope {
             else if (selected === "History")
                 navigateTo("Subscriptions.qml", { mode: "history" }, state)
         }
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+        }
     }
 
     // Footer

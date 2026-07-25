@@ -144,11 +144,17 @@ FocusScope {
         items.push({ type: "section", label: "Application" })
         items.push({
             type: "submenu",
-            key: "software_update",
-            label: "Update 240-MP",
+            key: "remap_controls",
+            label: "Controls",
             moduleId: ""
         })
-        items.push({ type: "quit", label: "Quit 240-MP" })
+        items.push({
+            type: "submenu",
+            key: "software_update",
+            label: "Update",
+            moduleId: ""
+        })
+        items.push({ type: "quit", label: "Quit" })
 
         settingsItems = items
 
@@ -207,11 +213,28 @@ FocusScope {
 
         Keys.onUpPressed: {
             var prev = settingsRoot.firstSelectableBefore(currentIndex)
-            if (prev !== currentIndex) currentIndex = prev
+            if (prev !== currentIndex) {
+                currentIndex = prev
+            } else {
+                // wrap to last selectable
+                for (var i = settingsItems.length - 1; i >= 0; i--) {
+                    if (settingsItems[i].type !== "section") { currentIndex = i; break }
+                }
+            }
+            settingsList.positionViewAtIndex(currentIndex, ListView.Contain)
         }
         Keys.onDownPressed: {
             var next = settingsRoot.firstSelectableAfter(currentIndex)
-            if (next !== currentIndex) currentIndex = next
+            if (next !== currentIndex) {
+                currentIndex = next
+                settingsList.positionViewAtIndex(currentIndex, ListView.Contain)
+            } else {
+                // wrap to first selectable
+                for (var j = 0; j < settingsItems.length; j++) {
+                    if (settingsItems[j].type !== "section") { currentIndex = j; break }
+                }
+                settingsList.positionViewAtIndex(currentIndex, ListView.Contain)
+            }
         }
 
         Keys.onLeftPressed: {
@@ -255,6 +278,8 @@ FocusScope {
             if (row && row.type === "submenu") {
                 if (row.key === "software_update")
                     settingsRoot.navigateTo("views/Update.qml", {}, { currentIndex: settingsList.currentIndex })
+                else if (row.key === "remap_controls")
+                    settingsRoot.navigateTo("views/RemapControls.qml", {}, { currentIndex: settingsList.currentIndex })
                 else
                     settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
             } else if (row && row.type === "quit") {

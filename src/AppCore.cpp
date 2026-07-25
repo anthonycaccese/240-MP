@@ -123,6 +123,12 @@ QVariant AppCore::get_setting(const QString &moduleId, const QString &key) {
         target = config["app"].toObject();
     else
         target = config["modules"].toObject()[moduleId].toObject();
+
+    // Mirror save_setting's dot-notation handling: "libraries.somekey" reads
+    // target["libraries"]["somekey"], not a literal "libraries.somekey" key.
+    QStringList parts = key.split('.', Qt::KeepEmptyParts);
+    if (parts.size() == 2)
+        return target[parts[0]].toObject()[parts[1]].toVariant();
     return target[key].toVariant();
 }
 

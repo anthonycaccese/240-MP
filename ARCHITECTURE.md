@@ -395,6 +395,22 @@ FocusScope {
             positionViewAtIndex(currentIndex, ListView.Contain)
         }
 
+        // Up/Down with wraparound. The positionViewAtIndex call is required:
+        // changing currentIndex alone does not scroll a clipped ListView, so
+        // without it a wrap moves the selection off-screen.
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+        }
+
         Keys.onReturnPressed: {
             navigateTo("Detail.qml", { item: model[currentIndex] }, { currentIndex: currentIndex })
         }
@@ -438,7 +454,8 @@ FocusScope {
 **View rules:**
 - Always declare `property var navParams: ({})` — the router passes params via `Loader.setSource`.
 - List views also declare `property var navListState: navParams.navListState || ({})` and restore position in `Component.onCompleted`.
-- `navigateTo` always takes 3 args: `(path, params, listState)` — pass `{ currentIndex: listView.currentIndex }` as listState when pushing to a detail view.
+- `navigateTo` always takes 3 args: `(path, params, listState)` — pass `{ currentIndex: listView.currentIndex }` as listState when pushing to a detail view. Detail views with multiple focus rows (play button / list) also pass `focusRow` in listState and restore it in their data-loaded handler, so backing in lands on the row the user left.
+- Up/Down navigation wraps: past the last item returns to the first and vice versa, always followed by `positionViewAtIndex(..., ListView.Contain)` (see the handlers in Items.qml above). Views with an A–Z letter panel additionally keep `letterList.currentIndex` in sync on every move and wrap the panel itself — `modules/jellyfin/views/Items.qml` is the reference.
 - Leaf views only need `signal goBack()` — no `navigateTo`.
 - Use `root.sh` / `root.sw` for all margins and sizes — never hardcoded pixels. This keeps layouts responsive across CRT (240p/480i, watch overscan) and HDMI/LCD.
 - Access shared state via `moduleRoot.moduleName`, `moduleRoot.moduleIcon`.

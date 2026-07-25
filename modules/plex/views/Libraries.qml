@@ -90,8 +90,18 @@ FocusScope {
         clip: true
         focus: true
 
-        Keys.onUpPressed: if (currentIndex > 0) currentIndex--
-        Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+            libraryList.positionViewAtIndex(libraryList.currentIndex, ListView.Contain)
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            libraryList.positionViewAtIndex(libraryList.currentIndex, ListView.Contain)
+        }
         Keys.onLeftPressed: browseRoot.openServerSwitch()
         Keys.onRightPressed: browseRoot.openServerSwitch()
 

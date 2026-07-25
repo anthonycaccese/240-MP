@@ -1,0 +1,11 @@
+VCR OSD Mono (VCR_OSD_MONO_1.001.ttf), Version 1.001
+
+Created by Riciery Santos Leal (a.k.a. mrmanet).
+Source: https://www.dafont.com/vcr-osd-mono.font
+
+VCR OSD Mono is distributed by its author as a free font via dafont.com and
+is redistributed here unmodified for use as 240-MP's primary UI typeface. It
+does not ship with a formal, standalone license text; the terms are those
+stated on the dafont listing above. If you are the author and would like the
+attribution or terms recorded differently, please open an issue on the
+240-MP repository.

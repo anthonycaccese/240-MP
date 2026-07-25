@@ -145,6 +145,19 @@ FocusScope {
                 }
             }
         }
+
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+            fileList.positionViewAtIndex(fileList.currentIndex, ListView.Contain)
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            fileList.positionViewAtIndex(fileList.currentIndex, ListView.Contain)
+        }
     }
 
     Component.onCompleted: {
@@ -157,6 +170,8 @@ FocusScope {
         }
         fileList.forceActiveFocus()
     }
+
+    
 
     // Footer
     Text {
