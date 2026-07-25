@@ -31,6 +31,9 @@ FocusScope {
     property bool   pendingNextEpisode: false
     // Set when a direct-play attempt fails and we re-request forcing a transcode.
     property bool   pendingRetryTranscode: false
+    // Set when the user changed the subtitle mid-transcode: mpv is quitting so we
+    // can re-request the stream with a different burned-in track (not a real stop).
+    property bool   pendingSubtitleSwitch: false
     property string carryAudioLang:     ""
     property string carrySubLang:       "__off__"
     // Full stream metadata used to disambiguate when several streams share a language.
@@ -382,18 +385,24 @@ FocusScope {
     function doStartPlayback(offsetMs) {
         var jfToken = jellyfinBackend.get_access_token()
         if (isTranscoding) {
-            // Find the human-readable name of the selected subtitle track
+            // The HLS manifest bakes in the selected audio, and the chosen subtitle
+            // is burned into the video — so there's no soft sub track for mpv to
+            // pick (subTrack -2 = --sid=no) or to cycle. Instead the OSC gets:
+            //   sub-cycle     — show a SUBTITLE button that asks us to switch
+            //                   (handled in onSubtitleCycleRequested → new transcode)
+            //   transcode-sub — the burned-in track's name, for the info line
+            // Both go through --script-opts-append: a plain --script-opts= would
+            // replace the list MpvController already built (screensaver, hide-crop…).
             var subName = "Off"
-            if (subtitleIdx >= 0 && subtitleStreams && subtitleStreams[subtitleIdx]) {
+            if (subtitleIdx >= 0 && subtitleStreams[subtitleIdx]) {
                 var s = subtitleStreams[subtitleIdx]
                 subName = s.displayTitle || s.title || s.language || "Unknown"
             }
-            
-            // Replace spaces with underscores for command-line safety
-            subName = subName.replace(/ /g, "_")
-            
-            // Inject it as a custom script option
-            var extra = ["--script-opts=transcode_sub=" + subName]
+            // script-opts is a comma-separated key=value list, so the value can
+            // carry neither a comma nor an "="; spaces round-trip as underscores.
+            subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
+            var extra = ["--script-opts-append=transcode-sub=" + subName,
+                         "--script-opts-append=sub-cycle=" + (subtitleStreams.length > 0 ? "1" : "0")]
 
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
                                        -1, -2, [], [], false, -1, 0.0, "",
@@ -540,29 +549,45 @@ FocusScope {
                 // end naturally. Nulling it before the seek completes causes a
                 // position update at the old location to re-detect the same
                 // segment as "new" and re-trigger the prompt.
-            } else if (streamUrl.indexOf(".m3u8") >= 0 && subtitleStreams && subtitleStreams.length > 0) {
-                subtitleIdx++
-                if (subtitleIdx >= subtitleStreams.length) subtitleIdx = -1
-
-                selectedSubtitleId = subtitleIdx >= 0 ? subtitleStreams[subtitleIdx].id : ""
-
-                // Save the current timestamp so we can resume smoothly
-                lastKnownPositionMs = mpvController.position
-                pendingRetryTranscode = true
-                stoppedReported = false
-
-                var aIdx = selectedAudioId ? parseInt(selectedAudioId) : -1
-                var sIdx = selectedSubtitleId ? parseInt(selectedSubtitleId) : -1
-                
-                // Explicitly stop mpv before requesting the new stream
-                mpvController.stop()
-                
-                // Request a new transcode from the server with the new SubtitleStreamIndex
-                jellyfinBackend.get_playback_url(itemId, mediaSourceId, aIdx, sIdx, true)
             }
         }
 
+        // OSC SUBTITLE button during a transcode. The sub is burned into the
+        // video, so switching means a new transcode: quit mpv, then do the work
+        // in onPlaybackEnded once it has actually exited — starting the request
+        // here would race mpv's exit, and that exit would run the normal
+        // "user stopped" path and navigate out of the player.
+        function onSubtitleCycleRequested() {
+            if (!isTranscoding || subtitleStreams.length === 0) return
+            playerRoot.lastKnownPositionMs = mpvController.position
+            playerRoot.pendingSubtitleSwitch = true
+            mpvController.stop()
+        }
+
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
+            if (pendingSubtitleSwitch) {
+                // mpv exited because we asked it to (onSubtitleCycleRequested), not
+                // because the user stopped. Close out the old transcode session so
+                // the server tears the encode down, advance to the next subtitle,
+                // and re-request — onStreamUrlReady's pendingRetryTranscode branch
+                // resumes at lastKnownPositionMs. Deliberately no goBack().
+                pendingSubtitleSwitch = false
+                reportStopped(finalPositionMs, finalDurationMs)
+                stoppedReported = false
+
+                subtitleIdx++
+                if (subtitleIdx >= subtitleStreams.length) subtitleIdx = -1
+                selectedSubtitleId = subtitleIdx >= 0 ? subtitleStreams[subtitleIdx].id : ""
+                // Keep the autoplay carry-over hints in step with the new choice so
+                // the next episode inherits it.
+                captureCarryLanguages()
+
+                pendingRetryTranscode = true
+                var newAIdx = selectedAudioId ? parseInt(selectedAudioId) : -1
+                var newSIdx = selectedSubtitleId ? parseInt(selectedSubtitleId) : -1
+                jellyfinBackend.get_playback_url(itemId, mediaSourceId, newAIdx, newSIdx, true)
+                return
+            }
             if (reason === "failed") {
                 if (!isTranscoding) {
                     // Direct play failed (e.g. a codec mpv couldn't handle, or a

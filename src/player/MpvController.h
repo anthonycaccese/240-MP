@@ -82,6 +82,10 @@ signals:
     void playbackEnded(int finalPositionMs, int finalDurationMs, const QString &reason);
 
     void skipRequested();
+    // The OSC's SUBTITLE button when the sub is burned into the stream and mpv
+    // has nothing to cycle (see `sub-cycle` in scripts/mpv-osc.lua). The module
+    // owns the change — typically stop, re-request the stream, relaunch.
+    void subtitleCycleRequested();
 
 private slots:
     void onProcessFinished();

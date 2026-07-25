@@ -313,11 +313,7 @@ FocusScope {
                 }
             }
         }
-        if (jellyfinBackend && typeof jellyfinBackend.set_last_track_langs === "function") {
-            jellyfinBackend.set_last_track_langs(aLang, sLang, aLangIdx, sLangIdx)
-        } else {
-            console.log("[Item] Skipping set_last_track_langs: backend method not available")
-        }
+        jellyfinBackend.set_last_track_langs(aLang, sLang, aLangIdx, sLangIdx)
     }
 
     function applyLanguagePreferences(d) {
