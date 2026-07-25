@@ -172,6 +172,54 @@ On Raspberry Pi OS all user configuration is stored at:
 
 This directory is created automatically on first run. It is separate from the app itself, so deleting or rebuilding the app will not wipe your settings.
 
+## Linux x86_64 (AppImage)
+
+For Intel/AMD desktops and the **Steam Deck**, 240-MP ships as a self-contained **AppImage** — a single executable that bundles Qt, SDL2 and mpv, so it runs on immutable distros like SteamOS with no package-install step. (This differs from the Raspberry Pi arm64 build, which is a `.tar.gz` that relies on `apt` via `install.sh`.)
+
+The app itself is architecture-agnostic — the same C++/QML builds on x86_64 unchanged. On a desktop compositor (SteamOS gamescope / KDE, X11/Wayland) it uses `--hwdec=auto-safe`, letting mpv pick VA-API on Intel/AMD GPUs (overridable via `mpv_video_args`).
+
+### Prerequisites (one-time)
+
+On a Debian/Ubuntu x86_64 build host:
+
+```bash
+sudo apt-get install -y build-essential cmake \
+  libdrm-dev libssl-dev libsdl2-dev libpcsclite-dev \
+  libgl1-mesa-dev libxkbcommon-dev mpv
+```
+
+Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qml6-module-qtquick*`) or from the [Qt online installer](https://www.qt.io/download-qt-installer) (set `CMAKE_PREFIX_PATH` to it, matching CI's Qt 6.7).
+
+> **The bundled `mpv` must be modern (≥ 0.38)** — the app's "forced subtitles only" option (`--subs-with-matching-audio=forced`) was added in mpv 0.38, and distro packages are often older (Ubuntu 24.04 ships 0.37, 22.04 ships 0.34.1). If your distro's mpv is too old, build one first and point `MPV_BIN` at it:
+>
+> ```bash
+> MPV_BIN=$(scripts/build-mpv.sh) scripts/build-appimage.sh --configure
+> ```
+>
+> `scripts/build-mpv.sh` compiles mpv 0.40 against your system FFmpeg (needs the meson + FFmpeg/libass/libplacebo/lua/vaapi `-dev` packages — see the CI job). If your distro already ships mpv ≥ 0.38, you can skip it and `build-appimage.sh` uses the system mpv. Note the build host sets the AppImage's glibc floor.
+
+### Build the AppImage
+
+```bash
+# Configure + build, then bundle into a portable AppImage in one step:
+CMAKE_PREFIX_PATH=/path/to/Qt/6.7.x/gcc_64 scripts/build-appimage.sh --configure
+```
+
+This produces `240-MP-linux-x86_64.AppImage` in the repo root. On first run the script downloads `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` into `.appimage-tools/` (cached). Drop `--configure` if you have already built into `build/` yourself.
+
+The script installs into an `AppDir` using the FHS layout (`usr/bin/240mp`, `usr/share/240mp`), bundles a copy of `mpv`, deploys Qt, then prunes host-provided GPU/driver libraries (VA-API, GL, libdrm, Wayland…) so the target's own drivers are used.
+
+### Run
+
+```bash
+chmod +x 240-MP-linux-x86_64.AppImage
+./240-MP-linux-x86_64.AppImage
+```
+
+Configuration lives at `~/.local/share/240-MP/` (same as the Pi). See [INSTALL.md](INSTALL.md) for the Steam Deck end-user flow (Desktop Mode + adding it to Steam for Gaming Mode).
+
+`yt-dlp` is deliberately **not** bundled (it needs to be updatable independently of app releases). For the YouTube module on an immutable distro, drop a copy at `~/.local/share/240-MP/bin/yt-dlp` (`chmod +x`, update with `yt-dlp -U`); the app resolves it there first, then a `yt-dlp` sibling of the binary, then `PATH`, and hands the chosen path to mpv's ytdl hook via `--script-opts=ytdl_hook-ytdl_path=…` so both use the same copy. See [INSTALL.md](INSTALL.md#youtube-yt-dlp).
+
 ## Gamepad input (input.cfg)
 
 USB game controllers should work out of the box as SDL's built-in controller database normalizes most pads (Xbox, PlayStation, 8BitDo, NES-style clones etc...) to a standard layout. 240-MP maps that stanard layout to its navigation actions:
@@ -317,14 +365,17 @@ These build jobs run in parallel:
 
 | Job | Runner | Output |
 |---|---|---|
-| `build-macos-arm64` | `macos-latest` (Apple Silicon) | `240-MP-<tag>-macOS-arm64.dmg` |
+| `build-macos-arm64` | `macos-15` (Apple Silicon) | `240-MP-<tag>-macOS-arm64.dmg` |
 | `build-linux-arm64` | `ubuntu-24.04-arm` (native arm64) | `240-MP-<tag>-linux-arm64.tar.gz` |
+| `build-linux-x86_64` | `ubuntu-24.04` | `240-MP-linux-x86_64.AppImage` (version-less — self-updates in place) |
 
-macOS jobs: installs Qt via the Qt CDN, builds, runs `macdeployqt` to embed Qt frameworks (including `libSDL2.dylib`), ad-hoc codesign, package as `.dmg`. mpv is not bundled — users install it via `brew install mpv`.
+macOS job: installs Qt via the Qt CDN, builds, runs `macdeployqt` to embed Qt frameworks (including `libSDL2.dylib`), ad-hoc codesign, package as `.dmg`. mpv is not bundled — users install it via `brew install mpv`.
 
 Linux arm64 job: installs Qt from apt, builds, package as `.tar.gz`. mpv and SDL2 are not bundled — end users install them via `apt install mpv libsdl2-2.0-0` or by running the `install.sh` that is bundled with each release where they are installed as part of the dependency list.
 
-A final `release` job waits for all three builds, then creates a GitHub Release with all artifacts attached (including `install.sh`).
+Linux x86_64 job: installs Qt via the Qt CDN, builds the app, builds **mpv 0.40 from source** (`scripts/build-mpv.sh`, against 24.04's stock FFmpeg 6.1 — apt's mpv 0.37 is one release too old for the app's forced-subtitle option, and the savoury1 PPA for a newer one is now gated), then runs `scripts/build-appimage.sh` to bundle Qt, SDL2 **and** that mpv into a self-contained `.AppImage`. Built on `ubuntu-24.04`, which sets a glibc 2.39 floor (a current Steam Deck and modern distros — not Ubuntu 22.04 / Debian 12 / older SteamOS). Nothing to install on the target — it runs on immutable distros like SteamOS.
+
+A final `release` job waits for all three build jobs, then creates a GitHub Release with all artifacts attached (including `install.sh`).
 
 ### Output
 
@@ -334,4 +385,4 @@ Go to **Actions** → select the workflow run → each build job has an **Artifa
 
 **After the workflow completes:**
 
-Go to the repository on GitHub → **Releases** → select the release for the tag you set. All three artifacts are listed under Assets.
+Go to the repository on GitHub → **Releases** → select the release for the tag you set. All build artifacts (the `.dmg`, both Linux packages, `SHA256SUMS` and `install.sh`) are listed under Assets.

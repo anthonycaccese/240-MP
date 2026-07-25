@@ -199,11 +199,120 @@ jobs:
           if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────────────
+  # Linux x86_64 — self-contained AppImage for SteamDeck / Intel-AMD desktops.
+  # Unlike the arm64 tarball (which relies on apt via install.sh), the AppImage
+  # bundles Qt, SDL2 and mpv so it runs on immutable distros like SteamOS.
+  # Built on ubuntu-24.04. apt's mpv is 0.37, one release short of the app's
+  # --subs-with-matching-audio=forced option (added in mpv 0.38), so we build
+  # mpv 0.40 from source against 24.04's stock FFmpeg 6.1 (see build-mpv.sh) —
+  # no PPA, no FFmpeg compile. Sets the glibc floor at 2.39 (2.35's savoury1
+  # path for a modern mpv is now gated behind a private PPA): covers a current
+  # Steam Deck and modern distros; older ones can't run it.
+  # ──────────────────────────────────────────────────────────────────────────────
+  build-linux-x86_64:
+    name: Linux x86_64 (AppImage)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.*'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
+
+      - name: Install build + bundling dependencies
+        run: |
+          # Drop the flaky Microsoft/azure apt repos (they intermittently serve
+          # broken signatures), then install: the app toolchain + non-Qt deps and
+          # the X11/GL/xkb libs the Qt plugins pull in at deploy time; plus the
+          # deps to build mpv from source (meson + the FFmpeg 6.1 -dev set,
+          # libass/libplacebo/lua/vaapi and the Wayland/X11/EGL/DRM dev libs).
+          # We build mpv (0.40) rather than apt's 0.37 — see scripts/build-mpv.sh.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.* /etc/apt/sources.list.d/azure-cli.*
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libdrm-dev \
+            libssl-dev \
+            libsdl2-dev \
+            libpcsclite-dev \
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libxcb-cursor0 \
+            meson \
+            ninja-build \
+            pkg-config \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswscale-dev \
+            libavfilter-dev \
+            libswresample-dev \
+            libass-dev \
+            libplacebo-dev \
+            liblua5.2-dev \
+            libva-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxpresent-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libgbm-dev \
+            libegl-dev \
+            libpulse-dev \
+            libasound2-dev \
+            libpipewire-0.3-dev \
+            libjpeg-dev \
+            liblcms2-dev \
+            libuchardet-dev \
+            libzimg-dev
+
+      - name: Build mpv (0.40 from source — apt's 0.37 is too old)
+        run: |
+          echo "MPV_BIN=$(scripts/build-mpv.sh)" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
+            -DAPP_VERSION="${{ github.ref_name }}"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Build AppImage
+        env:
+          # Extract-and-run the linuxdeploy/appimagetool AppImages instead of
+          # requiring FUSE on the runner.
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          QMAKE: ${{ env.QT_ROOT_DIR }}/bin/qmake
+          VERSION: ${{ github.ref_name }}
+          # MPV_BIN was exported by the "Build mpv" step above.
+        run: scripts/build-appimage.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: appimage-linux-x86_64
+          # Version-less on purpose — the AppImage self-updates in place.
+          path: "240-MP-linux-x86_64.AppImage"
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────────────────────────────────────
   # Publish GitHub Release
   # ──────────────────────────────────────────────────────────────────────────────
   release:
     name: Publish Release
-    needs: [build-macos-arm64, build-linux-arm64]
+    needs: [build-macos-arm64, build-linux-arm64, build-linux-x86_64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -223,7 +332,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum dmg-arm64/*.dmg tarball-linux-arm64/*.tar.gz \
+          sha256sum dmg-arm64/*.dmg tarball-linux-arm64/*.tar.gz appimage-linux-x86_64/*.AppImage \
             | sed 's|  .*/|  |' > SHA256SUMS
 
       - name: Publish
@@ -236,13 +345,16 @@ jobs:
           files: |
             artifacts/dmg-arm64/*.dmg
             artifacts/tarball-linux-arm64/*.tar.gz
+            artifacts/appimage-linux-x86_64/*.AppImage
             artifacts/SHA256SUMS
             scripts/install.sh
           body: |
             Install:
             - Raspberry Pi OS Trixie (arm64): Please follow [these instructions](INSTALL.md#on-a-raspberry-pi)
             - macOS (Apple Silicon): Download the `.dmg`, open and move 240mp.app to your applications folder
+            - Steam Deck / Linux (x86_64): Download `240-MP-linux-x86_64.AppImage`, make it executable (`chmod +x`), and run it. See [these instructions](INSTALL.md#on-a-steam-deck--linux-x86_64)
 
             Update:
             - Raspberry Pi OS Trixie (arm64): Use the in-app updater or follow [these instructions](INSTALL.md#update)
             - macOS (Apple Silicon): Use the in-app updater or download the `.dmg`, open and move 240mp.app to your applications folder
+            - Steam Deck / Linux (x86_64): Use the in-app updater (it swaps the AppImage in place) or download the latest `240-MP-linux-x86_64.AppImage` and replace your copy

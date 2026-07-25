@@ -187,6 +187,7 @@ void InputManager::openController(int deviceIndex) {
     SDL_JoystickID id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(gc));
     m_controllers.insert(id, gc);
     qInfo("[input] controller added: %s", SDL_GameControllerName(gc));
+    recomputeSuppressedDevices();
     emit gamepadConnectedChanged();
 }
 
@@ -201,6 +202,8 @@ void InputManager::closeController(SDL_JoystickID instanceId) {
     if (m_heldDirection != Action::None)
         releaseAction(m_heldDirection);
     m_axisState.clear();
+    m_heldActions.clear();   // no stuck "held" action if a device drops mid-press
+    recomputeSuppressedDevices();   // built-in may have unplugged → unsuppress
     if (m_lastActiveController == instanceId) {
         m_lastActiveController = -1;
         updateHints();
@@ -550,7 +553,33 @@ void InputManager::noteActiveController(SDL_JoystickID which) {
     updateHints();
 }
 
+// When Steam Input is active it presents a managed "Steam Virtual Gamepad"
+// alongside the raw controllers it mirrors — on the Steam Deck that's the
+// built-in "Steam Deck" pad; on a desktop running Steam it's whatever pad is
+// attached. The raw device echoes each press with ~0.5s of lag, so one physical
+// press registers twice. The virtual pad is the low-latency one to use (it's
+// also the device Gaming Mode drives), so whenever it is present, suppress every
+// other controller. With no virtual pad (Steam not running), nothing is
+// suppressed and raw controllers work normally. Recomputed on connect/disconnect.
+void InputManager::recomputeSuppressedDevices() {
+    m_suppressedDevices.clear();
+    auto isVirtual = [](SDL_GameController *gc) {
+        const char *n = SDL_GameControllerName(gc);
+        return n && qstrcmp(n, "Steam Virtual Gamepad") == 0;
+    };
+    bool hasVirtual = false;
+    for (SDL_GameController *gc : std::as_const(m_controllers))
+        if (isVirtual(gc)) { hasVirtual = true; break; }
+    if (!hasVirtual)
+        return;
+    for (auto it = m_controllers.cbegin(); it != m_controllers.cend(); ++it)
+        if (!isVirtual(it.value()))
+            m_suppressedDevices.insert(it.key());
+}
+
 void InputManager::handleButton(SDL_JoystickID which, Uint8 button, bool pressed) {
+    if (m_suppressedDevices.contains(which))
+        return;
     const Action a = m_buttonMap.value(button, Action::None);
     if (a == Action::None)
         return;
@@ -562,6 +591,8 @@ void InputManager::handleButton(SDL_JoystickID which, Uint8 button, bool pressed
 }
 
 void InputManager::handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value) {
+    if (m_suppressedDevices.contains(which))
+        return;
     const auto it = m_axisMap.constFind(axis);
     if (it == m_axisMap.constEnd())
         return;
@@ -602,6 +633,15 @@ void InputManager::pressAction(Action a) {
 // button repeats through the same timers a held d-pad does. Remapped keyboard
 // keys don't come through here: the OS supplies their repeat.
 void InputManager::beginPress(Action a) {
+    // Drop a press for an action already held. The Steam Deck reports one
+    // physical press from two SDL devices (built-in + Steam Input virtual pad),
+    // which would otherwise double every navigation. Genuine repeat still comes
+    // from the timers below; a real double-tap alternates held state so both taps
+    // register.
+    if (m_heldActions.contains(a))
+        return;
+    m_heldActions.insert(a);
+
     deliverPress(a, false);
 
     if (isDirectional(a)) {
@@ -614,6 +654,10 @@ void InputManager::beginPress(Action a) {
 
 void InputManager::releaseAction(Action a) {
     if (a == Action::None)
+        return;
+    // Ignore a release for an action that isn't held — the mirror device's
+    // duplicate release, or a stray release with no matching press.
+    if (!m_heldActions.remove(a))
         return;
     if (m_heldDirection == a) {
         m_heldDirection = Action::None;

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=240-MP
+GenericName=Media Player
+Comment=Retro VHS-style media player
+Exec=240mp
+Icon=240-mp
+Terminal=false
+Categories=AudioVideo;Player;Video;
+Keywords=media;video;plex;jellyfin;mpv;retro;

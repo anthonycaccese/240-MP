@@ -275,3 +275,50 @@ Or manually:
 
 - Remove it just like you would any application on macOS
 - Remove the configuration files in `~/Library/Application Support/240-MP/`
+
+## On a Steam Deck / Linux x86_64
+
+For the **Steam Deck** and other Intel/AMD Linux machines, 240-MP ships as an **AppImage** — a single self-contained file. mpv is bundled, so there is nothing else to install; it runs on stock SteamOS without needing Desktop Mode package installs.
+
+### Requirements
+
+- A Steam Deck (any model) or an x86_64 Linux machine with a graphical desktop (X11 or Wayland)
+- Internet access
+
+### Steps (Steam Deck)
+
+1. Switch to **Desktop Mode** (hold the power button → *Switch to Desktop*).
+2. Download `240-MP-linux-x86_64.AppImage` from the [latest release](https://github.com/anthonycaccese/240-mp/releases/latest).
+3. In the file manager (Dolphin), right-click the file → **Properties → Permissions** → tick *Is executable* (or run `chmod +x` on it in Konsole).
+4. Double-click to launch. The Local Files module is enabled by default; open Settings to enable others (see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki).
+
+### Launching from Gaming Mode
+
+To run it from the Steam Deck's Gaming Mode like any other title:
+
+1. In Desktop Mode, open **Steam → Games → Add a Non-Steam Game to My Library**, click **Browse**, and select the AppImage.
+2. Back in Gaming Mode it appears in your library and launches full-screen under gamescope. Controllers work out of the box (see the gamepad notes in [BUILDING.md](BUILDING.md#gamepad-input-inputcfg)).
+
+### YouTube (yt-dlp)
+
+The YouTube module needs `yt-dlp`, which is **not** bundled with the AppImage — YouTube breaks it every few weeks, so it has to be updatable independently of app releases. Because SteamOS is immutable (no `apt`/`pacman`), drop a single self-contained `yt-dlp` binary into the app's data directory and the app and its bundled mpv both use it automatically:
+
+```bash
+mkdir -p ~/.local/share/240-MP/bin
+wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+  -O ~/.local/share/240-MP/bin/yt-dlp
+chmod +x ~/.local/share/240-MP/bin/yt-dlp
+```
+
+Keep it current with `~/.local/share/240-MP/bin/yt-dlp -U` (no app reinstall needed). If you already have `yt-dlp` on your `PATH` (e.g. in `~/.local/bin`), that works too — the data-dir copy just takes precedence.
+
+### Update
+
+**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Relaunch. The app verifies the download, swaps the new `.AppImage` over your current one in place (keeping a `.bak` of the previous version until the new one launches cleanly), and — in **Desktop Mode** — reopens on the new version. In **Gaming Mode** the app closes after applying; relaunch it from your Steam library to pick up the new version (the file path is unchanged, so the shortcut still works). Your settings in `~/.local/share/240-MP/` are retained.
+
+If the app is stored in a read-only location the in-app update can't write to, the update screen falls back to pointing you at the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) to download and replace the `.AppImage` manually.
+
+### Uninstall
+
+- Delete the `.AppImage` file (and remove it from Steam if you added it as a non-Steam game)
+- Remove the configuration files in `~/.local/share/240-MP/`

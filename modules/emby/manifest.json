@@ -1,0 +1,72 @@
+{
+  "id": "com.240mp.emby",
+  "name": "Emby",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "libraries",
+      "label": "Libraries",
+      "type": "multiselect_submenu",
+      "options_source": "dynamic",
+      "options_slot": "getLibraries",
+      "requires_auth": true
+    },
+    {
+      "key": "video_quality",
+      "label": "Video Quality",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "getVideoQualities",
+      "default": "auto",
+      "requires_auth": true
+    },
+    {
+      "key": "resume_playback",
+      "label": "Resume Playback",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_resume_playback_options",
+      "default": "ask",
+      "requires_auth": true
+    },
+    {
+      "key": "autoplay_next_episode",
+      "label": "Autoplay Next Episode",
+      "type": "toggle",
+      "default": "OFF",
+      "requires_auth": true
+    },
+    {
+      "key": "intro_skip",
+      "label": "Intro Skip",
+      "type": "list_single",
+      "options": ["Off", "Auto", "Button"],
+      "default": "Off",
+      "requires_auth": true,
+      "description": "Uses Emby's intro chapter markers when the server has detected them"
+    },
+    {
+      "key": "outro_skip",
+      "label": "Credit Skip",
+      "type": "list_single",
+      "options": ["Off", "Auto", "Button"],
+      "default": "Off",
+      "requires_auth": true,
+      "description": "Uses Emby's credit chapter markers when the server has detected them"
+    },
+    {
+      "key": "logout",
+      "label": "Sign out",
+      "type": "action",
+      "action_slot": "logout",
+      "requires_auth": true
+    }
+  ]
+}

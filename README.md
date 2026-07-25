@@ -4,7 +4,7 @@
 
 240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV).
 
-Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 6 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
+Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 7 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), Emby, [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
 It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps outlined below.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" section.
 
@@ -61,6 +61,20 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Show/Season browsing
 - Video quality selection: Direct Playback (Default) or Transcode options
 
+### Emby Module
+- Designed for CRT navigation (simple, fast, list browsing)
+- Supported library types: `movies, tvshows, homevideos, boxsets`
+- Username / password authentication, or Emby Connect (emby.media cloud account, with server picker)
+- Select specific libraries to display
+- Continue Watching, Next Up and Resume Playback
+- Autoplay next episode in a season (optional, off by default)
+- Intro/Credit skip using the server's chapter markers (when detected)
+- Collections support
+- Select preferred audio/subtitle track before playback and switch tracks during playback
+- Full library browsing by letter
+- Show/Season browsing
+- Video quality selection: Direct Playback (Default) or Transcode options
+
 ### YouTube Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube))
 - Designed for CRT navigation (simple, fast, list browsing)
 - Built to list content from YouTube RSS feeds and playback via mpv + yt-dl (no auth required)
@@ -92,6 +106,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 ## Install
 - [On a Raspberry Pi](INSTALL.md#on-a-raspberry-pi)
 - [On macOS (ARM)](INSTALL.md#on-macos-arm)
+- [On a Steam Deck / Linux x86_64](INSTALL.md#on-a-steam-deck--linux-x86_64) (self-contained AppImage)
 
 ## Hardware Testing
 - [Raspberry Pi 3B](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#raspberry-pi-3b)

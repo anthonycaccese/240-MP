@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QHash>
 #include <QPair>
+#include <QSet>
 #include <QDateTime>
 #include <QVariantMap>
 #include <QFileSystemWatcher>
@@ -103,6 +104,7 @@ private:
     static QString evdevKeyName(int linuxCode);
     static QString mouseButtonName(int qtButton);
     void noteActiveController(SDL_JoystickID which);
+    void recomputeSuppressedDevices();
     void handleButton(SDL_JoystickID which, Uint8 button, bool pressed);
     void handleAxis(SDL_JoystickID which, Uint8 axis, Sint16 value);
     void pressAction(Action a);
@@ -142,6 +144,17 @@ private:
     QHash<int, Action> m_keyRemap;                   // Qt::Key or extended evdev id → Action
     SDL_JoystickID m_lastActiveController = -1;      // labels follow the pad last touched
     Action m_heldDirection = Action::None;
+
+    // Steam Input mirror de-dup: it presents a managed "Steam Virtual Gamepad"
+    // plus the raw controllers it mirrors (the Deck's built-in pad, etc.); the
+    // raw device echoes each press ~0.5s later → double/late input. The virtual
+    // pad is the low-latency one (and what Gaming Mode uses), so when it's
+    // present we suppress the rest. Recomputed on connect/disconnect.
+    QSet<SDL_JoystickID> m_suppressedDevices;
+
+    // Actions currently held down — idempotent press/release hygiene (a device
+    // can't re-fire a press it's already holding).
+    QSet<Action> m_heldActions;
     bool m_remapCapture = false;                     // see setRemapCapture()
 
 #ifdef Q_OS_LINUX

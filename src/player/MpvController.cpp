@@ -1,7 +1,10 @@
 #include "MpvController.h"
 #include "../AppCore.h"
+#include "../util/YtDlpLocator.h"
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -43,10 +46,12 @@ static QString writeFontconfigOverride(const QString &fontsDir) {
 }
 #endif
 
-MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *parent)
+MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
+                             AppCore *appCore, QObject *parent)
     : QObject(parent)
     , m_appCore(appCore)
     , m_appRoot(appRoot)
+    , m_dataRoot(dataRoot)
     , m_socketPath(QDir::tempPath() + "/240mp-mpv.sock")
     , m_inputConfPath(QDir::tempPath() + "/240mp-input.conf")
     , m_logFilePath(QDir::tempPath() + "/240mp-mpv.log")
@@ -152,9 +157,18 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         }
     }
 #endif
-    const QString bin = QStandardPaths::findExecutable("mpv");
+    // Prefer an mpv bundled next to our own binary — inside the Linux AppImage,
+    // usr/bin/mpv sits beside usr/bin/240mp, and linuxdeploy's AppRun does not
+    // add usr/bin to PATH, so findExecutable() alone would miss it. Fall back to
+    // PATH for system installs (brew on macOS, apt on the Pi).
+    QString bin;
+    const QString siblingMpv = QCoreApplication::applicationDirPath() + "/mpv";
+    if (QFileInfo(siblingMpv).isExecutable())
+        bin = siblingMpv;
+    else
+        bin = QStandardPaths::findExecutable("mpv");
     if (bin.isEmpty()) {
-        qWarning("[MpvController] mpv not found in PATH");
+        qWarning("[MpvController] mpv not found (no bundled sibling, none on PATH)");
         QTimer::singleShot(0, this, [this]() {
             emit playbackEnded(0, 0, QStringLiteral("stopped"));
         });
@@ -251,6 +265,15 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (!subLangs.isEmpty())
         args << QString("--slang=%1").arg(subLangs.join(QStringLiteral(",")));
 
+    // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
+    // playback with spurious 401/400 errors — disabled unless the caller
+    // explicitly opts in via extraArgs (e.g. YouTube passes --ytdl=yes).
+    bool ytdlEnabled = false;
+    for (const QString &a : extraArgs) {
+        if (a == QLatin1String("--ytdl") || a.startsWith(QLatin1String("--ytdl=")))
+            ytdlEnabled = true;
+    }
+
     QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
@@ -281,6 +304,17 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             scriptOpts << QString("subinfo-file=%1").arg(m_subInfoPath);
         }
     }
+    // Point mpv's ytdl_hook at the same user-updatable yt-dlp the app resolves,
+    // so both agree on one copy even when it isn't on the global PATH (the
+    // SteamOS story). Merged into the single --script-opts below — a second
+    // --script-opts flag would replace, not append, clobbering the entries above.
+    // The comma guard mirrors the subinfo-file constraint (a path with a comma
+    // would break the join); realistically never hit.
+    if (ytdlEnabled) {
+        const QString ytdlPath = ytdlp::locate(m_dataRoot);
+        if (!ytdlPath.isEmpty() && !ytdlPath.contains(QLatin1Char(',')))
+            scriptOpts << QString("ytdl_hook-ytdl_path=%1").arg(ytdlPath);
+    }
     if (!scriptOpts.isEmpty())
         args << QString("--script-opts=%1").arg(scriptOpts.join(QStringLiteral(",")));
 
@@ -295,15 +329,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--image-display-duration=%1").arg(double(imageDurationSec), 0, 'f', 1);
     if (muteAudio)
         args << QStringLiteral("--no-audio");
-    // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
-    // playback with spurious 401/400 errors — disabled unless the caller
-    // explicitly opts in via extraArgs (e.g. YouTube passes --ytdl=yes).
-    bool ytdlOverridden = false;
-    for (const QString &a : extraArgs) {
-        if (a == QLatin1String("--ytdl") || a.startsWith(QLatin1String("--ytdl=")))
-            ytdlOverridden = true;
-    }
-    if (!ytdlOverridden)
+    // See ytdlEnabled above: default the hook off unless the caller opted in.
+    if (!ytdlEnabled)
         args << QStringLiteral("--ytdl=no");
     args << extraArgs;
     if (!plexToken.isEmpty()) {
@@ -401,13 +428,19 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         m_connectTimer->start();
     } else {
         // Desktop: X11 or Wayland compositor present.
-        // Remove WAYLAND_DISPLAY so mpv uses X11/Xwayland — the Wayland VO
-        // stalls waiting for wl_surface frame-done callbacks from labwc.
+        // Prefer X11/Xwayland for mpv — the Wayland VO stalls waiting for
+        // wl_surface frame-done callbacks from labwc (the Pi compositor). But
+        // only strip WAYLAND_DISPLAY when there is a DISPLAY to fall back to:
+        // on a pure-Wayland session with no Xwayland DISPLAY exported to us
+        // (e.g. the Steam Deck's KDE session launched from the file manager),
+        // removing it would leave mpv with no output at all and it exits
+        // instantly. In that case keep Wayland so mpv can open a window.
         // --no-native-fs avoids macOS Space-transition delays that can
         // prevent early OSD renders from appearing.
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("APP_ROOT", m_appRoot);
-        env.remove("WAYLAND_DISPLAY");
+        if (!qEnvironmentVariable("DISPLAY").trimmed().isEmpty())
+            env.remove("WAYLAND_DISPLAY");
 #ifdef Q_OS_LINUX
         const QString fcConf = writeFontconfigOverride(m_appRoot + "/assets/fonts");
         if (!fcConf.isEmpty())
@@ -691,11 +724,19 @@ void MpvController::appendVideoArgs(QStringList &args) const {
             args << "--vo=drm" << "--hwdec=auto-safe";
         }
     } else {
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS)
         // Apple Silicon: enable VideoToolbox HW decode (mpv's default is none).
         args << "--hwdec=videotoolbox";
+#elif defined(Q_OS_LINUX)
+        // Desktop compositor (SteamDeck gamescope / KDE, x86_64 Intel/AMD): mpv
+        // sets no hwdec by default, so decode falls back to software. auto-safe
+        // lets mpv pick VA-API on the AMD APU / Intel/AMD GPUs while skipping
+        // decoders with known correctness issues. Degrades gracefully to software
+        // when no HW decoder is present (e.g. an RPi desktop dev run). Fully
+        // overridable via the mpv_video_args setting handled above.
+        args << "--hwdec=auto-safe";
 #endif
-        // Other desktop (X11/Wayland dev): leave mpv's defaults untouched.
+        // Any other desktop: leave mpv's defaults untouched.
     }
 }
 

@@ -14,6 +14,7 @@
 #include "modules/local_files/LocalFilesBackend.h"
 #include "modules/plex/PlexBackend.h"
 #include "modules/jellyfin/JellyfinBackend.h"
+#include "modules/emby/EmbyBackend.h"
 #include "modules/ambient_mode/AmbientModeBackend.h"
 #include "modules/nfc_reader/NfcReaderBackend.h"
 #include "modules/youtube/YouTubeBackend.h"
@@ -57,11 +58,11 @@ int main(int argc, char *argv[]) {
     app.setApplicationName("240-MP");
     app.setApplicationVersion(QStringLiteral(APP_VERSION));
 
-    // Hide cursor — 240-MP is keyboard-only so the cursor serves no purpose.
-    // On Linux, only hide on headless EGLFS (not desktop X11/Wayland sessions).
+    // Hide cursor — 240-MP is keyboard/gamepad-only so the cursor serves no
+    // purpose. Hidden on all of Linux: headless EGLFS and desktop compositors
+    // (Steam Deck / RPi desktop) alike, since the app runs fullscreen kiosk-style.
 #ifdef Q_OS_LINUX
-    if (qgetenv("DISPLAY").isEmpty() && qgetenv("WAYLAND_DISPLAY").isEmpty())
-        QGuiApplication::setOverrideCursor(Qt::BlankCursor);
+    QGuiApplication::setOverrideCursor(Qt::BlankCursor);
 #endif
 #ifdef Q_OS_MAC
     QGuiApplication::setOverrideCursor(Qt::BlankCursor);
@@ -84,10 +85,11 @@ int main(int argc, char *argv[]) {
     LocalFilesBackend   localFiles(appRoot, dataRoot);
     PlexBackend         plexBackend(appRoot, dataRoot);
     JellyfinBackend     jellyfinBackend(appRoot, dataRoot);
+    EmbyBackend         embyBackend(appRoot, dataRoot);
     AmbientModeBackend  ambientMode(dataRoot);
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
-    MpvController       mpvController(appRoot, &appCore);
+    MpvController       mpvController(appRoot, dataRoot, &appCore);
     InputManager        inputManager(dataRoot, &appCore);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
     UpdateManager       updateManager(appRoot, dataRoot);
@@ -104,6 +106,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.local_files",  "localFilesBackend",  &localFiles,  ctx);
     appCore.registerModule("com.240mp.plex",         "plexBackend",        &plexBackend, ctx);
     appCore.registerModule("com.240mp.jellyfin",     "jellyfinBackend",    &jellyfinBackend, ctx);
+    appCore.registerModule("com.240mp.emby",         "embyBackend",        &embyBackend, ctx);
     appCore.registerModule("com.240mp.ambient_mode", "ambientModeBackend", &ambientMode, ctx);
     appCore.registerModule("com.240mp.nfc_reader",   "nfcReaderBackend",   &nfcReader,   ctx);
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);

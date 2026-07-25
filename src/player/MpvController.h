@@ -30,8 +30,8 @@ class MpvController : public QObject {
     Q_PROPERTY(int playlistPos READ playlistPos NOTIFY playlistPosChanged)
 
 public:
-    explicit MpvController(const QString &appRoot, AppCore *appCore = nullptr,
-                           QObject *parent = nullptr);
+    explicit MpvController(const QString &appRoot, const QString &dataRoot,
+                           AppCore *appCore = nullptr, QObject *parent = nullptr);
     ~MpvController() override;
 
     int position()    const { return m_position;    }
@@ -127,6 +127,7 @@ private:
     qint64        m_lastIpcEventMs = 0;
     bool          m_paused         = false;  // mirrors mpv's pause property (watchdog exemption)
     QString       m_appRoot;
+    QString       m_dataRoot;
     QString       m_socketPath;
     QString       m_inputConfPath;
     QString       m_logFilePath;
