@@ -533,6 +533,8 @@ void MpvController::onIpcReadyRead() {
                     const QString msg = args[0].toString();
                     if (msg == "skip-segment")
                         emit skipRequested();
+                    else if (msg == "cycle-sub")
+                        emit subtitleCycleRequested();
                 }
             }
             continue;
