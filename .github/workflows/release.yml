@@ -303,7 +303,8 @@ jobs:
         uses: actions/upload-artifact@v4.6.2
         with:
           name: appimage-linux-x86_64
-          path: "240-MP-*-linux-x86_64.AppImage"
+          # Version-less on purpose — the AppImage self-updates in place.
+          path: "240-MP-linux-x86_64.AppImage"
           if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────────────
@@ -351,7 +352,9 @@ jobs:
             Install:
             - Raspberry Pi OS Trixie (arm64): Please follow [these instructions](INSTALL.md#on-a-raspberry-pi)
             - macOS (Apple Silicon): Download the `.dmg`, open and move 240mp.app to your applications folder
+            - Steam Deck / Linux (x86_64): Download `240-MP-linux-x86_64.AppImage`, make it executable (`chmod +x`), and run it. See [these instructions](INSTALL.md#on-a-steam-deck--linux-x86_64)
 
             Update:
             - Raspberry Pi OS Trixie (arm64): Use the in-app updater or follow [these instructions](INSTALL.md#update)
             - macOS (Apple Silicon): Use the in-app updater or download the `.dmg`, open and move 240mp.app to your applications folder
+            - Steam Deck / Linux (x86_64): Use the in-app updater (it swaps the AppImage in place) or download the latest `240-MP-linux-x86_64.AppImage` and replace your copy

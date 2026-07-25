@@ -15,7 +15,7 @@
 # Env overrides (all optional):
 #   BUILD_DIR      cmake build tree                     (default: build)
 #   APPDIR         staging AppDir                        (default: AppDir)
-#   VERSION        version string in the output name     (default: git describe)
+#   VERSION        version baked into the app (APP_VERSION) (default: git describe)
 #   MPV_BIN        mpv to bundle                          (default: $(command -v mpv))
 #   QMAKE          qmake for linuxdeploy-plugin-qt        (default: auto-detect)
 #   CMAKE_PREFIX_PATH  passed through to cmake --configure (find Qt)
@@ -33,7 +33,13 @@ BUILD_DIR="${BUILD_DIR:-build}"
 APPDIR="${APPDIR:-AppDir}"
 TOOLS_DIR="${TOOLS_DIR:-$SRC_ROOT/.appimage-tools}"
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}"
-OUTPUT="240-MP-${VERSION}-linux-x86_64.AppImage"
+# Deliberately version-less: the AppImage self-updates in place (swaps over
+# $APPIMAGE), so a version in the filename would drift from the actual app
+# version after the first update and could break the Steam/.desktop shortcut
+# path. The real version is baked in (APP_VERSION) and shown in-app; the release
+# tag records it on GitHub. (dmg/tarball keep their version — they're installers,
+# not the installed-in-place runtime.)
+OUTPUT="240-MP-linux-x86_64.AppImage"
 
 CONFIGURE=0
 [ "${1:-}" = "--configure" ] && CONFIGURE=1

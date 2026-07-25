@@ -205,15 +205,15 @@ Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qm
 CMAKE_PREFIX_PATH=/path/to/Qt/6.7.x/gcc_64 scripts/build-appimage.sh --configure
 ```
 
-This produces `240-MP-<version>-linux-x86_64.AppImage` in the repo root. On first run the script downloads `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` into `.appimage-tools/` (cached). Drop `--configure` if you have already built into `build/` yourself.
+This produces `240-MP-linux-x86_64.AppImage` in the repo root. On first run the script downloads `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` into `.appimage-tools/` (cached). Drop `--configure` if you have already built into `build/` yourself.
 
 The script installs into an `AppDir` using the FHS layout (`usr/bin/240mp`, `usr/share/240mp`), bundles a copy of `mpv`, deploys Qt, then prunes host-provided GPU/driver libraries (VA-API, GL, libdrm, Wayland…) so the target's own drivers are used.
 
 ### Run
 
 ```bash
-chmod +x 240-MP-<version>-linux-x86_64.AppImage
-./240-MP-<version>-linux-x86_64.AppImage
+chmod +x 240-MP-linux-x86_64.AppImage
+./240-MP-linux-x86_64.AppImage
 ```
 
 Configuration lives at `~/.local/share/240-MP/` (same as the Pi). See [INSTALL.md](INSTALL.md) for the Steam Deck end-user flow (Desktop Mode + adding it to Steam for Gaming Mode).
@@ -367,7 +367,7 @@ These build jobs run in parallel:
 |---|---|---|
 | `build-macos-arm64` | `macos-15` (Apple Silicon) | `240-MP-<tag>-macOS-arm64.dmg` |
 | `build-linux-arm64` | `ubuntu-24.04-arm` (native arm64) | `240-MP-<tag>-linux-arm64.tar.gz` |
-| `build-linux-x86_64` | `ubuntu-24.04` | `240-MP-<tag>-linux-x86_64.AppImage` |
+| `build-linux-x86_64` | `ubuntu-24.04` | `240-MP-linux-x86_64.AppImage` (version-less — self-updates in place) |
 
 macOS job: installs Qt via the Qt CDN, builds, runs `macdeployqt` to embed Qt frameworks (including `libSDL2.dylib`), ad-hoc codesign, package as `.dmg`. mpv is not bundled — users install it via `brew install mpv`.
 

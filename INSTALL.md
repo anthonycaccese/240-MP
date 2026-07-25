@@ -288,7 +288,7 @@ For the **Steam Deck** and other Intel/AMD Linux machines, 240-MP ships as an **
 ### Steps (Steam Deck)
 
 1. Switch to **Desktop Mode** (hold the power button → *Switch to Desktop*).
-2. Download `240-MP-<version>-linux-x86_64.AppImage` from the [latest release](https://github.com/anthonycaccese/240-mp/releases/latest).
+2. Download `240-MP-linux-x86_64.AppImage` from the [latest release](https://github.com/anthonycaccese/240-mp/releases/latest).
 3. In the file manager (Dolphin), right-click the file → **Properties → Permissions** → tick *Is executable* (or run `chmod +x` on it in Konsole).
 4. Double-click to launch. The Local Files module is enabled by default; open Settings to enable others (see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki).
 
