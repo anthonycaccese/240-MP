@@ -382,12 +382,22 @@ FocusScope {
     function doStartPlayback(offsetMs) {
         var jfToken = jellyfinBackend.get_access_token()
         if (isTranscoding) {
-            // HLS manifest bakes in the selected audio, and the chosen subtitle is
-            // burned into the video — so there's no soft sub track for mpv to pick
-            // (subTrack -2 = --sid=no, a no-op when nothing soft exists).
+            // Find the human-readable name of the selected subtitle track
+            var subName = "Off"
+            if (subtitleIdx >= 0 && subtitleStreams && subtitleStreams[subtitleIdx]) {
+                var s = subtitleStreams[subtitleIdx]
+                subName = s.displayTitle || s.title || s.language || "Unknown"
+            }
+            
+            // Replace spaces with underscores for command-line safety
+            subName = subName.replace(/ /g, "_")
+            
+            // Inject it as a custom script option
+            var extra = ["--script-opts=transcode_sub=" + subName]
+
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
                                        -1, -2, [], [], false, -1, 0.0, "",
-                                       false, "", false, [], 0.0, false, [], jfToken)
+                                       false, "", false, [], 0.0, false, extra, jfToken)
         } else {
             // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
             // --aid; subtitles come from buildSubArgs (sidecars + --sid).
@@ -530,6 +540,25 @@ FocusScope {
                 // end naturally. Nulling it before the seek completes causes a
                 // position update at the old location to re-detect the same
                 // segment as "new" and re-trigger the prompt.
+            } else if (streamUrl.indexOf(".m3u8") >= 0 && subtitleStreams && subtitleStreams.length > 0) {
+                subtitleIdx++
+                if (subtitleIdx >= subtitleStreams.length) subtitleIdx = -1
+
+                selectedSubtitleId = subtitleIdx >= 0 ? subtitleStreams[subtitleIdx].id : ""
+
+                // Save the current timestamp so we can resume smoothly
+                lastKnownPositionMs = mpvController.position
+                pendingRetryTranscode = true
+                stoppedReported = false
+
+                var aIdx = selectedAudioId ? parseInt(selectedAudioId) : -1
+                var sIdx = selectedSubtitleId ? parseInt(selectedSubtitleId) : -1
+                
+                // Explicitly stop mpv before requesting the new stream
+                mpvController.stop()
+                
+                // Request a new transcode from the server with the new SubtitleStreamIndex
+                jellyfinBackend.get_playback_url(itemId, mediaSourceId, aIdx, sIdx, true)
             }
         }
 

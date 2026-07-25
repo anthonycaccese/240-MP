@@ -52,6 +52,18 @@ local function get_audio_str()
 end
 
 local function get_sub_str()
+    -- 1. Check for QML-injected transcode subtitle name first
+    local transcode_sub = mp.get_opt("transcode_sub")
+    if transcode_sub and transcode_sub ~= "" then
+        if transcode_sub == "Off" then
+            return "(NONE)"
+        else
+            -- Convert underscores back to spaces and match the UI's uppercase style
+            return transcode_sub:gsub("_", " "):upper()
+        end
+    end
+
+    -- 2. Standard mpv track logic for direct play
     local id = mp.get_property_number("current-tracks/sub/id", 0)
     if id == 0 then return "(NONE)" end
     -- External sidecar with an app-provided friendly name (e.g. Jellyfin): use it
@@ -72,17 +84,32 @@ end
 
 local btn_actions = {
     function() mp.command("no-osd cycle audio") end,
-    function() mp.command("no-osd cycle sub") end,
+    function()
+        local path = mp.get_property("path", "")
+        if path and path:find("%.m3u8") then
+            -- Hijack the exact signal the C++ wrapper allows through
+            mp.commandv("script-message", "skip-segment")
+        else
+            mp.command("no-osd cycle sub")
+        end
+    end,
     function() mp.command("no-osd cycle-values panscan 0 1") end,
-    function() mp.command("quit") end,
-    function() mp.command("playlist-prev") end,
-    function() mp.command("playlist-next") end,
+    function() mp.command("quit") end
 }
 
 local function has_subtitle_tracks()
-    local tracks = mp.get_property_native("track-list", {})
-    for _, t in ipairs(tracks) do
-        if t.type == "sub" then return true end
+    -- Always show the button for transcoded HLS streams
+    local path = mp.get_property("path", "")
+    if path and path:find("%.m3u8") then
+        return true
+    end
+    
+    -- Fall back to checking standard tracks for direct play
+    local count = mp.get_property_number("track-list/count", 0)
+    for i = 0, count - 1 do
+        if mp.get_property("track-list/"..i.."/type") == "sub" then
+            return true
+        end
     end
     return false
 end
