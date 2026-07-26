@@ -1,0 +1,28 @@
+{
+  "id": "com.240mp.weather",
+  "name": "WEATHER",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "units",
+      "label": "Units",
+      "type": "list_single",
+      "options": ["Metric", "US"],
+      "default": "Metric"
+    },
+    {
+      "key": "hours_format",
+      "label": "Hours Format",
+      "type": "list_single",
+      "options": ["24-hour", "12-hour"],
+      "default": "24-hour"
+    }
+  ]
+}

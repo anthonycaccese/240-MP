@@ -1,0 +1,404 @@
+#include "WeatherBackend.h"
+
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QTimer>
+#include <QUrl>
+#include <QUrlQuery>
+#include <QHash>
+#include <QtMath>
+#include <QDebug>
+
+namespace {
+
+const char *kModuleId   = "com.240mp.weather";
+const char *kForecastUrl = "https://api.open-meteo.com/v1/forecast";
+const char *kGeocodeUrl  = "https://geocoding-api.open-meteo.com/v1/search";
+
+// Open-Meteo publishes data roughly every 15 minutes.
+constexpr int kRefreshMs = 10 * 60 * 1000;
+
+// WMO 4677 weather interpretation codes, as short uppercase strings.
+//
+// Note these merge two things a METAR keeps separate: sky condition (CLEAR,
+// OVERCAST) and present weather (RAIN, FOG, THUNDERSTORM). One code, so one
+// condition line — which is what the WeatherStar layout wants anyway.
+QString conditionForCode(int code) {
+    switch (code) {
+    case 0:  return QStringLiteral("CLEAR");
+    case 1:  return QStringLiteral("MAINLY CLEAR");
+    case 2:  return QStringLiteral("PARTLY CLOUDY");
+    case 3:  return QStringLiteral("OVERCAST");
+    case 45: case 48:            return QStringLiteral("FOG");
+    case 51: case 53: case 55:   return QStringLiteral("DRIZZLE");
+    case 56: case 57:            return QStringLiteral("FREEZING DRIZZLE");
+    case 61: case 63: case 65:   return QStringLiteral("RAIN");
+    case 66: case 67:            return QStringLiteral("FREEZING RAIN");
+    case 71: case 73: case 75:   return QStringLiteral("SNOW");
+    case 77:                     return QStringLiteral("SNOW GRAINS");
+    case 80: case 81: case 82:   return QStringLiteral("SHOWERS");
+    case 85: case 86:            return QStringLiteral("SNOW SHOWERS");
+    case 95:                     return QStringLiteral("THUNDERSTORM");
+    case 96: case 99:            return QStringLiteral("THUNDERSTORM HAIL");
+    default: break;
+    }
+    return QStringLiteral("UNKNOWN");
+}
+
+// ── Location disambiguation ──────────────────────────────────────────────────
+//
+// Open-Meteo's geocoder has no country/region filter (countryCode, country_code
+// and country are all silently ignored) and orders purely by population. So
+// "Caldwell, NJ, USA" returns Caldwell **Idaho** first, and picking the first
+// result shows confidently wrong weather with no error anywhere — the worst
+// failure this module can have. Everything below exists to prevent that.
+//
+// Results carry: name, admin1 (region, spelled out), country, country_code,
+// population. A qualifier is matched against those in several ways because
+// people write locations in several ways.
+
+// Aliases people actually type for countries whose ISO code isn't obvious.
+QString countryAlias(const QString &q) {
+    static const QHash<QString, QString> kAliases = {
+        { "USA", "US" }, { "U.S.A.", "US" }, { "U.S.", "US" }, { "AMERICA", "US" },
+        { "UNITED STATES OF AMERICA", "US" },
+        { "UK", "GB" }, { "BRITAIN", "GB" }, { "GREAT BRITAIN", "GB" },
+        { "ENGLAND", "GB" }, { "SCOTLAND", "GB" }, { "WALES", "GB" },
+        { "HOLLAND", "NL" }, { "UAE", "AE" }, { "SOUTH KOREA", "KR" },
+    };
+    return kAliases.value(q.toUpper());
+}
+
+// US states and DC. Needed because "City, ST" is the dominant way Americans
+// write a location, and the abbreviations aren't derivable from the spelled-out
+// name the API returns (TX from Texas, CA from California…).
+QString expandUsState(const QString &q) {
+    static const QHash<QString, QString> kStates = {
+        {"AL","Alabama"},{"AK","Alaska"},{"AZ","Arizona"},{"AR","Arkansas"},
+        {"CA","California"},{"CO","Colorado"},{"CT","Connecticut"},{"DE","Delaware"},
+        {"DC","District of Columbia"},{"FL","Florida"},{"GA","Georgia"},{"HI","Hawaii"},
+        {"ID","Idaho"},{"IL","Illinois"},{"IN","Indiana"},{"IA","Iowa"},
+        {"KS","Kansas"},{"KY","Kentucky"},{"LA","Louisiana"},{"ME","Maine"},
+        {"MD","Maryland"},{"MA","Massachusetts"},{"MI","Michigan"},{"MN","Minnesota"},
+        {"MS","Mississippi"},{"MO","Missouri"},{"MT","Montana"},{"NE","Nebraska"},
+        {"NV","Nevada"},{"NH","New Hampshire"},{"NJ","New Jersey"},{"NM","New Mexico"},
+        {"NY","New York"},{"NC","North Carolina"},{"ND","North Dakota"},{"OH","Ohio"},
+        {"OK","Oklahoma"},{"OR","Oregon"},{"PA","Pennsylvania"},{"RI","Rhode Island"},
+        {"SC","South Carolina"},{"SD","South Dakota"},{"TN","Tennessee"},{"TX","Texas"},
+        {"UT","Utah"},{"VT","Vermont"},{"VA","Virginia"},{"WA","Washington"},
+        {"WV","West Virginia"},{"WI","Wisconsin"},{"WY","Wyoming"},
+    };
+    return kStates.value(q.toUpper());
+}
+
+// "New South Wales" -> "NSW". Free generalisation that covers multi-word regions
+// worldwide (BC, NSW, NT…) without another table.
+QString initialsOf(const QString &s) {
+    QString out;
+    const QStringList words = s.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    for (const QString &w : words)
+        if (!w.isEmpty()) out += w.at(0).toUpper();
+    return out;
+}
+
+bool qualifierMatches(const QJsonObject &r, const QString &qualifier) {
+    const QString q       = qualifier.trimmed();
+    if (q.isEmpty()) return true;
+    const QString admin1  = r["admin1"].toString();
+    const QString country = r["country"].toString();
+    const QString code    = r["country_code"].toString();
+
+    if (code.compare(q, Qt::CaseInsensitive) == 0)                       return true;
+    if (countryAlias(q).compare(code, Qt::CaseInsensitive) == 0)         return true;
+    if (admin1.compare(q, Qt::CaseInsensitive) == 0)                     return true;
+    if (country.compare(q, Qt::CaseInsensitive) == 0)                    return true;
+    if (expandUsState(q).compare(admin1, Qt::CaseInsensitive) == 0
+            && !admin1.isEmpty())                                        return true;
+    if (!admin1.isEmpty() && initialsOf(admin1).compare(q, Qt::CaseInsensitive) == 0)
+                                                                         return true;
+    // Substring only for longer qualifiers: the API returns "The Netherlands",
+    // so an exact test fails for "Amsterdam, Netherlands" — but a substring test
+    // on a 2-letter code would match "Paris, US" against "Australia".
+    if (q.size() >= 4 && (admin1.contains(q, Qt::CaseInsensitive)
+                          || country.contains(q, Qt::CaseInsensitive)))  return true;
+    return false;
+}
+
+// 16-point compass, matching how the original displayed wind.
+QString cardinal(double degrees) {
+    static const char *points[] = {
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+        "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"
+    };
+    int idx = int(qRound(degrees / 22.5)) % 16;
+    if (idx < 0) idx += 16;
+    return QString::fromLatin1(points[idx]);
+}
+
+} // namespace
+
+WeatherBackend::WeatherBackend(const QString &appRoot, const QString &dataRoot,
+                               QObject *parent)
+    : QObject(parent)
+    , m_appRoot(appRoot)
+    , m_dataRoot(dataRoot)
+    , m_nam(new QNetworkAccessManager(this))
+    , m_refresh(new QTimer(this)) {
+    m_refresh->setInterval(kRefreshMs);
+    connect(m_refresh, &QTimer::timeout, this, [this]() { fetchWeather(); });
+}
+
+QString WeatherBackend::location_file_path() const {
+    return m_dataRoot + QStringLiteral("/weather_location.txt");
+}
+
+QJsonObject WeatherBackend::loadConfig() const {
+    QFile f(m_dataRoot + QStringLiteral("/config.json"));
+    if (f.open(QIODevice::ReadOnly)) {
+        QJsonParseError err;
+        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject())
+            return doc.object();
+    }
+    return {};
+}
+
+QJsonObject WeatherBackend::moduleConfig() const {
+    return loadConfig()["modules"].toObject()[kModuleId].toObject();
+}
+
+bool WeatherBackend::useUsUnits() const {
+    return moduleConfig()["units"].toString(QStringLiteral("Metric"))
+               .compare(QLatin1String("US"), Qt::CaseInsensitive) == 0;
+}
+
+void WeatherBackend::onSettingChanged(const QString &moduleId, const QString &key,
+                                      const QVariant &value) {
+    Q_UNUSED(value)
+    if (moduleId != QLatin1String(kModuleId)) return;
+    // Units change the requested values, not just their presentation, so a
+    // switch has to re-fetch rather than reformat.
+    if (key == QLatin1String("units") && m_resolved)
+        fetchWeather();
+}
+
+void WeatherBackend::emitError(const QString &reason) {
+    QTimer::singleShot(0, this, [this, reason]() { emit locationError(reason); });
+}
+
+// ── Lifecycle ────────────────────────────────────────────────────────────────
+
+void WeatherBackend::start() {
+    if (m_resolved) {
+        fetchWeather();
+        m_refresh->start();
+        return;
+    }
+    resolveLocation();
+}
+
+void WeatherBackend::stop() {
+    m_refresh->stop();
+}
+
+// ── Location ─────────────────────────────────────────────────────────────────
+
+void WeatherBackend::resolveLocation() {
+    QFile f(location_file_path());
+    if (!f.exists())                                      { emitError(QStringLiteral("missing"));    return; }
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))   { emitError(QStringLiteral("unreadable")); return; }
+
+    // First non-empty, non-comment line wins. '#' comments exist so the file we
+    // tell users to create can document its own format.
+    QString line;
+    while (!f.atEnd()) {
+        const QString candidate = QString::fromUtf8(f.readLine()).trimmed();
+        if (candidate.isEmpty() || candidate.startsWith(QLatin1Char('#'))) continue;
+        line = candidate;
+        break;
+    }
+    if (line.isEmpty()) { emitError(QStringLiteral("empty")); return; }
+
+    // Explicit coordinates, checked before geocoding so someone who knows
+    // exactly where they want the forecast never depends on a name lookup. This
+    // is the reliable escape hatch when a place name is ambiguous.
+    //
+    //     40.8398, -74.2765            -> labelled with the coordinates
+    //     40.8398, -74.2765, CALDWELL  -> labelled "CALDWELL"
+    //
+    // The optional third segment exists because there is no way to recover a
+    // name from coordinates: Open-Meteo's geocoder is forward-only (it returns
+    // an error for lat/lon), and the forecast response carries only a timezone
+    // — "America/New_York" would label a New Jersey town "NEW YORK", which is
+    // worse than showing the numbers. A real reverse geocoder means a
+    // third-party service with its own usage policy, so the user names it.
+    const QStringList parts = line.split(QLatin1Char(','));
+    if (parts.size() >= 2) {
+        bool okLat = false, okLon = false;
+        const double lat = parts.at(0).trimmed().toDouble(&okLat);
+        const double lon = parts.at(1).trimmed().toDouble(&okLon);
+        if (okLat && okLon && lat >= -90.0 && lat <= 90.0
+                           && lon >= -180.0 && lon <= 180.0) {
+            const QString label = parts.mid(2).join(QLatin1Char(',')).trimmed();
+            m_locationName = label.isEmpty()
+                ? QStringLiteral("%1, %2").arg(lat, 0, 'f', 4).arg(lon, 0, 'f', 4)
+                : label.toUpper();
+            m_lat = lat;
+            m_lon = lon;
+            m_resolved = true;
+            m_resolvedFrom = line;
+            qInfo("[Weather] using explicit coordinates -> %s (%.4f, %.4f)",
+                  qPrintable(m_locationName), m_lat, m_lon);
+            fetchWeather();
+            m_refresh->start();
+            return;
+        }
+    }
+
+    geocode(line);
+}
+
+void WeatherBackend::geocode(const QString &rawLine) {
+    // Open-Meteo's geocoder matches a bare place name, so send only the part
+    // before the first comma. Anything after it disambiguates the results, which
+    // matters for a worldwide userbase — "Paris, France" and "Paris, Texas" are
+    // both reasonable inputs.
+    const QStringList segments = rawLine.split(QLatin1Char(','));
+    const QString name = segments.first().trimmed();
+    // Every segment after the name is a qualifier — "Caldwell, NJ, USA" has two,
+    // and both matter. Using only the first one is what let Idaho win.
+    QStringList qualifiers;
+    for (int i = 1; i < segments.size(); ++i) {
+        const QString q = segments.at(i).trimmed();
+        if (!q.isEmpty()) qualifiers << q;
+    }
+
+    QUrl url(QString::fromLatin1(kGeocodeUrl));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("name"),     name);
+    q.addQueryItem(QStringLiteral("count"),    QStringLiteral("10"));
+    q.addQueryItem(QStringLiteral("language"), QStringLiteral("en"));
+    q.addQueryItem(QStringLiteral("format"),   QStringLiteral("json"));
+    url.setQuery(q);
+
+    QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, rawLine, name, qualifiers]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning("[Weather] geocode failed: %s", qPrintable(reply->errorString()));
+            emitError(QStringLiteral("network"));
+            return;
+        }
+        const QJsonArray results =
+            QJsonDocument::fromJson(reply->readAll()).object()["results"].toArray();
+        if (results.isEmpty()) { emitError(QStringLiteral("notfound")); return; }
+
+        // Score every result against every qualifier and take the best. Results
+        // arrive ordered by population, so a plain first-match would always pick
+        // the biggest city of that name regardless of the state or country the
+        // user asked for.
+        QJsonObject chosen = results.first().toObject();
+        if (!qualifiers.isEmpty()) {
+            int bestScore = -1;
+            for (const QJsonValue &v : results) {
+                const QJsonObject o = v.toObject();
+                int score = 0;
+                for (const QString &q : qualifiers)
+                    if (qualifierMatches(o, q)) ++score;
+                // Strictly greater keeps the population ordering as the
+                // tie-break, which is the right default among equal matches.
+                if (score > bestScore) { bestScore = score; chosen = o; }
+            }
+            if (bestScore == 0) {
+                qWarning("[Weather] no result matched any qualifier in \"%s\" — "
+                         "falling back to the most populous match",
+                         qPrintable(rawLine));
+            } else if (bestScore < qualifiers.size()) {
+                qWarning("[Weather] only %d of %lld qualifiers matched for \"%s\"",
+                         bestScore, qualifiers.size(), qPrintable(rawLine));
+            }
+        }
+
+        m_locationName = chosen["name"].toString(name).toUpper();
+        m_lat = chosen["latitude"].toDouble();
+        m_lon = chosen["longitude"].toDouble();
+        m_resolved = true;
+        m_resolvedFrom = rawLine;
+        qInfo("[Weather] resolved \"%s\" -> %s, %s, %s (%.4f, %.4f)",
+              qPrintable(rawLine), qPrintable(m_locationName),
+              qPrintable(chosen["admin1"].toString()),
+              qPrintable(chosen["country_code"].toString()), m_lat, m_lon);
+
+        fetchWeather();
+        m_refresh->start();
+    });
+}
+
+// ── Weather ──────────────────────────────────────────────────────────────────
+
+void WeatherBackend::fetchWeather() {
+    if (!m_resolved) return;
+    const bool us = useUsUnits();
+
+    QUrl url(QString::fromLatin1(kForecastUrl));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("latitude"),  QString::number(m_lat, 'f', 4));
+    q.addQueryItem(QStringLiteral("longitude"), QString::number(m_lon, 'f', 4));
+    q.addQueryItem(QStringLiteral("current"),
+                   QStringLiteral("temperature_2m,relative_humidity_2m,dew_point_2m,"
+                                  "pressure_msl,wind_speed_10m,wind_direction_10m,"
+                                  "visibility,weather_code"));
+    q.addQueryItem(QStringLiteral("timezone"), QStringLiteral("auto"));
+    q.addQueryItem(QStringLiteral("temperature_unit"),
+                   us ? QStringLiteral("fahrenheit") : QStringLiteral("celsius"));
+    q.addQueryItem(QStringLiteral("wind_speed_unit"),
+                   us ? QStringLiteral("mph") : QStringLiteral("kmh"));
+    url.setQuery(q);
+
+    QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, us]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning("[Weather] fetch failed: %s", qPrintable(reply->errorString()));
+            emit fetchError(reply->errorString());
+            return;
+        }
+
+        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonObject cur  = root["current"].toObject();
+        if (cur.isEmpty()) {
+            emit fetchError(QStringLiteral("empty response"));
+            return;
+        }
+
+        m_utcOffset = root["utc_offset_seconds"].toInt();
+
+        const double windSpeed = cur["wind_speed_10m"].toDouble();
+        // Visibility is always metres regardless of the unit parameters, so it
+        // is the one field converted by hand.
+        const double visMetres  = cur["visibility"].toDouble();
+
+        QVariantMap m;
+        m["condition"]   = conditionForCode(cur["weather_code"].toInt());
+        m["temperature"] = QString::number(qRound(cur["temperature_2m"].toDouble())) + QStringLiteral("°");
+        m["humidity"]    = QString::number(qRound(cur["relative_humidity_2m"].toDouble())) + QStringLiteral("%");
+        m["dewPoint"]    = QString::number(qRound(cur["dew_point_2m"].toDouble())) + QStringLiteral("°");
+        m["pressure"]    = us
+            ? QString::number(cur["pressure_msl"].toDouble() * 0.0295299830714, 'f', 2)
+            : QString::number(cur["pressure_msl"].toDouble(), 'f', 1) + QStringLiteral(" MB");
+        m["wind"] = QStringLiteral("%1 %2")
+                        .arg(cardinal(cur["wind_direction_10m"].toDouble()))
+                        .arg(qRound(windSpeed));
+        m["visibility"] = us
+            ? QString::number(qRound(visMetres / 1609.344)) + QStringLiteral(" MI.")
+            : QString::number(qRound(visMetres / 1000.0))   + QStringLiteral(" KM");
+
+        m_current = m;
+        m_hasData = true;
+        emit dataChanged();
+    });
+}
