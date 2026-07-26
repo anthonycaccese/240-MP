@@ -9,7 +9,9 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QDate>
 #include <QHash>
+#include <QLocale>
 #include <QtMath>
 #include <QDebug>
 
@@ -44,6 +46,33 @@ QString conditionForCode(int code) {
     case 85: case 86:            return QStringLiteral("SNOW SHOWERS");
     case 95:                     return QStringLiteral("THUNDERSTORM");
     case 96: case 99:            return QStringLiteral("THUNDERSTORM HAIL");
+    default: break;
+    }
+    return QStringLiteral("UNKNOWN");
+}
+
+// Short forms for the Extended Forecast columns, which are a third of the screen
+// wide. Long single words are the problem — WordWrap can't break "THUNDERSTORM",
+// so it runs into the next column. The original had the same split: full wording
+// on Current Conditions, abbreviations across the three-day columns.
+//
+// These also read as a *forecast* rather than an observation: a clear day ahead
+// is SUNNY, whereas conditions right now are CLEAR.
+QString conditionShortForCode(int code) {
+    switch (code) {
+    case 0: case 1:              return QStringLiteral("SUNNY");
+    case 2:                      return QStringLiteral("PARTLY CLOUDY");  // wraps to two lines
+    case 3:                      return QStringLiteral("CLOUDY");
+    case 45: case 48:            return QStringLiteral("FOG");
+    case 51: case 53: case 55:   return QStringLiteral("DRIZZLE");
+    case 56: case 57:            return QStringLiteral("FRZ DRIZZLE");
+    case 61: case 63: case 65:   return QStringLiteral("RAIN");
+    case 66: case 67:            return QStringLiteral("FRZ RAIN");
+    case 71: case 73: case 75:   return QStringLiteral("SNOW");
+    case 77:                     return QStringLiteral("SNOW");
+    case 80: case 81: case 82:   return QStringLiteral("SHOWERS");
+    case 85: case 86:            return QStringLiteral("SNOW SHOWERS");
+    case 95: case 96: case 99:   return QStringLiteral("T'STORMS");
     default: break;
     }
     return QStringLiteral("UNKNOWN");
@@ -184,6 +213,13 @@ void WeatherBackend::onSettingChanged(const QString &moduleId, const QString &ke
     // switch has to re-fetch rather than reformat.
     if (key == QLatin1String("units") && m_resolved)
         fetchWeather();
+}
+
+void WeatherBackend::getDisplays() {
+    emit dynamicOptionsReady(QStringLiteral("displays"), QVariantList{
+        QVariantMap{ { "id", "current"  }, { "label", "CURRENT CONDITIONS" } },
+        QVariantMap{ { "id", "extended" }, { "label", "EXTENDED FORECAST"  } },
+    });
 }
 
 void WeatherBackend::emitError(const QString &reason) {
@@ -352,6 +388,10 @@ void WeatherBackend::fetchWeather() {
                    QStringLiteral("temperature_2m,relative_humidity_2m,dew_point_2m,"
                                   "pressure_msl,wind_speed_10m,wind_direction_10m,"
                                   "visibility,weather_code"));
+    q.addQueryItem(QStringLiteral("daily"),
+                   QStringLiteral("temperature_2m_min,temperature_2m_max,"
+                                  "weather_code"));
+    q.addQueryItem(QStringLiteral("forecast_days"), QStringLiteral("3"));
     q.addQueryItem(QStringLiteral("timezone"), QStringLiteral("auto"));
     q.addQueryItem(QStringLiteral("temperature_unit"),
                    us ? QStringLiteral("fahrenheit") : QStringLiteral("celsius"));
@@ -398,7 +438,30 @@ void WeatherBackend::fetchWeather() {
             : QString::number(qRound(visMetres / 1000.0))   + QStringLiteral(" KM");
 
         m_current = m;
+        buildForecast(root["daily"].toObject());
         m_hasData = true;
         emit dataChanged();
     });
+}
+
+void WeatherBackend::buildForecast(const QJsonObject &daily) {
+    m_forecast.clear();
+    const QJsonArray times = daily["time"].toArray();
+    const QJsonArray mins  = daily["temperature_2m_min"].toArray();
+    const QJsonArray maxs  = daily["temperature_2m_max"].toArray();
+    const QJsonArray codes = daily["weather_code"].toArray();
+    if (times.isEmpty()) return;
+
+    for (int i = 0; i < times.size(); ++i) {
+        const QDate date = QDate::fromString(times.at(i).toString(), Qt::ISODate);
+        QVariantMap day;
+        day["name"] = date.isValid()
+            ? QLocale::c().dayName(date.dayOfWeek(), QLocale::LongFormat).toUpper()
+            : QString();
+        day["condition"] = conditionShortForCode(codes.at(i).toInt());
+        day["lo"] = QString::number(qRound(mins.at(i).toDouble()));
+        day["hi"] = QString::number(qRound(maxs.at(i).toDouble()));
+
+        m_forecast.append(day);
+    }
 }

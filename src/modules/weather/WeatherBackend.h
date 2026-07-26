@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QString>
 #include <QVariantMap>
+#include <QVariantList>
 #include <QJsonObject>
 
 class QNetworkAccessManager;
@@ -22,6 +23,8 @@ class WeatherBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString     locationName     READ locationName     NOTIFY dataChanged)
     Q_PROPERTY(QVariantMap current          READ current          NOTIFY dataChanged)
+    // Three days, each a map of display-ready strings: name, condition, lo, hi.
+    Q_PROPERTY(QVariantList forecast        READ forecast         NOTIFY dataChanged)
     Q_PROPERTY(bool        hasData          READ hasData          NOTIFY dataChanged)
     // Location's own UTC offset, so the status-bar clock shows the time where
     // the weather is rather than where the device is.
@@ -32,7 +35,8 @@ public:
                             QObject *parent = nullptr);
 
     QString     locationName()     const { return m_locationName; }
-    QVariantMap current()          const { return m_current; }
+    QVariantMap  current()  const { return m_current; }
+    QVariantList forecast() const { return m_forecast; }
     bool        hasData()          const { return m_hasData; }
     int         utcOffsetSeconds() const { return m_utcOffset; }
 
@@ -45,11 +49,16 @@ public:
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
 
+    // options_slot for the "displays" multiselect. Ids match Weather.qml's
+    // allScreens list.
+    Q_INVOKABLE void getDisplays();
+
 signals:
     void dataChanged();
     // reason ∈ {missing, unreadable, empty, notfound, network}
     void locationError(const QString &reason);
     void fetchError(const QString &message);
+    void dynamicOptionsReady(const QString &key, const QVariant &options);
 
 public slots:
     void onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value);
@@ -62,6 +71,7 @@ private:
     void resolveLocation();
     void geocode(const QString &rawLine);
     void fetchWeather();
+    void buildForecast(const QJsonObject &daily);
 
     // Always answer on the next event-loop turn, never synchronously — views
     // call start() from Component.onCompleted, and a synchronous reply there
@@ -83,7 +93,8 @@ private:
     bool    m_resolved = false;
     QString m_resolvedFrom;
 
-    QVariantMap m_current;
+    QVariantMap  m_current;
+    QVariantList m_forecast;
     bool        m_hasData   = false;
     int         m_utcOffset = 0;
 };

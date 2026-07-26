@@ -11,6 +11,14 @@
       "default": "OFF"
     },
     {
+      "key": "displays",
+      "label": "Displays",
+      "type": "multiselect_submenu",
+      "options_source": "dynamic",
+      "options_slot": "getDisplays",
+      "description": "Which screens the forecast loop cycles through"
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "list_single",

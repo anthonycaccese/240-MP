@@ -12,9 +12,15 @@ FocusScope {
     signal replaceWith(string path, var params)
     signal goBack()
 
-    // Screens in rotation order. Grows as the other three are built; the ring
-    // and the key handling do not change when it does.
-    readonly property var screens: [ "screens/CurrentConditions.qml" ]
+    // Every screen this module can show, in rotation order. `screens` below is
+    // this list filtered by the Displays setting — the ring, the timer and the
+    // key handling all work off the filtered list, so adding a screen is one
+    // entry here plus one option in the backend's getDisplays().
+    readonly property var allScreens: [
+        { id: "current",  source: "screens/CurrentConditions.qml" },
+        { id: "extended", source: "screens/ExtendedForecast.qml"  }
+    ]
+    property var screens: []
     property int  screenIndex: 0
     property bool paused: false
     property int  screenTimeMs: 10000
@@ -27,6 +33,19 @@ FocusScope {
         var cfg = appCore.get_settings()
         var mod = (cfg.modules && cfg.modules[moduleRoot.moduleId]) || {}
         twelveHour = (mod.hours_format || "24-hour").indexOf("12") === 0
+
+        // Absent means enabled, matching MultiSelectSettings.qml, which defaults
+        // an option to true when config has no entry for it.
+        var chosen = mod.displays || {}
+        var ring = []
+        for (var i = 0; i < allScreens.length; i++) {
+            var s = allScreens[i]
+            if (chosen[s.id] === undefined || chosen[s.id]) ring.push(s.source)
+        }
+        // Never leave an empty ring — a module that shows nothing is worse than
+        // one that ignores a setting.
+        screens = ring.length > 0 ? ring : [ allScreens[0].source ]
+
         weatherBackend.start()
     }
 
@@ -101,13 +120,17 @@ FocusScope {
         anchors.topMargin:    root.sh * 0.075
         anchors.bottomMargin: root.sh * 0.02
 
-        source: weatherRoot.screens[weatherRoot.screenIndex]
+        source: weatherRoot.screens.length > 0
+                ? weatherRoot.screens[weatherRoot.screenIndex] : ""
         onLoaded: syncScreen()
 
+        // Screens declare only the properties they use, so assign defensively
+        // rather than assuming a shape.
         function syncScreen() {
             if (!item) return
-            item.wx = weatherBackend.current
-            item.locationName = weatherBackend.locationName
+            if (item.hasOwnProperty("wx"))           item.wx = weatherBackend.current
+            if (item.hasOwnProperty("locationName")) item.locationName = weatherBackend.locationName
+            if (item.hasOwnProperty("days"))         item.days = weatherBackend.forecast
         }
     }
 
