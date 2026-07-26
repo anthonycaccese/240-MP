@@ -19,6 +19,7 @@ FocusScope {
     readonly property var allScreens: [
         { id: "current",  source: "screens/CurrentConditions.qml" },
         { id: "extended", source: "screens/ExtendedForecast.qml"  },
+        { id: "others",   source: "screens/OtherLocations.qml"    },
         { id: "almanac",  source: "screens/Almanac.qml"           }
     ]
     property var screens: []
@@ -34,20 +35,53 @@ FocusScope {
         var cfg = appCore.get_settings()
         var mod = (cfg.modules && cfg.modules[moduleRoot.moduleId]) || {}
         twelveHour = (mod.hours_format || "24-hour").indexOf("12") === 0
+        // parseInt stops at the space, so "30 SEC" -> 30.
+        screenTimeMs = (parseInt(mod.screen_time || "10") || 10) * 1000
+
+        // Suppress the screen saver for as long as this view is up. The module
+        // IS a screen saver — a rotating display you leave running — so letting
+        // the saver paint over it would be actively wrong. The flag is
+        // mpv-named because playback was its first user; it is the app's
+        // general "something is already owning the screen" signal.
+        idleTracker.mpvActive = true
 
         // Absent means enabled, matching MultiSelectSettings.qml, which defaults
         // an option to true when config has no entry for it.
-        var chosen = mod.displays || {}
+        chosenDisplays = mod.displays || {}
+        rebuildRing()
+
+        weatherBackend.start()
+    }
+
+    property var chosenDisplays: ({})
+
+    // A screen is in the ring if it is enabled AND has something to show. Only
+    // "others" can be empty — it depends on extra lines in weather_location.txt,
+    // which are not known until the extras have resolved, so this reruns on
+    // every data update rather than once at startup.
+    function screenHasContent(id) {
+        if (id === "others") return weatherBackend.hasOtherLocations
+        return true
+    }
+
+    function rebuildRing() {
         var ring = []
         for (var i = 0; i < allScreens.length; i++) {
             var s = allScreens[i]
-            if (chosen[s.id] === undefined || chosen[s.id]) ring.push(s.source)
+            var enabled = (chosenDisplays[s.id] === undefined) || chosenDisplays[s.id]
+            if (enabled && screenHasContent(s.id)) ring.push(s.source)
         }
         // Never leave an empty ring — a module that shows nothing is worse than
         // one that ignores a setting.
         screens = ring.length > 0 ? ring : [ allScreens[0].source ]
+        if (screenIndex >= screens.length) screenIndex = 0
+    }
 
-        weatherBackend.start()
+    Component.onDestruction: {
+        if (idleTracker) {
+            idleTracker.mpvActive = false
+            idleTracker.resetActivity()
+        }
     }
 
     function advance(step) {
@@ -133,12 +167,17 @@ FocusScope {
             if (item.hasOwnProperty("locationName")) item.locationName = weatherBackend.locationName
             if (item.hasOwnProperty("days"))         item.days = weatherBackend.forecast
             if (item.hasOwnProperty("almanac"))      item.almanac = weatherBackend.almanac
+            if (item.hasOwnProperty("rows"))         item.rows = weatherBackend.otherLocations
+            if (item.hasOwnProperty("tempUnit"))     item.tempUnit = weatherBackend.tempUnitLabel
         }
     }
 
     Connections {
         target: weatherBackend
-        function onDataChanged() { screenLoader.syncScreen() }
+        function onDataChanged() {
+            weatherRoot.rebuildRing()
+            screenLoader.syncScreen()
+        }
     }
 
     StatusBar {

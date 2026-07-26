@@ -4,6 +4,8 @@
 #include <QVariantMap>
 #include <QVariantList>
 #include <QJsonObject>
+#include <QStringList>
+#include <functional>
 
 class QNetworkAccessManager;
 class QTimer;
@@ -27,6 +29,13 @@ class WeatherBackend : public QObject {
     Q_PROPERTY(QVariantList forecast        READ forecast         NOTIFY dataChanged)
     // { days: [{name, sunrise, sunset}], moons: [{name, date}] }
     Q_PROPERTY(QVariantMap  almanac         READ almanac          NOTIFY dataChanged)
+    // [{name, temp, condition, wind}] for the extra places listed in
+    // weather_location.txt. Empty when none are listed, which drops the screen
+    // out of the rotation rather than showing an empty table.
+    Q_PROPERTY(QVariantList otherLocations  READ otherLocations   NOTIFY dataChanged)
+    Q_PROPERTY(bool hasOtherLocations       READ hasOtherLocations NOTIFY dataChanged)
+    // "°F" or "°C", for the table's column heading.
+    Q_PROPERTY(QString tempUnitLabel        READ tempUnitLabel    NOTIFY dataChanged)
     Q_PROPERTY(bool        hasData          READ hasData          NOTIFY dataChanged)
     // Location's own UTC offset, so the status-bar clock shows the time where
     // the weather is rather than where the device is.
@@ -40,6 +49,9 @@ public:
     QVariantMap  current()  const { return m_current; }
     QVariantList forecast() const { return m_forecast; }
     QVariantMap  almanac()  const { return m_almanac; }
+    QVariantList otherLocations() const { return m_otherLocations; }
+    bool hasOtherLocations() const { return !m_otherLocations.isEmpty(); }
+    QString tempUnitLabel() const;
     bool        hasData()          const { return m_hasData; }
     int         utcOffsetSeconds() const { return m_utcOffset; }
 
@@ -73,6 +85,13 @@ private:
 
     void resolveLocation();
     void geocode(const QString &rawLine);
+    // Shared by the primary location and the extras.
+    QStringList readLocationLines() const;
+    static bool parseCoordLine(const QString &line, double *lat, double *lon, QString *label);
+    void geocodeLine(const QString &line,
+                     const std::function<void(bool, QString, double, double)> &done);
+    void resolveOthers(const QStringList &lines);
+    void fetchOthers();
     void fetchWeather();
     void buildForecast(const QJsonObject &daily);
     void buildAlmanac(const QJsonObject &daily);
@@ -101,6 +120,10 @@ private:
     QVariantMap  m_current;
     QVariantList m_forecast;
     QVariantMap  m_almanac;
+    QVariantList m_otherLocations;
+    // Extra places from weather_location.txt, resolved once: {name, lat, lon}.
+    QVariantList m_otherPoints;
+    int          m_pendingOthers = 0;
     bool        m_hasData   = false;
     int         m_utcOffset = 0;
 };

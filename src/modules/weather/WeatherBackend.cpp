@@ -179,7 +179,10 @@ WeatherBackend::WeatherBackend(const QString &appRoot, const QString &dataRoot,
     , m_nam(new QNetworkAccessManager(this))
     , m_refresh(new QTimer(this)) {
     m_refresh->setInterval(kRefreshMs);
-    connect(m_refresh, &QTimer::timeout, this, [this]() { fetchWeather(); });
+    connect(m_refresh, &QTimer::timeout, this, [this]() {
+        fetchWeather();
+        fetchOthers();
+    });
 }
 
 QString WeatherBackend::location_file_path() const {
@@ -211,15 +214,21 @@ void WeatherBackend::onSettingChanged(const QString &moduleId, const QString &ke
     Q_UNUSED(value)
     if (moduleId != QLatin1String(kModuleId)) return;
     // Units change the requested values, not just their presentation, so a
-    // switch has to re-fetch rather than reformat.
-    if (key == QLatin1String("units") && m_resolved)
+    // switch has to re-fetch rather than reformat. Both fetches: the extras are
+    // a separate request, and refreshing only the primary left the Other
+    // Locations table in the old units while its °C/°F heading — which reads
+    // config live — had already flipped.
+    if (key == QLatin1String("units") && m_resolved) {
         fetchWeather();
+        fetchOthers();
+    }
 }
 
 void WeatherBackend::getDisplays() {
     emit dynamicOptionsReady(QStringLiteral("displays"), QVariantList{
         QVariantMap{ { "id", "current"  }, { "label", "CURRENT CONDITIONS" } },
         QVariantMap{ { "id", "extended" }, { "label", "EXTENDED FORECAST"  } },
+        QVariantMap{ { "id", "others"   }, { "label", "OTHER LOCATIONS"    } },
         QVariantMap{ { "id", "almanac"  }, { "label", "ALMANAC"            } },
     });
 }
@@ -232,7 +241,11 @@ void WeatherBackend::emitError(const QString &reason) {
 
 void WeatherBackend::start() {
     if (m_resolved) {
+        // Already resolved from an earlier visit: refresh both requests. Only
+        // fetching the primary here left Other Locations showing whatever units
+        // were in force last time the module was open.
         fetchWeather();
+        fetchOthers();
         m_refresh->start();
         return;
     }
@@ -245,70 +258,99 @@ void WeatherBackend::stop() {
 
 // ── Location ─────────────────────────────────────────────────────────────────
 
-void WeatherBackend::resolveLocation() {
+QStringList WeatherBackend::readLocationLines() const {
+    QStringList lines;
     QFile f(location_file_path());
-    if (!f.exists())                                      { emitError(QStringLiteral("missing"));    return; }
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))   { emitError(QStringLiteral("unreadable")); return; }
-
-    // First non-empty, non-comment line wins. '#' comments exist so the file we
-    // tell users to create can document its own format.
-    QString line;
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return lines;
     while (!f.atEnd()) {
         const QString candidate = QString::fromUtf8(f.readLine()).trimmed();
+        // '#' comments exist so the file we tell users to create can document
+        // its own format.
         if (candidate.isEmpty() || candidate.startsWith(QLatin1Char('#'))) continue;
-        line = candidate;
-        break;
+        lines << candidate;
     }
-    if (line.isEmpty()) { emitError(QStringLiteral("empty")); return; }
-
-    // Explicit coordinates, checked before geocoding so someone who knows
-    // exactly where they want the forecast never depends on a name lookup. This
-    // is the reliable escape hatch when a place name is ambiguous.
-    //
-    //     40.8398, -74.2765            -> labelled with the coordinates
-    //     40.8398, -74.2765, CALDWELL  -> labelled "CALDWELL"
-    //
-    // The optional third segment exists because there is no way to recover a
-    // name from coordinates: Open-Meteo's geocoder is forward-only (it returns
-    // an error for lat/lon), and the forecast response carries only a timezone
-    // — "America/New_York" would label a New Jersey town "NEW YORK", which is
-    // worse than showing the numbers. A real reverse geocoder means a
-    // third-party service with its own usage policy, so the user names it.
-    const QStringList parts = line.split(QLatin1Char(','));
-    if (parts.size() >= 2) {
-        bool okLat = false, okLon = false;
-        const double lat = parts.at(0).trimmed().toDouble(&okLat);
-        const double lon = parts.at(1).trimmed().toDouble(&okLon);
-        if (okLat && okLon && lat >= -90.0 && lat <= 90.0
-                           && lon >= -180.0 && lon <= 180.0) {
-            const QString label = parts.mid(2).join(QLatin1Char(',')).trimmed();
-            m_locationName = label.isEmpty()
-                ? QStringLiteral("%1, %2").arg(lat, 0, 'f', 4).arg(lon, 0, 'f', 4)
-                : label.toUpper();
-            m_lat = lat;
-            m_lon = lon;
-            m_resolved = true;
-            m_resolvedFrom = line;
-            qInfo("[Weather] using explicit coordinates -> %s (%.4f, %.4f)",
-                  qPrintable(m_locationName), m_lat, m_lon);
-            fetchWeather();
-            m_refresh->start();
-            return;
-        }
-    }
-
-    geocode(line);
+    return lines;
 }
 
-void WeatherBackend::geocode(const QString &rawLine) {
+// "40.8398, -74.2765" or "40.8398, -74.2765, CALDWELL".
+//
+// Explicit coordinates are the reliable escape hatch when a place name is
+// ambiguous — they never touch the geocoder, so nothing can mis-resolve them.
+// The optional label exists because a name cannot be recovered from
+// coordinates: Open-Meteo's geocoder is forward-only, and the forecast response
+// carries only a timezone, which would label a New Jersey town "NEW YORK".
+bool WeatherBackend::parseCoordLine(const QString &line, double *lat, double *lon,
+                                    QString *label) {
+    const QStringList parts = line.split(QLatin1Char(','));
+    if (parts.size() < 2) return false;
+    bool okLat = false, okLon = false;
+    const double la = parts.at(0).trimmed().toDouble(&okLat);
+    const double lo = parts.at(1).trimmed().toDouble(&okLon);
+    if (!okLat || !okLon) return false;
+    if (la < -90.0 || la > 90.0 || lo < -180.0 || lo > 180.0) return false;
+
+    const QString given = parts.mid(2).join(QLatin1Char(',')).trimmed();
+    *lat = la;
+    *lon = lo;
+    *label = given.isEmpty()
+        ? QStringLiteral("%1, %2").arg(la, 0, 'f', 4).arg(lo, 0, 'f', 4)
+        : given.toUpper();
+    return true;
+}
+
+void WeatherBackend::resolveLocation() {
+    QFile probe(location_file_path());
+    if (!probe.exists())                                    { emitError(QStringLiteral("missing"));    return; }
+    if (!probe.open(QIODevice::ReadOnly | QIODevice::Text)) { emitError(QStringLiteral("unreadable")); return; }
+    probe.close();
+
+    const QStringList lines = readLocationLines();
+    if (lines.isEmpty()) { emitError(QStringLiteral("empty")); return; }
+
+    const QString primary = lines.first();
+    const QStringList others = lines.mid(1);
+
+    double lat = 0.0, lon = 0.0;
+    QString label;
+    if (parseCoordLine(primary, &lat, &lon, &label)) {
+        m_locationName = label;
+        m_lat = lat;
+        m_lon = lon;
+        m_resolved = true;
+        m_resolvedFrom = primary;
+        qInfo("[Weather] using explicit coordinates -> %s (%.4f, %.4f)",
+              qPrintable(m_locationName), m_lat, m_lon);
+        fetchWeather();
+        m_refresh->start();
+        resolveOthers(others);
+        return;
+    }
+
+    geocodeLine(primary, [this, primary, others](bool ok, QString name,
+                                                 double la, double lo) {
+        if (!ok) { emitError(name); return; }   // name carries the reason here
+        m_locationName = name;
+        m_lat = la;
+        m_lon = lo;
+        m_resolved = true;
+        m_resolvedFrom = primary;
+        qInfo("[Weather] resolved \"%s\" -> %s (%.4f, %.4f)",
+              qPrintable(primary), qPrintable(m_locationName), m_lat, m_lon);
+        fetchWeather();
+        m_refresh->start();
+        resolveOthers(others);
+    });
+}
+
+// Geocodes one "Name, qualifier, ..." line. Reports failure through `done` with
+// ok=false and the reason in the name argument, so callers decide whether a
+// failure is fatal (the primary location) or just skipped (an extra).
+void WeatherBackend::geocodeLine(const QString &line,
+                                 const std::function<void(bool, QString, double, double)> &done) {
     // Open-Meteo's geocoder matches a bare place name, so send only the part
-    // before the first comma. Anything after it disambiguates the results, which
-    // matters for a worldwide userbase — "Paris, France" and "Paris, Texas" are
-    // both reasonable inputs.
-    const QStringList segments = rawLine.split(QLatin1Char(','));
+    // before the first comma. Everything after it disambiguates the results.
+    const QStringList segments = line.split(QLatin1Char(','));
     const QString name = segments.first().trimmed();
-    // Every segment after the name is a qualifier — "Caldwell, NJ, USA" has two,
-    // and both matter. Using only the first one is what let Idaho win.
     QStringList qualifiers;
     for (int i = 1; i < segments.size(); ++i) {
         const QString q = segments.at(i).trimmed();
@@ -324,56 +366,90 @@ void WeatherBackend::geocode(const QString &rawLine) {
     url.setQuery(q);
 
     QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, rawLine, name, qualifiers]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, line, name, qualifiers, done]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            qWarning("[Weather] geocode failed: %s", qPrintable(reply->errorString()));
-            emitError(QStringLiteral("network"));
+            qWarning("[Weather] geocode failed for \"%s\": %s",
+                     qPrintable(line), qPrintable(reply->errorString()));
+            done(false, QStringLiteral("network"), 0.0, 0.0);
             return;
         }
         const QJsonArray results =
             QJsonDocument::fromJson(reply->readAll()).object()["results"].toArray();
-        if (results.isEmpty()) { emitError(QStringLiteral("notfound")); return; }
+        if (results.isEmpty()) {
+            done(false, QStringLiteral("notfound"), 0.0, 0.0);
+            return;
+        }
 
         // Score every result against every qualifier and take the best. Results
         // arrive ordered by population, so a plain first-match would always pick
-        // the biggest city of that name regardless of the state or country the
-        // user asked for.
+        // the biggest city of that name regardless of the state or country
+        // asked for — "Caldwell, NJ, USA" would land in Idaho.
         QJsonObject chosen = results.first().toObject();
         if (!qualifiers.isEmpty()) {
             int bestScore = -1;
             for (const QJsonValue &v : results) {
                 const QJsonObject o = v.toObject();
                 int score = 0;
-                for (const QString &q : qualifiers)
-                    if (qualifierMatches(o, q)) ++score;
-                // Strictly greater keeps the population ordering as the
-                // tie-break, which is the right default among equal matches.
+                for (const QString &qq : qualifiers)
+                    if (qualifierMatches(o, qq)) ++score;
+                // Strictly greater keeps population order as the tie-break.
                 if (score > bestScore) { bestScore = score; chosen = o; }
             }
-            if (bestScore == 0) {
+            if (bestScore == 0)
                 qWarning("[Weather] no result matched any qualifier in \"%s\" — "
-                         "falling back to the most populous match",
-                         qPrintable(rawLine));
-            } else if (bestScore < qualifiers.size()) {
-                qWarning("[Weather] only %d of %lld qualifiers matched for \"%s\"",
-                         bestScore, qualifiers.size(), qPrintable(rawLine));
-            }
+                         "falling back to the most populous match", qPrintable(line));
         }
-
-        m_locationName = chosen["name"].toString(name).toUpper();
-        m_lat = chosen["latitude"].toDouble();
-        m_lon = chosen["longitude"].toDouble();
-        m_resolved = true;
-        m_resolvedFrom = rawLine;
-        qInfo("[Weather] resolved \"%s\" -> %s, %s, %s (%.4f, %.4f)",
-              qPrintable(rawLine), qPrintable(m_locationName),
-              qPrintable(chosen["admin1"].toString()),
-              qPrintable(chosen["country_code"].toString()), m_lat, m_lon);
-
-        fetchWeather();
-        m_refresh->start();
+        done(true, chosen["name"].toString(name).toUpper(),
+             chosen["latitude"].toDouble(), chosen["longitude"].toDouble());
     });
+}
+
+// Extras are resolved once, then fetched together. A failure here is skipped
+// rather than fatal: one unrecognised extra should not take out the whole
+// module, and the primary location is what the rest of the screens need.
+void WeatherBackend::resolveOthers(const QStringList &lines) {
+    m_otherPoints.clear();
+    m_pendingOthers = 0;
+    if (lines.isEmpty()) { fetchOthers(); return; }
+
+    // Slots are pre-allocated and filled by index, not appended on completion:
+    // the geocode calls run concurrently and finish in arbitrary order, so
+    // appending put the rows in whatever order the network happened to answer.
+    // The listed order is the user's, and it should survive.
+    m_otherPoints = QVariantList(lines.size());
+
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString line = lines.at(i);
+        double lat = 0.0, lon = 0.0;
+        QString label;
+        if (parseCoordLine(line, &lat, &lon, &label)) {
+            m_otherPoints[i] = QVariantMap{
+                { "name", label }, { "lat", lat }, { "lon", lon } };
+            continue;
+        }
+        ++m_pendingOthers;
+        geocodeLine(line, [this, line, i](bool ok, QString name, double la, double lo) {
+            if (ok) {
+                m_otherPoints[i] = QVariantMap{
+                    { "name", name }, { "lat", la }, { "lon", lo } };
+            } else {
+                // One unrecognised extra should not take out the module — skip
+                // it and keep the rest. Its slot stays empty and is dropped below.
+                qWarning("[Weather] skipping other location \"%s\" (%s)",
+                         qPrintable(line), qPrintable(name));
+            }
+            if (--m_pendingOthers <= 0) {
+                m_otherPoints.removeIf([](const QVariant &v) { return v.toMap().isEmpty(); });
+                fetchOthers();
+            }
+        });
+    }
+    if (m_pendingOthers == 0) {
+        m_otherPoints.removeIf([](const QVariant &v) { return v.toMap().isEmpty(); });
+        fetchOthers();
+    }
 }
 
 // ── Weather ──────────────────────────────────────────────────────────────────
@@ -602,4 +678,78 @@ void WeatherBackend::buildAlmanac(const QJsonObject &daily) {
 bool WeatherBackend::useTwelveHour() const {
     return moduleConfig()["hours_format"].toString(QStringLiteral("24-hour"))
                .startsWith(QLatin1String("12"));
+}
+
+QString WeatherBackend::tempUnitLabel() const {
+    return useUsUnits() ? QStringLiteral("°F") : QStringLiteral("°C");
+}
+
+// One request for every extra place. Open-Meteo accepts comma-joined
+// coordinates and answers with an array in the same order — so the whole table
+// is a single round trip no matter how many places are listed.
+void WeatherBackend::fetchOthers() {
+    if (m_otherPoints.isEmpty()) {
+        m_otherLocations.clear();
+        emit dataChanged();
+        return;
+    }
+    const bool us = useUsUnits();
+
+    QStringList lats, lons;
+    for (const QVariant &v : m_otherPoints) {
+        const QVariantMap m = v.toMap();
+        lats << QString::number(m["lat"].toDouble(), 'f', 4);
+        lons << QString::number(m["lon"].toDouble(), 'f', 4);
+    }
+
+    QUrl url(QString::fromLatin1(kForecastUrl));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("latitude"),  lats.join(QLatin1Char(',')));
+    q.addQueryItem(QStringLiteral("longitude"), lons.join(QLatin1Char(',')));
+    q.addQueryItem(QStringLiteral("current"),
+                   QStringLiteral("temperature_2m,weather_code,wind_speed_10m,"
+                                  "wind_direction_10m"));
+    q.addQueryItem(QStringLiteral("temperature_unit"),
+                   us ? QStringLiteral("fahrenheit") : QStringLiteral("celsius"));
+    q.addQueryItem(QStringLiteral("wind_speed_unit"),
+                   us ? QStringLiteral("mph") : QStringLiteral("kmh"));
+    url.setQuery(q);
+
+    QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qWarning("[Weather] other-locations fetch failed: %s",
+                     qPrintable(reply->errorString()));
+            return;
+        }
+
+        // The API returns a bare object for one coordinate and an array for
+        // several, so normalise before iterating.
+        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonArray entries;
+        if (doc.isArray())       entries = doc.array();
+        else if (doc.isObject()) entries.append(doc.object());
+
+        QVariantList rows;
+        for (int i = 0; i < entries.size() && i < m_otherPoints.size(); ++i) {
+            const QJsonObject cur = entries.at(i).toObject()["current"].toObject();
+            if (cur.isEmpty()) continue;
+            const double speed = cur["wind_speed_10m"].toDouble();
+            rows.append(QVariantMap{
+                { "name", m_otherPoints.at(i).toMap()["name"] },
+                { "temp", QString::number(qRound(cur["temperature_2m"].toDouble())) },
+                { "condition", conditionShortForCode(cur["weather_code"].toInt()) },
+                // The original showed CALM rather than a direction with no
+                // speed behind it.
+                { "wind", qRound(speed) == 0
+                      ? QStringLiteral("CALM")
+                      : QStringLiteral("%1 %2")
+                            .arg(cardinal(cur["wind_direction_10m"].toDouble()))
+                            .arg(qRound(speed)) },
+            });
+        }
+        m_otherLocations = rows;
+        emit dataChanged();
+    });
 }
