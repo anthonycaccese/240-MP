@@ -25,6 +25,8 @@ class WeatherBackend : public QObject {
     Q_PROPERTY(QVariantMap current          READ current          NOTIFY dataChanged)
     // Three days, each a map of display-ready strings: name, condition, lo, hi.
     Q_PROPERTY(QVariantList forecast        READ forecast         NOTIFY dataChanged)
+    // { days: [{name, sunrise, sunset}], moons: [{name, date}] }
+    Q_PROPERTY(QVariantMap  almanac         READ almanac          NOTIFY dataChanged)
     Q_PROPERTY(bool        hasData          READ hasData          NOTIFY dataChanged)
     // Location's own UTC offset, so the status-bar clock shows the time where
     // the weather is rather than where the device is.
@@ -37,6 +39,7 @@ public:
     QString     locationName()     const { return m_locationName; }
     QVariantMap  current()  const { return m_current; }
     QVariantList forecast() const { return m_forecast; }
+    QVariantMap  almanac()  const { return m_almanac; }
     bool        hasData()          const { return m_hasData; }
     int         utcOffsetSeconds() const { return m_utcOffset; }
 
@@ -72,6 +75,8 @@ private:
     void geocode(const QString &rawLine);
     void fetchWeather();
     void buildForecast(const QJsonObject &daily);
+    void buildAlmanac(const QJsonObject &daily);
+    bool useTwelveHour() const;
 
     // Always answer on the next event-loop turn, never synchronously — views
     // call start() from Component.onCompleted, and a synchronous reply there
@@ -95,6 +100,7 @@ private:
 
     QVariantMap  m_current;
     QVariantList m_forecast;
+    QVariantMap  m_almanac;
     bool        m_hasData   = false;
     int         m_utcOffset = 0;
 };

@@ -10,6 +10,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QDate>
+#include <QDateTime>
 #include <QHash>
 #include <QLocale>
 #include <QtMath>
@@ -219,6 +220,7 @@ void WeatherBackend::getDisplays() {
     emit dynamicOptionsReady(QStringLiteral("displays"), QVariantList{
         QVariantMap{ { "id", "current"  }, { "label", "CURRENT CONDITIONS" } },
         QVariantMap{ { "id", "extended" }, { "label", "EXTENDED FORECAST"  } },
+        QVariantMap{ { "id", "almanac"  }, { "label", "ALMANAC"            } },
     });
 }
 
@@ -390,7 +392,7 @@ void WeatherBackend::fetchWeather() {
                                   "visibility,weather_code"));
     q.addQueryItem(QStringLiteral("daily"),
                    QStringLiteral("temperature_2m_min,temperature_2m_max,"
-                                  "weather_code"));
+                                  "weather_code,sunrise,sunset"));
     q.addQueryItem(QStringLiteral("forecast_days"), QStringLiteral("3"));
     q.addQueryItem(QStringLiteral("timezone"), QStringLiteral("auto"));
     q.addQueryItem(QStringLiteral("temperature_unit"),
@@ -439,6 +441,7 @@ void WeatherBackend::fetchWeather() {
 
         m_current = m;
         buildForecast(root["daily"].toObject());
+        buildAlmanac(root["daily"].toObject());
         m_hasData = true;
         emit dataChanged();
     });
@@ -464,4 +467,139 @@ void WeatherBackend::buildForecast(const QJsonObject &daily) {
 
         m_forecast.append(day);
     }
+}
+
+// ── Moon phases ──────────────────────────────────────────────────────────────
+//
+// Meeus, "Astronomical Algorithms", ch. 49, truncated to the principal periodic
+// terms (the planetary A1..A14 corrections contribute well under an hour and are
+// omitted). Accuracy of a few minutes, which matters more than it sounds: the
+// naive mean-synodic approximation is off by up to ~0.6 days, enough to move a
+// phase across midnight and print the wrong date — it disagreed with a reference
+// frame on two of the four phases.
+//
+// Open-Meteo has no moon data, so this is computed rather than fetched.
+namespace {
+
+double phaseJde(double k, double phase) {
+    k += phase;
+    const double T = k / 1236.85;
+    double jde = 2451550.09766 + 29.530588861 * k + 0.00015437 * T * T
+               - 0.000000150 * T * T * T + 0.00000000073 * T * T * T * T;
+
+    const double E  = 1 - 0.002516 * T - 0.0000074 * T * T;
+    const double M  = qDegreesToRadians(2.5534 + 29.10535670 * k
+                                        - 0.0000014 * T * T - 0.00000011 * T * T * T);
+    const double Mp = qDegreesToRadians(201.5643 + 385.81693528 * k
+                                        + 0.0107582 * T * T + 0.00001238 * T * T * T);
+    const double F  = qDegreesToRadians(160.7108 + 390.67050284 * k
+                                        - 0.0016118 * T * T - 0.00000227 * T * T * T);
+    const double Om = qDegreesToRadians(124.7746 - 1.56375588 * k
+                                        + 0.0020672 * T * T + 0.00000215 * T * T * T);
+
+    const bool isQuarter = (phase == 0.25 || phase == 0.75);
+    if (!isQuarter) {
+        const bool isNew = (phase == 0.0);
+        jde += (isNew ? -0.40720 : -0.40614) * qSin(Mp)
+             + (isNew ?  0.17241 :  0.17302) * E * qSin(M)
+             + (isNew ?  0.01608 :  0.01614) * qSin(2 * Mp)
+             + (isNew ?  0.01039 :  0.01043) * qSin(2 * F)
+             + (isNew ?  0.00739 :  0.00734) * E * qSin(Mp - M)
+             + (isNew ? -0.00514 : -0.00515) * E * qSin(Mp + M)
+             + (isNew ?  0.00208 :  0.00209) * E * E * qSin(2 * M)
+             - 0.00111 * qSin(Mp - 2 * F) - 0.00057 * qSin(Mp + 2 * F)
+             + 0.00056 * E * qSin(2 * Mp + M) - 0.00042 * qSin(3 * Mp)
+             + 0.00042 * E * qSin(M + 2 * F) + 0.00038 * E * qSin(M - 2 * F)
+             - 0.00024 * E * qSin(2 * Mp - M) - 0.00017 * qSin(Om)
+             - 0.00007 * qSin(Mp + 2 * M);
+    } else {
+        jde += -0.62801 * qSin(Mp) + 0.17172 * E * qSin(M)
+             - 0.01183 * E * qSin(Mp + M) + 0.00862 * qSin(2 * Mp)
+             + 0.00804 * qSin(2 * F) + 0.00454 * E * qSin(Mp - M)
+             + 0.00204 * E * E * qSin(2 * M) - 0.00180 * qSin(Mp - 2 * F)
+             - 0.00070 * qSin(Mp + 2 * F) - 0.00040 * qSin(3 * Mp)
+             - 0.00034 * E * qSin(2 * Mp - M) + 0.00032 * E * qSin(M + 2 * F)
+             + 0.00032 * E * qSin(M - 2 * F) - 0.00028 * E * E * qSin(Mp + 2 * M)
+             + 0.00027 * E * qSin(2 * Mp + M) - 0.00017 * qSin(Om);
+        const double W = 0.00306 - 0.00038 * E * qCos(M) + 0.00026 * qCos(Mp)
+                       - 0.00002 * qCos(Mp - M) + 0.00002 * qCos(Mp + M)
+                       + 0.00002 * qCos(2 * F);
+        jde += (phase == 0.25) ? W : -W;
+    }
+    return jde;
+}
+
+QDateTime jdToUtc(double jd) {
+    return QDateTime::fromMSecsSinceEpoch(
+        qint64((jd - 2440587.5) * 86400.0 * 1000.0), Qt::UTC);
+}
+
+} // namespace
+
+void WeatherBackend::buildAlmanac(const QJsonObject &daily) {
+    QVariantMap almanac;
+    const bool h12 = useTwelveHour();
+    const QString timeFmt = h12 ? QStringLiteral("h:mm AP") : QStringLiteral("HH:mm");
+
+    // Sunrise/sunset for the first two days. timezone=auto means these are
+    // already local to the forecast location.
+    const QJsonArray times   = daily["time"].toArray();
+    const QJsonArray sunrise = daily["sunrise"].toArray();
+    const QJsonArray sunset  = daily["sunset"].toArray();
+    QVariantList days;
+    for (int i = 0; i < qMin(2, times.size()); ++i) {
+        const QDate date = QDate::fromString(times.at(i).toString(), Qt::ISODate);
+        const QDateTime rise = QDateTime::fromString(sunrise.at(i).toString(), Qt::ISODate);
+        const QDateTime set  = QDateTime::fromString(sunset.at(i).toString(),  Qt::ISODate);
+        days.append(QVariantMap{
+            { "name", date.isValid()
+                  ? QLocale::c().dayName(date.dayOfWeek(), QLocale::LongFormat).toUpper()
+                  : QString() },
+            { "sunrise", rise.isValid() ? QLocale::c().toString(rise, timeFmt).toUpper() : QString() },
+            { "sunset",  set.isValid()  ? QLocale::c().toString(set,  timeFmt).toUpper() : QString() },
+        });
+    }
+    almanac["days"] = days;
+
+    // Next occurrence of each principal phase, in chronological order.
+    const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+    const double jdNow = nowUtc.toMSecsSinceEpoch() / 86400000.0 + 2440587.5;
+    const QDate today = nowUtc.date();
+    const double kBase = std::floor((today.year() + today.dayOfYear() / 365.25 - 2000.0) * 12.3685);
+
+    QList<QPair<double, QString>> found;
+    const QList<QPair<double, QString>> wanted = {
+        { 0.00, QStringLiteral("NEW")   }, { 0.25, QStringLiteral("FIRST") },
+        { 0.50, QStringLiteral("FULL")  }, { 0.75, QStringLiteral("LAST")  },
+    };
+    for (const auto &w : wanted) {
+        for (int dk = -2; dk <= 3; ++dk) {
+            const double jde = phaseJde(kBase + dk, w.first);
+            if (jde > jdNow) { found.append({ jde, w.second }); break; }
+        }
+    }
+    std::sort(found.begin(), found.end(),
+              [](const QPair<double, QString> &a, const QPair<double, QString> &b) {
+                  return a.first < b.first;
+              });
+
+    QVariantList moons;
+    for (const auto &f : found) {
+        // Render in the forecast location's timezone, not UTC. A phase at
+        // 02:23 UTC is the previous evening in New York — getting this wrong
+        // shifts the printed date by a day for roughly a third of all phases.
+        const QDate local = jdToUtc(f.first).addSecs(m_utcOffset).date();
+        moons.append(QVariantMap{
+            { "name", f.second },
+            { "date", QLocale::c().toString(local, QStringLiteral("MMM d")).toUpper() },
+        });
+    }
+    almanac["moons"] = moons;
+
+    m_almanac = almanac;
+}
+
+bool WeatherBackend::useTwelveHour() const {
+    return moduleConfig()["hours_format"].toString(QStringLiteral("24-hour"))
+               .startsWith(QLatin1String("12"));
 }

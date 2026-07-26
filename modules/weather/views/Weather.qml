@@ -18,7 +18,8 @@ FocusScope {
     // entry here plus one option in the backend's getDisplays().
     readonly property var allScreens: [
         { id: "current",  source: "screens/CurrentConditions.qml" },
-        { id: "extended", source: "screens/ExtendedForecast.qml"  }
+        { id: "extended", source: "screens/ExtendedForecast.qml"  },
+        { id: "almanac",  source: "screens/Almanac.qml"           }
     ]
     property var screens: []
     property int  screenIndex: 0
@@ -131,6 +132,7 @@ FocusScope {
             if (item.hasOwnProperty("wx"))           item.wx = weatherBackend.current
             if (item.hasOwnProperty("locationName")) item.locationName = weatherBackend.locationName
             if (item.hasOwnProperty("days"))         item.days = weatherBackend.forecast
+            if (item.hasOwnProperty("almanac"))      item.almanac = weatherBackend.almanac
         }
     }
 
