@@ -142,12 +142,9 @@ FocusScope {
         Keys.onUpPressed: {
             if (currentIndex > 0) currentIndex-- 
             else {
-                for (var i = rows.length - 1; i >= 0; i--) {
-                    if (rows[i].type !== "section") { currentIndex = i; break }
-                }
+                currentIndex = rows.length-1
             }
             rowList.positionViewAtIndex(currentIndex, ListView.Contain)
-
         }
         Keys.onDownPressed: {
             if (currentIndex < count - 1) currentIndex++
