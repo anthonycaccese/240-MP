@@ -50,12 +50,21 @@ trace="$(LD_TRACE_LOADED_OBJECTS=1 "$HERE/usr/bin/240mp" 2>/dev/null
 if [ -n "$trace" ]; then
     needs_fallback=0
     for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
-              libva-wayland.so.2; do
+              libva-wayland.so.2 libvulkan.so.1; do
         if printf '%s\n' "$trace" | grep -q "$so => not found"; then
             needs_fallback=1
             break
         fi
     done
+fi
+
+# A trace resolves libraries, not the symbols inside them. Batocera ships a
+# libvulkan.so.1 built without Wayland support, so mpv died on "undefined symbol:
+# vkCreateWaylandSurfaceKHR" (via libplacebo) while every library resolved fine.
+# Actually running mpv catches that, and anything else that stops it starting.
+# The app binary has no equivalent no-op flag, so it stays trace-only.
+if [ "$needs_fallback" = "0" ] && ! "$HERE/usr/bin/mpv" --version >/dev/null 2>&1; then
+    needs_fallback=1
 fi
 
 # usr/lib joins the path too, not just the fallback directory: linuxdeploy marks

@@ -129,19 +129,29 @@ log "Deploying Qt + libraries"
     --icon-file "$SRC_ROOT/packaging/linux/240-mp.png"
 
 # ── 6. Stage the Wayland fallback set ─────────────────────────────────────────
-# SDL2 and mpv are both built against libwayland on Debian/Ubuntu, so the AppImage
-# hard-needs libwayland-client/-cursor/-egl even when it will only ever run under
-# X11 — and mpv additionally hard-needs libva-wayland. Step 7 used to delete all
-# of them along with the driver libs, which made the app unlaunchable on X11-only
-# images that ship no Wayland at all (Batocera and other buildroot handhelds):
-# ld.so aborts before main(). None of them are driver libraries — the three
-# libwayland ones are protocol shims, and libva-wayland is a 27 KB glue layer
-# exporting three vaGetDisplayWl-style entry points that delegates to libva.so.2,
-# which still dlopens the host's real VA driver. So keep copies aside and let
-# AppRun reach for them only when the host cannot satisfy them itself.
-# See packaging/linux/AppRun.
+# Debian/Ubuntu build SDL2 and mpv with Wayland support on, so the bundle needs
+# the Wayland-facing libraries even on a machine that will only ever run X11.
+# Step 7 used to delete all of them along with the driver libs, which made the
+# app unlaunchable on X11-only images that ship no Wayland at all (Batocera and
+# other buildroot handhelds). Each is a vendor-neutral shim rather than a driver,
+# so a bundled copy is a safe substitute:
+#
+#   libwayland-client/-cursor/-egl  protocol shims (SDL2 and mpv link all three)
+#   libva-wayland.so.2              27 KB of vaGetDisplayWl glue; the real VA
+#                                   driver is still dlopened by host libva.so.2
+#   libvulkan.so.1                  the Khronos *loader*, not a driver — it
+#                                   dlopens the host's ICD from vulkan/icd.d, so
+#                                   hardware decode stays on the host driver
+#
+# libvulkan earns its place for a different reason than the rest: Batocera *has*
+# a libvulkan.so.1, but one built without Wayland support, so mpv died on
+# "undefined symbol: vkCreateWaylandSurfaceKHR" (via libplacebo). A missing
+# symbol inside a library that exists is invisible to ldd and to the build-time
+# audit — only the target can reveal it. Ours exports the full WSI set.
+#
+# AppRun reaches for these only when the host cannot satisfy them itself.
 FALLBACK_LIBS="libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1
-               libva-wayland.so.2"
+               libva-wayland.so.2 libvulkan.so.1"
 FALLBACK_DIR="$APPDIR/usr/lib/fallback"
 
 host_lib_path() {
