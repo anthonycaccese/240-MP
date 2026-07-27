@@ -285,7 +285,9 @@ void NfcReaderBackend::stopPolling() {
     if (m_watchdog)
         m_watchdog->stop();
 
-    abandonWorker(1500);
+    // Settings changes run on the main thread, so release logical ownership
+    // without waiting for a potentially wedged PC/SC call to return.
+    abandonWorker(0);
     m_lastSampleMs = 0;
     m_respawnCount = 0;
 
