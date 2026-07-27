@@ -282,8 +282,10 @@ For the **Steam Deck** and other Intel/AMD Linux machines, 240-MP ships as an **
 
 ### Requirements
 
-- A Steam Deck (any model) or an x86_64 Linux machine with a graphical desktop (X11 or Wayland)
+- A Steam Deck (running SteamOS) or an x86_64 Linux machine running a graphical session: X11, or Wayland with XWayland available (the AppImage ships Qt's `xcb` platform plugin)
 - Internet access
+
+The AppImage carries its own copy of the Wayland client libraries and uses them only if the system has none, so X11-only distributions that ship no Wayland at all (e.g. Batocera and similar buildroot-based images) should be able to run it too.
 
 ### Steps (Steam Deck)
 

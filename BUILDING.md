@@ -207,7 +207,19 @@ CMAKE_PREFIX_PATH=/path/to/Qt/6.7.x/gcc_64 scripts/build-appimage.sh --configure
 
 This produces `240-MP-linux-x86_64.AppImage` in the repo root. On first run the script downloads `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` into `.appimage-tools/` (cached). Drop `--configure` if you have already built into `build/` yourself.
 
-The script installs into an `AppDir` using the FHS layout (`usr/bin/240mp`, `usr/share/240mp`), bundles a copy of `mpv`, deploys Qt, then prunes host-provided GPU/driver libraries (VA-API, GL, libdrm, Wayland…) so the target's own drivers are used.
+The script installs into an `AppDir` using the FHS layout (`usr/bin/240mp`, `usr/share/240mp`), bundles a copy of `mpv`, deploys Qt, then prunes host-provided GPU/driver libraries (VA-API, GL, libdrm…) so the target's own drivers are used.
+
+#### Wayland client libraries and X11-only targets
+
+Debian/Ubuntu build SDL2 and mpv with the Wayland backend on, so both hard-link `libwayland-client`, `libwayland-cursor` and `libwayland-egl`. The dynamic loader therefore needs all three **even on a machine that will only ever run X11** — and minimal X11-only images (Batocera, other buildroot handhelds, slim containers) ship none of them, so the app used to die before `main()` with `error while loading shared libraries: libwayland-egl.so.1`.
+
+These are protocol shims rather than driver libraries, so the build stages a copy in `usr/lib/fallback/` instead of pruning them, and `packaging/linux/AppRun` prepends that directory to `LD_LIBRARY_PATH` **only when the host provides none of the three**. A real Wayland host keeps using its own copies, matching whatever its Mesa EGL loads. `AppRun` also pins `QT_QPA_PLATFORM=xcb` when `DISPLAY` is set — the bundle ships the xcb platform plugin only.
+
+#### Host-library audit
+
+After pruning, the script walks every ELF in the `AppDir`, collects the `DT_NEEDED` sonames, and fails the build if any of them is neither bundled nor allowed to come from the host. The allowed set is `ALLOWED_HOST_LIBS` (the upstream AppImage excludelist) plus whatever the pruning step just deleted, added automatically so the two lists can't drift apart. That set is the explicit promise about which machines can run the build — the Wayland breakage above was exactly this promise growing silently.
+
+If the audit fails it prints each unsatisfied soname and the files needing it. Usually the fix is to bundle the library. Only add it to `ALLOWED_HOST_LIBS` if every supported target genuinely provides it; to unblock a release without editing the script, pass `ALLOW_HOST_LIBS_EXTRA="soname …"`.
 
 ### Run
 

@@ -1,0 +1,71 @@
+#!/bin/sh
+# ──────────────────────────────────────────────────────────────────────────────
+# AppImage entry point for 240-MP (Linux x86_64).
+#
+# Installed over the symlink linuxdeploy generates (see scripts/build-appimage.sh
+# step 8). Two jobs, both about surviving hosts that are not a normal desktop:
+#
+#   1. Wayland client libraries. The bundled SDL2 and mpv both hard-link
+#      libwayland-client/-cursor/-egl (Debian/Ubuntu build them with the Wayland
+#      backend on), so ld.so needs all three even on a machine that will only
+#      ever run X11. Distros with a Wayland session provide them; minimal X11-only
+#      images — Batocera, buildroot-based handhelds, slim containers — do not, and
+#      the app dies in the loader before main() runs. We carry a copy in
+#      usr/lib/fallback and reach for it only when the host has none, so a real
+#      Wayland host keeps using its own (matching whatever its Mesa EGL loads).
+#
+#   2. Qt platform plugin. The bundle ships xcb only, so pin it when there is a
+#      DISPLAY rather than letting Qt probe for a wayland plugin that isn't here.
+#
+# Deliberately POSIX sh, no bashisms: the shell on a buildroot image is busybox
+# ash. Both behaviours yield to a value the user already set.
+# ──────────────────────────────────────────────────────────────────────────────
+
+HERE="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+
+# Is $1 (a soname) resolvable from the host's own library path? Directory probing
+# comes first and ldconfig second on purpose — buildroot images frequently ship no
+# ldconfig at all, so it cannot be the primary check. The ldconfig answer is
+# confirmed against the filesystem because /etc/ld.so.cache happily keeps listing
+# libraries that have already been removed.
+have_lib() {
+    for d in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /lib64 /usr/lib64 /lib /usr/lib; do
+        if [ -e "$d/$1" ]; then
+            return 0
+        fi
+    done
+    if command -v ldconfig >/dev/null 2>&1; then
+        for p in $(ldconfig -p 2>/dev/null | awk -v s="$1" '$1 == s { print $NF }'); do
+            if [ -e "$p" ]; then
+                return 0
+            fi
+        done
+    fi
+    return 1
+}
+
+# All-or-nothing: if any one of the three is missing we take the whole bundled
+# set. Mixing a host libwayland-client with our libwayland-egl is the one
+# combination that could genuinely misbehave.
+#
+# usr/lib joins the path too, not just the fallback directory: linuxdeploy marks
+# the bundled binaries with RUNPATH, which — unlike RPATH — is not inherited by
+# their dependencies' own lookups. Without this, libwayland-client resolves but
+# its libffi does not on a host that has no system copy.
+for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1; do
+    if ! have_lib "$so"; then
+        LD_LIBRARY_PATH="$HERE/usr/lib/fallback:$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        export LD_LIBRARY_PATH
+        break
+    fi
+done
+
+# Matches what MpvController already does for the player process (it drops
+# WAYLAND_DISPLAY whenever DISPLAY is set) and the WAYLAND_DISPLAY → DISPLAY →
+# eglfs ladder in scripts/run-local.sh.
+if [ -n "${DISPLAY:-}" ]; then
+    QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+    export QT_QPA_PLATFORM
+fi
+
+exec "$HERE/usr/bin/240mp" "$@"
