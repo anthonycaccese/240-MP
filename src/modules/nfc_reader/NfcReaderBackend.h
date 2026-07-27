@@ -45,10 +45,9 @@ public:
     Q_INVOKABLE void reloadMapping();
     Q_INVOKABLE void resetAfterPlayback();
 
-    // The module's Root.qml raises/lowers this on load/unload. Polling runs
-    // for the whole app lifetime (the watchdog needs it), but card events must
-    // not do anything — no state changes, no playback — unless the user is
-    // inside the NFC module.
+    // The module's Root.qml raises/lowers this on load/unload. The configured
+    // enabled setting owns polling lifetime; active view state only decides
+    // whether card events may change state or request playback.
     Q_INVOKABLE void setModuleActive(bool active);
 
     Q_INVOKABLE QVariantMap getSavedPosition(const QString &videoPath);
@@ -94,6 +93,7 @@ private:
     QString m_dataRoot;
     QString m_tagsDir;
     QHash<QString, MappingEntry> m_mapping;
+    bool m_pollingEnabled = false;
     QThread *m_workerThread = nullptr;
     NfcPollWorker *m_worker = nullptr;
     QTimer *m_watchdog = nullptr;
@@ -116,6 +116,9 @@ private:
     void scanTagsDir();
     bool parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut) const;
     void writeStubFile(const QString &normalizedUid);
+    void setPollingEnabled(bool enabled);
+    void startPolling();
+    void stopPolling();
     void startWorker();
     void abandonWorker(int waitMs);
     void setCardState(const QString &state, const QString &uid = {}, const QString &title = {});

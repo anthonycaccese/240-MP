@@ -5,6 +5,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
+#include <QMetaType>
 #include <QTimer>
 #include <QDateTime>
 #include <QDebug>
@@ -182,21 +184,25 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
 {
     qDebug("[NfcReader] Initializing NFC reader backend");
 
-    // Resolve the configured tags directory (falls back to the dataRoot/nfc_tags default).
+    // Resolve module settings (the tags directory falls back to dataRoot/nfc_tags).
     m_tagsDir = m_dataRoot + "/" + kTagsDirName;
+    bool configuredEnabled = false;
     QFile f(m_dataRoot + "/config.json");
     if (f.open(QIODevice::ReadOnly)) {
-        const QString dir = QJsonDocument::fromJson(f.readAll()).object()
-            ["modules"].toObject()["com.240mp.nfc_reader"].toObject()
-            ["tags_directory"].toString();
+        const QJsonObject moduleConfig = QJsonDocument::fromJson(f.readAll()).object()
+            ["modules"].toObject()["com.240mp.nfc_reader"].toObject();
+        const QString dir = moduleConfig["tags_directory"].toString();
         if (!dir.isEmpty())
             m_tagsDir = dir;
+
+        const QJsonValue enabled = moduleConfig["enabled"];
+        if (enabled.isBool())
+            configuredEnabled = enabled.toBool();
     }
     qDebug("[NfcReader] Tags dir: %s", qPrintable(tagsDirPath()));
 
     QDir().mkpath(tagsDirPath());
     scanTagsDir();
-    startWorker();
 
     // If the worker wedges inside a PC/SC call, first report the reader as
     // disconnected rather than showing a stale "tap a card" while taps go
@@ -204,6 +210,8 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
     m_watchdog = new QTimer(this);
     m_watchdog->setInterval(2000);
     connect(m_watchdog, &QTimer::timeout, this, [this]() {
+        if (!m_pollingEnabled || !m_workerThread || !m_worker) return;
+
         const qint64 stalledMs = QDateTime::currentMSecsSinceEpoch() - m_lastSampleMs;
         if (stalledMs < kStallDisconnectMs) return;
 
@@ -221,21 +229,80 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
             qWarning("[NfcReader] Poll thread wedged for %llds - restarting it (attempt %d/%d)",
                      static_cast<long long>(stalledMs / 1000), m_respawnCount, kMaxRespawns);
             abandonWorker(100);
+            if (!m_pollingEnabled) return;
             startWorker();
-            m_lastSampleMs = QDateTime::currentMSecsSinceEpoch();
             if (m_respawnCount == kMaxRespawns) {
-                qWarning("[NfcReader] Repeated PC/SC wedges - giving up until app restart");
+                qWarning("[NfcReader] Repeated PC/SC wedges - pausing restarts until polling recovers or NFC is re-enabled");
             }
         }
     });
-    m_watchdog->start();
+
+    if (configuredEnabled) {
+        setPollingEnabled(true);
+    } else {
+        qInfo("[NfcReader] Polling disabled by configuration");
+    }
 }
 
 NfcReaderBackend::~NfcReaderBackend() {
+    m_pollingEnabled = false;
+    if (m_watchdog)
+        m_watchdog->stop();
     abandonWorker(1500);
 }
 
+void NfcReaderBackend::setPollingEnabled(bool enabled) {
+    if (m_pollingEnabled == enabled) return;
+
+    m_pollingEnabled = enabled;
+    if (enabled)
+        startPolling();
+    else
+        stopPolling();
+}
+
+void NfcReaderBackend::startPolling() {
+    if (!m_pollingEnabled) return;
+
+    if (!available()) {
+        if (m_watchdog)
+            m_watchdog->stop();
+        qInfo("[NfcReader] Polling enabled but PC/SC support is unavailable");
+        return;
+    }
+
+    if (m_workerThread || m_worker) return;
+
+    m_respawnCount = 0;
+    startWorker();
+    if (!m_workerThread || !m_worker) return;
+
+    m_watchdog->start();
+    qInfo("[NfcReader] Polling started");
+}
+
+void NfcReaderBackend::stopPolling() {
+    if (m_watchdog)
+        m_watchdog->stop();
+
+    abandonWorker(1500);
+    m_lastSampleMs = 0;
+    m_respawnCount = 0;
+
+    if (m_readerConnected) {
+        m_readerConnected = false;
+        emit readerConnectedChanged();
+    }
+    m_lastUid.clear();
+    m_playbackActive = false;
+    setCardState("none");
+
+    qInfo("[NfcReader] Polling disabled");
+}
+
 void NfcReaderBackend::startWorker() {
+    if (!m_pollingEnabled || !available() || m_workerThread || m_worker) return;
+
     m_lastSampleMs = QDateTime::currentMSecsSinceEpoch();
     m_workerThread = new QThread(this);
     m_worker = new NfcPollWorker;
@@ -256,7 +323,7 @@ void NfcReaderBackend::abandonWorker(int waitMs) {
     } else {
         // The thread is stuck in an uninterruptible PC/SC call: it can't be
         // terminated (mach_msg is not a cancellation point) and destroying a
-        // running QThread aborts the process. Unparent and leak it instead;
+        // running QThread aborts the process. Unparent it instead;
         // if the call ever returns, the thread exits (quit() was already
         // requested) and deletes itself.
         m_workerThread->setParent(nullptr);
@@ -279,8 +346,14 @@ void NfcReaderBackend::setTagsDir(const QString &path) {
 }
 
 void NfcReaderBackend::onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value) {
-    if (moduleId == QLatin1String("com.240mp.nfc_reader") && key == QLatin1String("tags_directory"))
+    if (moduleId != QLatin1String("com.240mp.nfc_reader")) return;
+
+    if (key == QLatin1String("enabled")) {
+        const bool enabled = value.metaType().id() == QMetaType::Bool && value.toBool();
+        setPollingEnabled(enabled);
+    } else if (key == QLatin1String("tags_directory")) {
         setTagsDir(value.toString());
+    }
 }
 
 // One .txt file per card: the filename (minus .txt) is the display title, the
@@ -533,6 +606,8 @@ QString NfcReaderBackend::resolveVideoPath(const QString &path) const {
 }
 
 void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid) {
+    if (!m_pollingEnabled || sender() != m_worker) return;
+
     m_lastSampleMs = QDateTime::currentMSecsSinceEpoch();
     m_respawnCount = 0;
 
