@@ -128,15 +128,20 @@ log "Deploying Qt + libraries"
     --desktop-file "$SRC_ROOT/packaging/linux/240-mp.desktop" \
     --icon-file "$SRC_ROOT/packaging/linux/240-mp.png"
 
-# ── 6. Stage the Wayland client fallback set ──────────────────────────────────
+# ── 6. Stage the Wayland fallback set ─────────────────────────────────────────
 # SDL2 and mpv are both built against libwayland on Debian/Ubuntu, so the AppImage
 # hard-needs libwayland-client/-cursor/-egl even when it will only ever run under
-# X11. Step 7 used to delete them along with the driver libs, which made the app
-# unlaunchable on X11-only images that ship no Wayland at all (Batocera and other
-# buildroot handhelds): ld.so aborts before main(). They are not driver libs —
-# they are vendor-neutral protocol shims — so keep a copy aside and let AppRun
-# fall back to it only when the host provides none. See packaging/linux/AppRun.
-WAYLAND_FALLBACK_LIBS="libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1"
+# X11 — and mpv additionally hard-needs libva-wayland. Step 7 used to delete all
+# of them along with the driver libs, which made the app unlaunchable on X11-only
+# images that ship no Wayland at all (Batocera and other buildroot handhelds):
+# ld.so aborts before main(). None of them are driver libraries — the three
+# libwayland ones are protocol shims, and libva-wayland is a 27 KB glue layer
+# exporting three vaGetDisplayWl-style entry points that delegates to libva.so.2,
+# which still dlopens the host's real VA driver. So keep copies aside and let
+# AppRun reach for them only when the host cannot satisfy them itself.
+# See packaging/linux/AppRun.
+FALLBACK_LIBS="libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1
+               libva-wayland.so.2"
 FALLBACK_DIR="$APPDIR/usr/lib/fallback"
 
 host_lib_path() {
@@ -152,14 +157,17 @@ mkdir -p "$FALLBACK_DIR"
 # Move whatever linuxdeploy bundled (soname symlinks and versioned files alike)…
 find "$APPDIR/usr/lib" -maxdepth 1 -name 'libwayland*' -print0 2>/dev/null |
     while IFS= read -r -d '' f; do mv "$f" "$FALLBACK_DIR/"; done
-# …then fill the gaps from the build host. libwayland-client is on the upstream
-# AppImage excludelist, so linuxdeploy never bundles it and it always lands here.
-for so in $WAYLAND_FALLBACK_LIBS; do
+# …then fill the gaps. libwayland-client is on the upstream AppImage excludelist
+# so linuxdeploy never bundles it, and libva-wayland is not caught by the glob
+# above — both always land here, copied from the build host. (The libva-wayland
+# copy linuxdeploy did put in usr/lib is removed by step 7's libva* pattern.)
+for so in $FALLBACK_LIBS; do
     [ -e "$FALLBACK_DIR/$so" ] && continue
     src="$(host_lib_path "$so")" || {
         echo "ERROR: $so is in neither the AppDir nor the build host's library path." >&2
-        echo "       Install it (apt-get install libwayland-client0 libwayland-cursor0 libwayland-egl1)" >&2
-        echo "       — an incomplete fallback set breaks every X11-only target." >&2
+        echo "       Install it (apt-get install libwayland-client0 libwayland-cursor0" >&2
+        echo "       libwayland-egl1 libva-wayland2) — an incomplete fallback set" >&2
+        echo "       breaks every X11-only target." >&2
         exit 1
     }
     cp -L "$src" "$FALLBACK_DIR/$so"

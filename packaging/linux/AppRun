@@ -41,11 +41,16 @@ HERE="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
 # is present but unusable) means we cannot tell — then prefer our own known-good
 # copies. They ship in the image regardless, so the only cost of being wrong that
 # way is using ours where the host's would also have done.
+# Both binaries are traced: mpv is a separate executable the app hands off to,
+# with dependencies the app itself never has (libva-wayland is mpv's alone), so
+# tracing only the app would miss a host that can start the UI but not play.
 needs_fallback=1
-trace="$(LD_TRACE_LOADED_OBJECTS=1 "$HERE/usr/bin/240mp" 2>/dev/null)"
+trace="$(LD_TRACE_LOADED_OBJECTS=1 "$HERE/usr/bin/240mp" 2>/dev/null
+         LD_TRACE_LOADED_OBJECTS=1 "$HERE/usr/bin/mpv" 2>/dev/null)"
 if [ -n "$trace" ]; then
     needs_fallback=0
-    for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1; do
+    for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
+              libva-wayland.so.2; do
         if printf '%s\n' "$trace" | grep -q "$so => not found"; then
             needs_fallback=1
             break
