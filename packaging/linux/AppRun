@@ -23,42 +23,44 @@
 
 HERE="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
 
-# Is $1 (a soname) resolvable from the host's own library path? Directory probing
-# comes first and ldconfig second on purpose — buildroot images frequently ship no
-# ldconfig at all, so it cannot be the primary check. The ldconfig answer is
-# confirmed against the filesystem because /etc/ld.so.cache happily keeps listing
-# libraries that have already been removed.
-have_lib() {
-    for d in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /lib64 /usr/lib64 /lib /usr/lib; do
-        if [ -e "$d/$1" ]; then
-            return 0
+# Ask the dynamic linker rather than guessing from filenames.
+# LD_TRACE_LOADED_OBJECTS makes ld.so resolve the binary's whole dependency tree
+# and print "=> not found" for whatever it cannot satisfy, using the host's real
+# search path and architecture. Checking for files by name cannot match that — it
+# is fooled by a multilib tree with a 32-bit copy in a directory we look in, by
+# libraries kept somewhere non-standard, and by a stale ld.so.cache. This asks
+# the question that actually matters: will this binary start?
+#
+# Only the three we carry spares of count. Other unresolved libraries are not
+# ours to fix — a host without Mesa is missing libGL whatever we do, and reacting
+# to that would wrongly pull our Wayland copies ahead of working host ones.
+# All-or-nothing across the three, so a host libwayland-client is never mixed
+# with our libwayland-egl.
+#
+# No readable answer (a non-glibc loader, or ld.so bailing out because a library
+# is present but unusable) means we cannot tell — then prefer our own known-good
+# copies. They ship in the image regardless, so the only cost of being wrong that
+# way is using ours where the host's would also have done.
+needs_fallback=1
+trace="$(LD_TRACE_LOADED_OBJECTS=1 "$HERE/usr/bin/240mp" 2>/dev/null)"
+if [ -n "$trace" ]; then
+    needs_fallback=0
+    for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1; do
+        if printf '%s\n' "$trace" | grep -q "$so => not found"; then
+            needs_fallback=1
+            break
         fi
     done
-    if command -v ldconfig >/dev/null 2>&1; then
-        for p in $(ldconfig -p 2>/dev/null | awk -v s="$1" '$1 == s { print $NF }'); do
-            if [ -e "$p" ]; then
-                return 0
-            fi
-        done
-    fi
-    return 1
-}
+fi
 
-# All-or-nothing: if any one of the three is missing we take the whole bundled
-# set. Mixing a host libwayland-client with our libwayland-egl is the one
-# combination that could genuinely misbehave.
-#
 # usr/lib joins the path too, not just the fallback directory: linuxdeploy marks
 # the bundled binaries with RUNPATH, which — unlike RPATH — is not inherited by
 # their dependencies' own lookups. Without this, libwayland-client resolves but
 # its libffi does not on a host that has no system copy.
-for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1; do
-    if ! have_lib "$so"; then
-        LD_LIBRARY_PATH="$HERE/usr/lib/fallback:$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        export LD_LIBRARY_PATH
-        break
-    fi
-done
+if [ "$needs_fallback" = "1" ]; then
+    LD_LIBRARY_PATH="$HERE/usr/lib/fallback:$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH
+fi
 
 # Matches what MpvController already does for the player process (it drops
 # WAYLAND_DISPLAY whenever DISPLAY is set) and the WAYLAND_DISPLAY → DISPLAY →
