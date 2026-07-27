@@ -13,8 +13,8 @@ Item {
     property var    wx: ({})
     property string locationName: ""
 
-    readonly property real lineSize: root.sh * 0.075
-    readonly property real lineGap:  root.sh * 0.018
+    readonly property real lineSize: root.sh * 0.05 //24
+    readonly property real lineGap:  root.sh * 0.0083333 //4
 
     Column {
         anchors.left: parent.left
@@ -35,6 +35,7 @@ Item {
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
+            elide: Text.ElideRight
         }
         Text {
             text: "TEMPERATURE: " + (screen.wx.temperature || "")
@@ -48,24 +49,28 @@ Item {
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
+            elide: Text.ElideRight
         }
         Text {
             text: "BAROMETRIC PRESSURE: " + (screen.wx.pressure || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
+            elide: Text.ElideRight
         }
         Text {
             text: "WIND: " + (screen.wx.wind || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
+            elide: Text.ElideRight
         }
         Text {
-            text: "VISIB: " + (screen.wx.visibility || "")
+            text: "VISIBILITY: " + (screen.wx.visibility || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
+            elide: Text.ElideRight
         }
     }
 }

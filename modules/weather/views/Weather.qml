@@ -137,9 +137,9 @@ FocusScope {
         anchors.centerIn: parent
         visible: !weatherBackend.hasData
         text: "LOADING..."
-        color: root.tertiaryColor
+        color: root.primaryColor
         font.family: root.globalFont
-        font.pixelSize: root.sh * 0.06
+        font.pixelSize: root.sh * 0.05 //24
     }
 
     // Screen area, above the status bar.
@@ -150,9 +150,9 @@ FocusScope {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: statusBar.top
-        anchors.leftMargin:   root.sw * 0.055
-        anchors.rightMargin:  root.sw * 0.055
-        anchors.topMargin:    root.sh * 0.075
+        anchors.leftMargin: root.sw * 0.125 //80
+        anchors.rightMargin:  root.sw * 0.125 //80
+        anchors.topMargin: root.sh * 0.125 //60
         anchors.bottomMargin: root.sh * 0.02
 
         source: weatherRoot.screens.length > 0
@@ -186,9 +186,9 @@ FocusScope {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.leftMargin:   root.sw * 0.055
-        anchors.rightMargin:  root.sw * 0.055
-        anchors.bottomMargin: root.sh * 0.055
+        anchors.leftMargin: root.sw * 0.125 //80
+        anchors.rightMargin:  root.sw * 0.125 //80
+        anchors.bottomMargin: root.sh * 0.1041667 //50
 
         utcOffsetSeconds: weatherBackend.utcOffsetSeconds
         twelveHour: weatherRoot.twelveHour
@@ -196,9 +196,13 @@ FocusScope {
             var c = weatherBackend.current
             if (!weatherBackend.hasData) return []
             return [
-                "CONDITIONS AT " + weatherBackend.locationName,
-                "HUMIDITY: " + c.humidity + "  DEWPOINT: " + c.dewPoint,
-                "VISIB: " + c.visibility
+                weatherBackend.locationName,
+                c.condition + " " + c.temperature,
+                "HUMIDITY: " + c.humidity,
+                "DEWPOINT: " + c.dewPoint,
+                "PRESSURE: " + c.pressure,
+                "WIND: " + c.wind,
+                "VISIBILITY: " + c.visibility
             ]
         }
     }

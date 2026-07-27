@@ -69,7 +69,7 @@ Item {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Math.max(1, root.sh * 0.004)
+        height: Math.max(1, root.sh * 0.0041667)//2
         color: root.tertiaryColor
     }
 
@@ -79,23 +79,23 @@ Item {
         anchors.topMargin: root.sh * 0.008
         anchors.left: parent.left
         anchors.right: parent.right
-        height: root.sh * 0.055
+        height: root.sh * 0.05//24
 
         Text {
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             text: statusBar._date
-            color: root.secondaryColor
+            color: root.tertiaryColor
             font.family: root.globalFont
-            font.pixelSize: root.sh * 0.05
+            font.pixelSize: root.sh * 0.0375//18
         }
         Text {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             text: statusBar._time
-            color: root.secondaryColor
+            color: root.tertiaryColor
             font.family: root.globalFont
-            font.pixelSize: root.sh * 0.05
+            font.pixelSize: root.sh * 0.0375//18
         }
     }
 
@@ -104,13 +104,13 @@ Item {
         anchors.top: dateRow.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        height: root.sh * 0.075
+        height: root.sh * 0.0583333//28
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
         text: statusBar.lines.length > 0
               ? statusBar.lines[statusBar._lineIndex % statusBar.lines.length] : ""
         color: root.primaryColor
         font.family: root.globalFont
-        font.pixelSize: root.sh * 0.07
+        font.pixelSize: root.sh * 0.05//24
     }
 }
