@@ -731,12 +731,20 @@ void MpvController::appendVideoArgs(QStringList &args) const {
         args << "--hwdec=videotoolbox";
 #elif defined(Q_OS_LINUX)
         // Desktop compositor (SteamDeck gamescope / KDE, x86_64 Intel/AMD): mpv
-        // sets no hwdec by default, so decode falls back to software. auto-safe
-        // lets mpv pick VA-API on the AMD APU / Intel/AMD GPUs while skipping
-        // decoders with known correctness issues. Degrades gracefully to software
-        // when no HW decoder is present (e.g. an RPi desktop dev run). Fully
-        // overridable via the mpv_video_args setting handled above.
-        args << "--hwdec=auto-safe";
+        // sets no hwdec by default, so decode falls back to software. This is an
+        // explicit priority list rather than auto-safe because auto-safe also
+        // considers Vulkan video decode, and on a host where neither NVDEC nor
+        // VA-API can initialise it walks all the way down to that: on Batocera
+        // with an NVIDIA GPU (no usable nvidia_drv_video.so, "Could not create
+        // device" for cuda) mpv picked h264-vulkan, presented exactly one frame
+        // and then deadlocked with the demuxer still buffering — a hard freeze
+        // needing SIGKILL. The Vulkan *output* path is fine and stays in use; only
+        // Vulkan decoding is excluded. VA-API still wins on the Deck's AMD APU and
+        // on Intel/AMD, NVDEC covers NVIDIA where it actually initialises, the
+        // -copy variants catch hosts whose VO interop is unavailable, and the
+        // trailing "no" degrades to software instead of hanging.
+        // Fully overridable via the mpv_video_args setting handled above.
+        args << "--hwdec=vaapi,nvdec,vaapi-copy,nvdec-copy,no";
 #endif
         // Any other desktop: leave mpv's defaults untouched.
     }

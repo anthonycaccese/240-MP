@@ -176,7 +176,7 @@ This directory is created automatically on first run. It is separate from the ap
 
 For Intel/AMD desktops and the **Steam Deck**, 240-MP ships as a self-contained **AppImage** — a single executable that bundles Qt, SDL2 and mpv, so it runs on immutable distros like SteamOS with no package-install step. (This differs from the Raspberry Pi arm64 build, which is a `.tar.gz` that relies on `apt` via `install.sh`.)
 
-The app itself is architecture-agnostic — the same C++/QML builds on x86_64 unchanged. On a desktop compositor (SteamOS gamescope / KDE, X11/Wayland) it uses `--hwdec=auto-safe`, letting mpv pick VA-API on Intel/AMD GPUs (overridable via `mpv_video_args`).
+The app itself is architecture-agnostic — the same C++/QML builds on x86_64 unchanged. On a desktop compositor (SteamOS gamescope / KDE, X11/Wayland) it passes `--hwdec=vaapi,nvdec,vaapi-copy,nvdec-copy,no`, letting mpv pick VA-API on Intel/AMD GPUs and NVDEC on NVIDIA, and degrading to software otherwise (overridable via `mpv_video_args`). This is an explicit list rather than `auto-safe` because `auto-safe` also considers Vulkan video decode: on a host where neither NVDEC nor VA-API initialises, mpv reaches it, shows one frame and then deadlocks. Vulkan *output* is unaffected and still used.
 
 ### Prerequisites (one-time)
 
