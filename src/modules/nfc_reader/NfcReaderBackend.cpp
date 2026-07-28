@@ -28,6 +28,9 @@ static constexpr qint64 kStallDisconnectMs = 3000;
 static constexpr qint64 kStallRespawnMs = 10000;
 static constexpr int kMaxRespawns = 5;
 static const char *kTagsDirName = "nfc_tags";
+// Must track the "enabled" toggle's default in modules/nfc_reader/manifest.json,
+// which is what AppCore falls back to when config.json has no value yet.
+static constexpr bool kManifestEnabledDefault = false;
 
 // ---------------------------------------------------------------------------
 // NfcPollWorker — lives on its own QThread; owns all PC/SC state and calls.
@@ -186,7 +189,12 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
 
     // Resolve module settings (the tags directory falls back to dataRoot/nfc_tags).
     m_tagsDir = m_dataRoot + "/" + kTagsDirName;
-    bool configuredEnabled = false;
+    // Whether polling runs must match whether AppCore shows the module at all,
+    // so this mirrors AppCore::isModuleEnabled: an unwritten setting means the
+    // manifest default (OFF for this module), and a present-but-not-bool value
+    // means enabled — otherwise a hand-edited config could list the module in
+    // the menu while the reader silently never polls.
+    bool configuredEnabled = kManifestEnabledDefault;
     QFile f(m_dataRoot + "/config.json");
     if (f.open(QIODevice::ReadOnly)) {
         const QJsonObject moduleConfig = QJsonDocument::fromJson(f.readAll()).object()
@@ -195,9 +203,8 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
         if (!dir.isEmpty())
             m_tagsDir = dir;
 
-        const QJsonValue enabled = moduleConfig["enabled"];
-        if (enabled.isBool())
-            configuredEnabled = enabled.toBool();
+        if (moduleConfig.contains("enabled"))
+            configuredEnabled = moduleConfig["enabled"].toBool(true);
     }
     qDebug("[NfcReader] Tags dir: %s", qPrintable(tagsDirPath()));
 
@@ -246,8 +253,7 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
 
 NfcReaderBackend::~NfcReaderBackend() {
     m_pollingEnabled = false;
-    if (m_watchdog)
-        m_watchdog->stop();
+    m_watchdog->stop();
     abandonWorker(1500);
 }
 
@@ -265,8 +271,7 @@ void NfcReaderBackend::startPolling() {
     if (!m_pollingEnabled) return;
 
     if (!available()) {
-        if (m_watchdog)
-            m_watchdog->stop();
+        m_watchdog->stop();
         qInfo("[NfcReader] Polling enabled but PC/SC support is unavailable");
         return;
     }
@@ -282,8 +287,7 @@ void NfcReaderBackend::startPolling() {
 }
 
 void NfcReaderBackend::stopPolling() {
-    if (m_watchdog)
-        m_watchdog->stop();
+    m_watchdog->stop();
 
     // Settings changes run on the main thread, so release logical ownership
     // without waiting for a potentially wedged PC/SC call to return.
@@ -311,6 +315,11 @@ void NfcReaderBackend::startWorker() {
     m_worker->moveToThread(m_workerThread);
     connect(m_workerThread, &QThread::started, m_worker, &NfcPollWorker::start);
     connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
+    // Set up here, not in abandonWorker(): a thread that exits between quit()
+    // and a connect() made afterwards has already emitted finished(), which
+    // would strand the QThread object. Harmless on the delete-after-wait path
+    // below — ~QObject drops the object's own pending deferred-delete event.
+    connect(m_workerThread, &QThread::finished, m_workerThread, &QObject::deleteLater);
     connect(m_worker, &NfcPollWorker::sampled, this, &NfcReaderBackend::onSampled);
     m_workerThread->start();
 }
@@ -323,13 +332,14 @@ void NfcReaderBackend::abandonWorker(int waitMs) {
     if (m_workerThread->wait(waitMs)) {
         delete m_workerThread;
     } else {
-        // The thread is stuck in an uninterruptible PC/SC call: it can't be
-        // terminated (mach_msg is not a cancellation point) and destroying a
-        // running QThread aborts the process. Unparent it instead;
+        // Either the caller did not want to block (waitMs 0, from a settings
+        // change) or the thread is stuck in an uninterruptible PC/SC call: it
+        // can't be terminated (mach_msg is not a cancellation point) and
+        // destroying a running QThread aborts the process. Unparent it instead;
         // if the call ever returns, the thread exits (quit() was already
-        // requested) and deletes itself.
+        // requested) and the deleteLater wired up in startWorker() reaps both
+        // it and its worker.
         m_workerThread->setParent(nullptr);
-        connect(m_workerThread, &QThread::finished, m_workerThread, &QObject::deleteLater);
     }
     m_workerThread = nullptr;
     m_worker = nullptr;
@@ -351,7 +361,9 @@ void NfcReaderBackend::onSettingChanged(const QString &moduleId, const QString &
     if (moduleId != QLatin1String("com.240mp.nfc_reader")) return;
 
     if (key == QLatin1String("enabled")) {
-        const bool enabled = value.metaType().id() == QMetaType::Bool && value.toBool();
+        // Same rule as the constructor / AppCore::isModuleEnabled: only an
+        // explicit false turns polling off.
+        const bool enabled = value.metaType().id() != QMetaType::Bool || value.toBool();
         setPollingEnabled(enabled);
     } else if (key == QLatin1String("tags_directory")) {
         setTagsDir(value.toString());
