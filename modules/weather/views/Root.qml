@@ -67,6 +67,13 @@ FocusScope {
     Component.onCompleted: replaceWith("Weather.qml", {})
 
     // Leaving the module stops the refresh timer — no point polling Open-Meteo
-    // for a screen nobody is looking at.
-    Component.onDestruction: { if (weatherBackend) weatherBackend.stop() }
+    // for a screen nobody is looking at — and silences the music. Both belong
+    // here rather than in Weather.qml so audio survives a swap between screens
+    // and stops exactly when the module exits.
+    Component.onDestruction: {
+        if (weatherBackend) {
+            weatherBackend.stop()
+            weatherBackend.stopMusic()
+        }
+    }
 }

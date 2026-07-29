@@ -51,6 +51,9 @@ FocusScope {
         rebuildRing()
 
         weatherBackend.start()
+        // No-op when the Music setting is off, so the view doesn't have to read
+        // the setting a second time.
+        weatherBackend.startMusic()
     }
 
     property var chosenDisplays: ({})
@@ -107,6 +110,11 @@ FocusScope {
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             weatherRoot.paused = !weatherRoot.paused
             event.accepted = true
+        } else if (event.key === Qt.Key_Down) {
+            // Independent of weatherRoot.paused: Enter pauses the carousel, and
+            // music should keep playing under a screen you're lingering on.
+            weatherBackend.toggleMusic()
+            event.accepted = true
         }
     }
 
@@ -124,6 +132,10 @@ FocusScope {
             // replaceWith, not navigateTo: pushing this view onto the back stack
             // would make BACK from the setup screen return here and immediately
             // retry the same failing lookup, trapping the user in a loop.
+            //
+            // Music stops here too: playing it over "your location file is
+            // missing" would be absurd.
+            weatherBackend.stopMusic()
             weatherRoot.replaceWith("Setup.qml", { reason: reason })
         }
     }

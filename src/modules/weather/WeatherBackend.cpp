@@ -1,6 +1,11 @@
 #include "WeatherBackend.h"
+#include "../../util/MpvLocator.h"
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QLocalSocket>
+#include <QProcess>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
@@ -29,6 +34,23 @@ const char *kNwsUserAgent = "240-MP/" APP_VERSION " (https://github.com/anthonyc
 
 // Open-Meteo publishes data roughly every 15 minutes.
 constexpr int kRefreshMs = 10 * 60 * 1000;
+
+// Played when the user has no weather_music.txt, so the module sounds right
+// with zero setup. Written the way a user would write them — spaces and all —
+// because musicPlaylist() applies the same encoding rule to both sources.
+//
+// The archive.org collection carries every track twice, .mp3 and .ogg; these
+// are the mp3s.
+const char *kBuiltInMusic[] = {
+    "https://archive.org/download/weatherscancompletecollection/01 Fair Weather.mp3",
+    "https://archive.org/download/weatherscancompletecollection/01 Lazy Days.mp3",
+    "https://archive.org/download/weatherscancompletecollection/02 Beach Frolic.mp3",
+    "https://archive.org/download/weatherscancompletecollection/03 Winter Tundra.mp3",
+    "https://archive.org/download/weatherscancompletecollection/04 Rainy Days.mp3",
+    "https://archive.org/download/weatherscancompletecollection/05 Easy Times.mp3",
+    "https://archive.org/download/weatherscancompletecollection/05 Midnight Cruise.mp3",
+    "https://archive.org/download/weatherscancompletecollection/06 Tropical Breeze.mp3",
+};
 
 // A station further away than this is describing somewhere else's weather.
 constexpr double kMaxStationKm = 25.0;
@@ -425,10 +447,22 @@ WeatherBackend::WeatherBackend(const QString &appRoot, const QString &dataRoot,
         fetchObservation();
         fetchOtherObservations();
     });
+
+    // Its own socket name: MpvController uses /240mp-mpv.sock for the player,
+    // and two mpvs sharing one path would hand the wrong process our commands.
+    m_musicSocketPath = QDir::tempPath() + QStringLiteral("/240mp-weather-music.sock");
+}
+
+WeatherBackend::~WeatherBackend() {
+    stopMusic();
 }
 
 QString WeatherBackend::location_file_path() const {
     return m_dataRoot + QStringLiteral("/weather_location.txt");
+}
+
+QString WeatherBackend::music_file_path() const {
+    return m_dataRoot + QStringLiteral("/weather_music.txt");
 }
 
 QJsonObject WeatherBackend::loadConfig() const {
@@ -500,20 +534,158 @@ void WeatherBackend::stop() {
     m_refresh->stop();
 }
 
+// ── Music ────────────────────────────────────────────────────────────────────
+
+QStringList WeatherBackend::musicPlaylist() const {
+    QStringList entries = readListFile(music_file_path());
+    if (entries.isEmpty()) {
+        for (const char *track : kBuiltInMusic)
+            entries << QString::fromUtf8(track);
+    }
+
+    QStringList out;
+    for (QString entry : entries) {
+        if (entry.startsWith(QLatin1String("http://"), Qt::CaseInsensitive)
+            || entry.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
+            // Only URLs get encoded. A local path with a space is already valid
+            // as-is, and percent-encoding one turns it into a missing file.
+            out << entry.replace(QLatin1Char(' '), QLatin1String("%20"));
+        } else {
+            // Relative paths resolve against the data dir, so a user can drop
+            // music beside weather_music.txt and name it with one word.
+            out << (QFileInfo(entry).isAbsolute() ? entry
+                                                  : QDir(m_dataRoot).filePath(entry));
+        }
+    }
+    return out;
+}
+
+bool WeatherBackend::musicPlaying() const {
+    return m_music && m_music->state() != QProcess::NotRunning && !m_musicPaused;
+}
+
+void WeatherBackend::startMusic() {
+    // Toggles are stored as JSON booleans, but tolerate the manifest's "ON"
+    // spelling in case a config was written before that convention.
+    const QJsonValue setting = moduleConfig()[QStringLiteral("music")];
+    const bool enabled = setting.isString()
+                             ? setting.toString().compare(QLatin1String("ON"),
+                                                          Qt::CaseInsensitive) == 0
+                             : setting.toBool(true);
+    if (!enabled) return;
+    if (m_music) return;
+
+    const QStringList tracks = musicPlaylist();
+    if (tracks.isEmpty()) return;
+
+    const QString bin = mpvbin::locate();
+    if (bin.isEmpty()) {
+        qWarning("[Weather] mpv not found — music will not play");
+        return;
+    }
+
+    QStringList args;
+    args << QStringLiteral("--no-video")
+         << QStringLiteral("--loop-playlist=inf")
+         // Shuffled once at load and looped forever, so the app never has to
+         // track a current track.
+         << QStringLiteral("--shuffle")
+         << QStringLiteral("--no-terminal")
+         << QStringLiteral("--really-quiet")
+         << QStringLiteral("--input-ipc-server=%1").arg(m_musicSocketPath)
+         // Everything after this is a file, so an entry starting with '-'
+         // cannot be mistaken for an option.
+         << QStringLiteral("--")
+         << tracks;
+
+    m_musicPaused = false;
+    m_music = new QProcess(this);
+    // mpv exiting on its own (no network, no readable files) leaves a stale
+    // pointer that would make startMusic() a no-op on the next visit.
+    connect(m_music, &QProcess::finished, this, [this](int, QProcess::ExitStatus) {
+        qInfo("[Weather] music process exited");
+        stopMusic();
+    });
+    m_music->start(bin, args);
+
+    // mpv creates the socket a beat after launch, so a single connect attempt
+    // loses the race. Same retry shape as MpvController.
+    if (!m_musicIpc) {
+        m_musicIpc = new QLocalSocket(this);
+        connect(m_musicIpc, &QLocalSocket::connected, this, [this]() {
+            m_musicConnect->stop();
+        });
+    }
+    if (!m_musicConnect) {
+        m_musicConnect = new QTimer(this);
+        m_musicConnect->setInterval(100);
+        connect(m_musicConnect, &QTimer::timeout, this, [this]() {
+            if (m_musicIpc->state() == QLocalSocket::ConnectedState
+                || m_musicIpc->state() == QLocalSocket::ConnectingState)
+                return;
+            m_musicIpc->connectToServer(m_musicSocketPath);
+        });
+    }
+    m_musicConnect->start();
+
+    qInfo("[Weather] music started — %lld track(s)", static_cast<long long>(tracks.size()));
+    emit musicStateChanged();
+}
+
+void WeatherBackend::stopMusic() {
+    if (m_musicConnect) m_musicConnect->stop();
+    if (m_musicIpc)     m_musicIpc->abort();
+
+    if (m_music) {
+        QProcess *p = m_music;
+        m_music = nullptr;          // cleared first: terminate() can re-enter
+        p->disconnect(this);        // this slot via the finished signal
+        if (p->state() != QProcess::NotRunning) {
+            p->terminate();
+            p->waitForFinished(1000);
+        }
+        p->deleteLater();
+    }
+    m_musicPaused = false;
+    emit musicStateChanged();
+}
+
+void WeatherBackend::toggleMusic() {
+    if (!m_music || m_music->state() == QProcess::NotRunning) return;
+    if (m_musicIpc->state() != QLocalSocket::ConnectedState) {
+        qWarning("[Weather] music IPC not connected — ignoring toggle");
+        return;
+    }
+    m_musicPaused = !m_musicPaused;
+    // set_property, not "cycle pause": our idea of the state and mpv's can then
+    // never drift apart.
+    const QJsonObject cmd{
+        { QStringLiteral("command"),
+          QJsonArray{ QStringLiteral("set_property"), QStringLiteral("pause"),
+                      m_musicPaused } }
+    };
+    m_musicIpc->write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + "\n");
+    emit musicStateChanged();
+}
+
 // ── Location ─────────────────────────────────────────────────────────────────
 
-QStringList WeatherBackend::readLocationLines() const {
+QStringList WeatherBackend::readListFile(const QString &path) const {
     QStringList lines;
-    QFile f(location_file_path());
+    QFile f(path);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return lines;
     while (!f.atEnd()) {
         const QString candidate = QString::fromUtf8(f.readLine()).trimmed();
-        // '#' comments exist so the file we tell users to create can document
-        // its own format.
+        // '#' comments exist so the files we tell users to create can document
+        // their own format.
         if (candidate.isEmpty() || candidate.startsWith(QLatin1Char('#'))) continue;
         lines << candidate;
     }
     return lines;
+}
+
+QStringList WeatherBackend::readLocationLines() const {
+    return readListFile(location_file_path());
 }
 
 // "40.8398, -74.2765" or "40.8398, -74.2765, CALDWELL".

@@ -19,6 +19,13 @@
       "description": "Which screens the forecast loop cycles through"
     },
     {
+      "key": "music",
+      "label": "Music",
+      "type": "toggle",
+      "default": "ON",
+      "description": "Background music while the forecast is up. Optional playlist: weather_music.txt in the data directory"
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "list_single",

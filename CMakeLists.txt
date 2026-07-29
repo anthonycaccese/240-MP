@@ -57,6 +57,7 @@ add_executable(240mp
     src/modules/weather/WeatherBackend.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
+    src/util/MpvLocator.cpp
     src/input/InputManager.cpp
     src/input/IdleTracker.cpp
     src/update/UpdateManager.cpp

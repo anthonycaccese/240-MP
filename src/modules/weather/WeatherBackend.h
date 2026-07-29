@@ -9,6 +9,8 @@
 
 class QNetworkAccessManager;
 class QTimer;
+class QProcess;
+class QLocalSocket;
 
 // Backend for the weather module.
 //
@@ -40,10 +42,15 @@ class WeatherBackend : public QObject {
     // Location's own UTC offset, so the status-bar clock shows the time where
     // the weather is rather than where the device is.
     Q_PROPERTY(int         utcOffsetSeconds READ utcOffsetSeconds NOTIFY dataChanged)
+    // Whether background music is currently audible — running and not paused.
+    // Nothing binds it yet; it exists so an on-screen indicator is a QML-only
+    // change.
+    Q_PROPERTY(bool musicPlaying READ musicPlaying NOTIFY musicStateChanged)
 
 public:
     explicit WeatherBackend(const QString &appRoot, const QString &dataRoot,
                             QObject *parent = nullptr);
+    ~WeatherBackend() override;
 
     QString     locationName()     const { return m_locationName; }
     QVariantMap  current()  const { return m_current; }
@@ -55,14 +62,28 @@ public:
     bool        hasData()          const { return m_hasData; }
     int         utcOffsetSeconds() const { return m_utcOffset; }
 
+    bool musicPlaying() const;
+
     // Absolute path to weather_location.txt, so the setup screen can say exactly
     // where to put it.
     Q_INVOKABLE QString location_file_path() const;
+    // Absolute path to the optional weather_music.txt playlist. The app never
+    // writes this file — it is opt-in, and absent means the built-in list.
+    Q_INVOKABLE QString music_file_path() const;
 
     // Resolve the location (if not already) and fetch, then keep refreshing
     // until stop(). Answers with dataChanged() or locationError().
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
+
+    // Background music, as a plain mpv subprocess — no video, no screen takeover.
+    // A no-op when the Music setting is off, so the view can call it
+    // unconditionally.
+    Q_INVOKABLE void startMusic();
+    Q_INVOKABLE void stopMusic();
+    // Pause/resume in place over mpv's IPC socket, so the current track survives
+    // the toggle. Session-only: it deliberately does not write the setting.
+    Q_INVOKABLE void toggleMusic();
 
     // options_slot for the "displays" multiselect. Ids match Weather.qml's
     // allScreens list.
@@ -70,6 +91,7 @@ public:
 
 signals:
     void dataChanged();
+    void musicStateChanged();
     // reason ∈ {missing, unreadable, empty, notfound, network}
     void locationError(const QString &reason);
     void fetchError(const QString &message);
@@ -85,8 +107,14 @@ private:
 
     void resolveLocation();
     void geocode(const QString &rawLine);
+    // '#'-commented, one-entry-per-line config files: the location list and the
+    // music playlist share the format, so they share the reader.
+    QStringList readListFile(const QString &path) const;
     // Shared by the primary location and the extras.
     QStringList readLocationLines() const;
+    // The music playlist: weather_music.txt if present, otherwise the built-in
+    // list. Entries are mpv-ready — URLs percent-encoded, local paths absolute.
+    QStringList musicPlaylist() const;
     static bool parseCoordLine(const QString &line, double *lat, double *lon, QString *label);
     void geocodeLine(const QString &line,
                      const std::function<void(bool, QString, double, double)> &done);
@@ -168,6 +196,14 @@ private:
     // Daylight per extra, from the model row. Stations report sky and weather,
     // never whether the sun is up, so the overlay borrows it from underneath.
     QHash<int, bool>        m_otherIsDay;
+
+    // Background music. Its own mpv, its own socket — entirely separate from
+    // MpvController's, which owns the screen and must not be disturbed by it.
+    QProcess     *m_music       = nullptr;
+    QLocalSocket *m_musicIpc    = nullptr;
+    QTimer       *m_musicConnect = nullptr;
+    QString       m_musicSocketPath;
+    bool          m_musicPaused = false;
 
     QVariantMap  m_current;
     QVariantList m_forecast;
