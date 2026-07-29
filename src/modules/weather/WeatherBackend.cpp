@@ -21,9 +21,29 @@ namespace {
 const char *kModuleId   = "com.240mp.weather";
 const char *kForecastUrl = "https://api.open-meteo.com/v1/forecast";
 const char *kGeocodeUrl  = "https://geocoding-api.open-meteo.com/v1/search";
+const char *kNwsPointsUrl = "https://api.weather.gov/points";
+
+// api.weather.gov answers 403 to requests without a User-Agent, and asks for
+// contact information in it. Qt sends none by default.
+const char *kNwsUserAgent = "240-MP/" APP_VERSION " (https://github.com/anthonycaccese/240-MP)";
 
 // Open-Meteo publishes data roughly every 15 minutes.
 constexpr int kRefreshMs = 10 * 60 * 1000;
+
+// A station further away than this is describing somewhere else's weather.
+constexpr double kMaxStationKm = 25.0;
+// Tried in order when one is unreachable or reporting nothing current.
+constexpr int    kMaxStations  = 3;
+// METARs are issued hourly at :50, with specials in between — but stations also
+// drop off for days at a time, and a day-old observation is worse than the
+// model. One cycle plus a margin.
+constexpr qint64 kObsMaxAgeSec = 75 * 60;
+
+// Private extension to WMO 4677, which has no code for a broken deck: it offers
+// four sky states (0–3) where METAR reports five. Codes at 100+ are ours, are
+// never emitted by Open-Meteo, and share the domain so that anything mapping
+// from codes — the planned icons, most of all — needs only one lookup table.
+constexpr int kCodeMostlyCloudy = 103;
 
 // WMO 4677 weather interpretation codes, as short uppercase strings.
 //
@@ -45,8 +65,11 @@ QString conditionForCode(int code) {
     case 77:                     return QStringLiteral("SNOW GRAINS");
     case 80: case 81: case 82:   return QStringLiteral("SHOWERS");
     case 85: case 86:            return QStringLiteral("SNOW SHOWERS");
+    case 79:                     return QStringLiteral("SLEET");
+    case 89:                     return QStringLiteral("HAIL");
     case 95:                     return QStringLiteral("THUNDERSTORM");
     case 96: case 99:            return QStringLiteral("THUNDERSTORM HAIL");
+    case kCodeMostlyCloudy:      return QStringLiteral("MOSTLY CLOUDY");
     default: break;
     }
     return QStringLiteral("UNKNOWN");
@@ -73,10 +96,179 @@ QString conditionShortForCode(int code) {
     case 77:                     return QStringLiteral("SNOW");
     case 80: case 81: case 82:   return QStringLiteral("SHOWERS");
     case 85: case 86:            return QStringLiteral("SNOW SHOWERS");
+    case 79:                     return QStringLiteral("SLEET");
+    case 89:                     return QStringLiteral("HAIL");
     case 95: case 96: case 99:   return QStringLiteral("T'STORMS");
+    // Only reachable if a station code ever reaches these columns; the forecast
+    // is Open-Meteo's, which never emits the private band.
+    case kCodeMostlyCloudy:      return QStringLiteral("CLOUDY");
     default: break;
     }
     return QStringLiteral("UNKNOWN");
+}
+
+// ── METAR → code ─────────────────────────────────────────────────────────────
+//
+// A station reports sky condition and present weather as two independent
+// fields, which is the distinction WMO 4677 throws away. Collapsing them here
+// rather than in the view keeps one code domain for both data sources.
+
+// Cloud amount ordered by how much sky is covered, so the worst layer wins.
+// Plain code order won't do it: the private 103 sorts above 3 numerically but
+// sits below OVERCAST in coverage.
+int skyRank(int code) {
+    switch (code) {
+    case 0:                 return 0;
+    case 1:                 return 1;
+    case 2:                 return 2;
+    case kCodeMostlyCloudy: return 3;
+    case 3:                 return 4;
+    default:                return -1;
+    }
+}
+
+int codeForSky(const QJsonArray &layers) {
+    // No layers at all is a clear sky: METAR omits the group rather than
+    // reporting zero coverage.
+    int best = 0;
+    for (const QJsonValue &v : layers) {
+        const QString amount = v.toObject()[QStringLiteral("amount")].toString();
+        int code = -1;
+        if      (amount == QLatin1String("CLR") || amount == QLatin1String("SKC")) code = 0;
+        else if (amount == QLatin1String("FEW")) code = 1;
+        else if (amount == QLatin1String("SCT")) code = 2;
+        else if (amount == QLatin1String("BKN")) code = kCodeMostlyCloudy;
+        // VV is vertical visibility — the sky is obscured, which from the
+        // ground looks like and is reported as full cover.
+        else if (amount == QLatin1String("OVC") || amount == QLatin1String("VV")) code = 3;
+        if (skyRank(code) > skyRank(best)) best = code;
+    }
+    return best;
+}
+
+// null intensity is moderate — METAR marks only the extremes (-RA, +RA).
+int byIntensity(const QString &intensity, int light, int moderate, int heavy) {
+    if (intensity == QLatin1String("light")) return light;
+    if (intensity == QLatin1String("heavy")) return heavy;
+    return moderate;
+}
+
+// Present weather → code, or -1 when nothing in the group is worth showing and
+// the caller should fall back to sky cover.
+//
+// Note that showers and freezing are `modifier` values rather than distinct
+// `weather` values (SHRA is rain + showers, FZRA is rain + freezing), and that
+// `inVicinity` marks weather near the field but not at it — VC in the raw
+// METAR — which shouldn't be reported as the current condition.
+int codeForPresentWeather(const QJsonArray &pw, double visMetres, bool haveVis) {
+    int best = -1;
+    int bestPriority = -1;
+
+    // A group may list several phenomena (RA BR). Report the most consequential
+    // rather than whichever the station happened to encode first.
+    const auto consider = [&](int code, int priority) {
+        if (code >= 0 && priority > bestPriority) { bestPriority = priority; best = code; }
+    };
+
+    bool hasHail = false;
+    for (const QJsonValue &v : pw) {
+        const QString w = v.toObject()[QStringLiteral("weather")].toString();
+        if (w == QLatin1String("hail") || w == QLatin1String("snow_pellets")) hasHail = true;
+    }
+
+    for (const QJsonValue &v : pw) {
+        const QJsonObject o = v.toObject();
+        if (o[QStringLiteral("inVicinity")].toBool()) continue;
+
+        const QString w   = o[QStringLiteral("weather")].toString();
+        const QString in  = o[QStringLiteral("intensity")].toString();
+        const QString mod = o[QStringLiteral("modifier")].toString();
+        const bool freezing = (mod == QLatin1String("freezing"));
+        const bool showers  = (mod == QLatin1String("showers"));
+
+        if (w == QLatin1String("thunderstorms")) {
+            consider(hasHail ? 96 : 95, 5);
+        } else if (w == QLatin1String("drizzle")) {
+            consider(freezing ? byIntensity(in, 56, 57, 57)
+                              : byIntensity(in, 51, 53, 55),
+                     freezing ? 4 : 2);
+        } else if (w == QLatin1String("rain")) {
+            if (freezing)     consider(byIntensity(in, 66, 67, 67), 4);
+            else if (showers) consider(byIntensity(in, 80, 81, 82), 2);
+            else              consider(byIntensity(in, 61, 63, 65), 2);
+        } else if (w == QLatin1String("snow")) {
+            consider(showers ? byIntensity(in, 85, 86, 86)
+                             : byIntensity(in, 71, 73, 75), 3);
+        } else if (w == QLatin1String("snow_grains")) {
+            consider(77, 3);
+        } else if (w == QLatin1String("ice_pellets")) {
+            consider(79, 3);
+        } else if (w == QLatin1String("hail") || w == QLatin1String("snow_pellets")) {
+            consider(89, 3);
+        } else if (w == QLatin1String("fog")) {
+            consider(freezing ? 48 : 45, 1);
+        } else if (w == QLatin1String("fog_mist")) {
+            // BR covers everything from thin haze to near-zero visibility, and
+            // automated stations report it in any humid air. Calling FOG on a
+            // muggy evening with ten miles of visibility would be its own
+            // version of the bug this exists to fix, so require the visibility
+            // to actually be down before it outranks the sky.
+            if (haveVis && visMetres < 3000.0) consider(45, 1);
+        }
+        // Everything else (haze, smoke, dust, squalls, funnel_cloud…) has no
+        // WMO code this module displays, and defers to the sky condition.
+    }
+    return best;
+}
+
+// Great-circle distance in km. Used only to reject stations reporting from too
+// far away, so the spherical approximation is far more precision than needed.
+double distanceKm(double lat1, double lon1, double lat2, double lon2) {
+    constexpr double R = 6371.0;
+    const double dLat = qDegreesToRadians(lat2 - lat1);
+    const double dLon = qDegreesToRadians(lon2 - lon1);
+    const double a = qSin(dLat / 2) * qSin(dLat / 2)
+                   + qCos(qDegreesToRadians(lat1)) * qCos(qDegreesToRadians(lat2))
+                       * qSin(dLon / 2) * qSin(dLon / 2);
+    return 2 * R * qAtan2(qSqrt(a), qSqrt(1 - a));
+}
+
+// An observation's values, kept raw and metric — exactly as NWS sends them
+// regardless of any parameter — so a units change re-formats without another
+// request. Any field can be null on an otherwise good observation, so each is
+// kept only when present and applied independently.
+QVariantMap parseObservation(const QJsonObject &props) {
+    const auto value = [&props](const char *key) -> QVariant {
+        const QJsonValue v = props[QLatin1String(key)].toObject()[QStringLiteral("value")];
+        return v.isDouble() ? QVariant(v.toDouble()) : QVariant();
+    };
+
+    QVariantMap obs;
+    obs["temperature"] = value("temperature");
+    obs["dewPoint"]    = value("dewpoint");
+    obs["humidity"]    = value("relativeHumidity");
+    obs["windDir"]     = value("windDirection");
+    obs["windSpeed"]   = value("windSpeed");
+    obs["visibility"]  = value("visibility");
+    // seaLevelPressure only, never barometricPressure: that one is station
+    // pressure, which is a different quantity (tens of millibars out at
+    // altitude) and would silently disagree with the model's value it replaces.
+    // Null here just leaves Open-Meteo's pressure_msl in place.
+    obs["pressure"]    = value("seaLevelPressure");
+
+    const bool haveVis = obs["visibility"].isValid();
+    const int  pwCode  = codeForPresentWeather(props[QStringLiteral("presentWeather")].toArray(),
+                                               obs["visibility"].toDouble(), haveVis);
+    obs["conditionCode"] = (pwCode >= 0)
+        ? pwCode
+        : codeForSky(props[QStringLiteral("cloudLayers")].toArray());
+    return obs;
+}
+
+QNetworkRequest nwsRequest(const QUrl &url) {
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QString::fromLatin1(kNwsUserAgent));
+    return req;
 }
 
 // ── Location disambiguation ──────────────────────────────────────────────────
@@ -182,6 +374,8 @@ WeatherBackend::WeatherBackend(const QString &appRoot, const QString &dataRoot,
     connect(m_refresh, &QTimer::timeout, this, [this]() {
         fetchWeather();
         fetchOthers();
+        fetchObservation();
+        fetchOtherObservations();
     });
 }
 
@@ -246,6 +440,8 @@ void WeatherBackend::start() {
         // were in force last time the module was open.
         fetchWeather();
         fetchOthers();
+        fetchObservation();
+        fetchOtherObservations();
         m_refresh->start();
         return;
     }
@@ -321,6 +517,7 @@ void WeatherBackend::resolveLocation() {
         qInfo("[Weather] using explicit coordinates -> %s (%.4f, %.4f)",
               qPrintable(m_locationName), m_lat, m_lon);
         fetchWeather();
+        resolveStations();
         m_refresh->start();
         resolveOthers(others);
         return;
@@ -337,6 +534,7 @@ void WeatherBackend::resolveLocation() {
         qInfo("[Weather] resolved \"%s\" -> %s (%.4f, %.4f)",
               qPrintable(primary), qPrintable(m_locationName), m_lat, m_lon);
         fetchWeather();
+        resolveStations();
         m_refresh->start();
         resolveOthers(others);
     });
@@ -443,12 +641,16 @@ void WeatherBackend::resolveOthers(const QStringList &lines) {
             if (--m_pendingOthers <= 0) {
                 m_otherPoints.removeIf([](const QVariant &v) { return v.toMap().isEmpty(); });
                 fetchOthers();
+                // Only once the skipped extras are gone — the station map is
+                // keyed by index into the final list.
+                resolveOtherStations();
             }
         });
     }
     if (m_pendingOthers == 0) {
         m_otherPoints.removeIf([](const QVariant &v) { return v.toMap().isEmpty(); });
         fetchOthers();
+        resolveOtherStations();
     }
 }
 
@@ -501,7 +703,11 @@ void WeatherBackend::fetchWeather() {
         const double visMetres  = cur["visibility"].toDouble();
 
         QVariantMap m;
-        m["condition"]   = conditionForCode(cur["weather_code"].toInt());
+        const int code = cur["weather_code"].toInt();
+        m["condition"]     = conditionForCode(code);
+        // Always populated, whichever source ends up winning, so anything
+        // mapping from the code has a single field to read.
+        m["conditionCode"] = code;
         m["temperature"] = QString::number(qRound(cur["temperature_2m"].toDouble())) + QStringLiteral("°");
         m["humidity"]    = QString::number(qRound(cur["relative_humidity_2m"].toDouble())) + QStringLiteral("%");
         m["dewPoint"]    = QString::number(qRound(cur["dew_point_2m"].toDouble())) + QStringLiteral("°");
@@ -516,11 +722,211 @@ void WeatherBackend::fetchWeather() {
             : QString::number(qRound(visMetres / 1000.0))   + QStringLiteral(" KM");
 
         m_current = m;
+        // m_current has just been rebuilt from scratch, so any station values
+        // that arrived earlier are gone. Re-apply them here rather than only
+        // where the observation lands — the two requests are concurrent and
+        // either can be the one that finishes last.
+        applyObservation();
         buildForecast(root["daily"].toObject());
         buildAlmanac(root["daily"].toObject());
         m_hasData = true;
         emit dataChanged();
     });
+}
+
+// ── Station observations ─────────────────────────────────────────────────────
+//
+// Open-Meteo's weather_code is model output for a grid cell of several km, not
+// an observation, and its sky codes (0–3) carry an implicit "and nothing is
+// falling" — so a small timing error in the model reads on screen as OVERCAST
+// while it is raining outside. Where the NWS has a station nearby, it reports
+// what is actually happening, and reports sky and present weather separately.
+//
+// This runs alongside fetchWeather() rather than instead of it: the forecast
+// and almanac screens need Open-Meteo regardless, so overlaying the observation
+// makes the fallback free. Nothing here is fatal — outside the US /points 404s
+// and the module simply keeps the model's values, which is what every non-US
+// location gets.
+
+// Two hops: the grid point names a station list, the list is ordered
+// nearest-first. Answers with an empty list for anywhere the NWS doesn't cover
+// or doesn't have a station close enough — never with an error, because neither
+// is one.
+void WeatherBackend::resolveStationsFor(double lat, double lon,
+                                        const std::function<void(const QStringList &)> &done) {
+    const QUrl url(QStringLiteral("%1/%2,%3")
+                       .arg(QString::fromLatin1(kNwsPointsUrl))
+                       .arg(lat, 0, 'f', 4)
+                       .arg(lon, 0, 'f', 4));
+
+    QNetworkReply *reply = m_nam->get(nwsRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, lat, lon, done]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            // Expected for anywhere the NWS doesn't cover — a 404 here is the
+            // normal non-US path, not a problem worth warning about.
+            qInfo("[Weather] no NWS coverage for %.4f,%.4f (%s) — using model data",
+                  lat, lon, qPrintable(reply->errorString()));
+            done({});
+            return;
+        }
+        const QJsonObject props =
+            QJsonDocument::fromJson(reply->readAll()).object()["properties"].toObject();
+        const QString stationsUrl = props["observationStations"].toString();
+        if (stationsUrl.isEmpty()) { done({}); return; }
+
+        QNetworkReply *sr = m_nam->get(nwsRequest(QUrl(stationsUrl)));
+        connect(sr, &QNetworkReply::finished, this, [sr, lat, lon, done]() {
+            sr->deleteLater();
+            if (sr->error() != QNetworkReply::NoError) {
+                qWarning("[Weather] station list failed: %s", qPrintable(sr->errorString()));
+                done({});
+                return;
+            }
+            const QJsonArray features =
+                QJsonDocument::fromJson(sr->readAll()).object()["features"].toArray();
+
+            // Already ordered nearest-first for the grid point, so this only
+            // drops the ones too far away to be describing our weather.
+            QStringList stations;
+            for (const QJsonValue &v : features) {
+                if (stations.size() >= kMaxStations) break;
+                const QJsonObject f = v.toObject();
+                const QJsonArray coords = f["geometry"].toObject()["coordinates"].toArray();
+                if (coords.size() < 2) continue;
+                const double km = distanceKm(lat, lon,
+                                             coords.at(1).toDouble(), coords.at(0).toDouble());
+                if (km > kMaxStationKm) continue;
+                const QString id =
+                    f["properties"].toObject()["stationIdentifier"].toString();
+                if (!id.isEmpty()) stations << id;
+            }
+            if (stations.isEmpty())
+                qInfo("[Weather] no reporting station within %.0f km of %.4f,%.4f — "
+                      "using model data", kMaxStationKm, lat, lon);
+            done(stations);
+        });
+    });
+}
+
+// Walks the station list until one answers with something current. Stations go
+// offline for days at a time, so every failure falls through to the next
+// nearest rather than giving up. Answers with an empty map when none do.
+void WeatherBackend::fetchObservationChain(
+        const QStringList &stations, int index,
+        const std::function<void(const QVariantMap &, const QDateTime &,
+                                 const QString &)> &done) {
+    if (index < 0 || index >= stations.size()) { done({}, {}, {}); return; }
+    const QString station = stations.at(index);
+
+    const QUrl url(QStringLiteral("https://api.weather.gov/stations/%1/observations/latest")
+                       .arg(station));
+
+    QNetworkReply *reply = m_nam->get(nwsRequest(url));
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, stations, index, station, done]() {
+        reply->deleteLater();
+
+        const auto next = [this, stations, index, station, done](const char *why) {
+            qInfo("[Weather] %s at %s — trying next station", why, qPrintable(station));
+            fetchObservationChain(stations, index + 1, done);
+        };
+
+        if (reply->error() != QNetworkReply::NoError) { next("observation failed"); return; }
+
+        const QJsonObject props =
+            QJsonDocument::fromJson(reply->readAll()).object()["properties"].toObject();
+        if (props.isEmpty()) { next("empty observation"); return; }
+
+        const QDateTime stamp =
+            QDateTime::fromString(props["timestamp"].toString(), Qt::ISODate);
+        if (!stamp.isValid()
+            || stamp.secsTo(QDateTime::currentDateTimeUtc()) > kObsMaxAgeSec) {
+            next("stale observation");
+            return;
+        }
+
+        done(parseObservation(props), stamp, station);
+    });
+}
+
+void WeatherBackend::resolveStations() {
+    if (m_stationsResolved || !m_resolved) return;
+    m_stationsResolved = true;   // one attempt per location, however it ends
+
+    resolveStationsFor(m_lat, m_lon, [this](const QStringList &stations) {
+        m_stations = stations;
+        if (m_stations.isEmpty()) return;
+        qInfo("[Weather] observation stations: %s", qPrintable(m_stations.join(", ")));
+        fetchObservation();
+    });
+}
+
+void WeatherBackend::fetchObservation() {
+    if (m_stations.isEmpty()) return;
+    fetchObservationChain(m_stations, 0,
+                          [this](const QVariantMap &obs, const QDateTime &stamp,
+                                 const QString &station) {
+        if (obs.isEmpty()) return;   // every station tried; keep the model's values
+        m_obs        = obs;
+        m_obsTime    = stamp;
+        m_obsStation = station;
+        qInfo("[Weather] observations from %s (%s) -> %s", qPrintable(station),
+              qPrintable(stamp.toString(Qt::ISODate)),
+              qPrintable(conditionForCode(obs["conditionCode"].toInt())));
+
+        applyObservation();
+        emit dataChanged();
+    });
+}
+
+void WeatherBackend::applyObservation() {
+    if (m_obs.isEmpty() || m_current.isEmpty()) return;
+    // Checked here rather than at fetch time: the refresh timer keeps running
+    // while a station is down, and the last good observation must stop being
+    // displayed once it ages out, not merely stop being replaced.
+    if (!m_obsTime.isValid()
+        || m_obsTime.secsTo(QDateTime::currentDateTimeUtc()) > kObsMaxAgeSec) return;
+
+    const bool us = useUsUnits();
+    // NWS always answers in metric — degC, km/h, metres, Pa — so this converts
+    // independently of the unit parameters sent to Open-Meteo.
+    const auto toF   = [](double c)  { return c * 9.0 / 5.0 + 32.0; };
+    const auto has   = [this](const char *k) { return m_obs.value(QLatin1String(k)).isValid(); };
+    const auto num   = [this](const char *k) { return m_obs.value(QLatin1String(k)).toDouble(); };
+    const auto temp  = [&](double c) {
+        return QString::number(qRound(us ? toF(c) : c)) + QStringLiteral("°");
+    };
+
+    if (has("conditionCode")) {
+        const int code = m_obs["conditionCode"].toInt();
+        m_current["condition"]     = conditionForCode(code);
+        m_current["conditionCode"] = code;
+    }
+    if (has("temperature")) m_current["temperature"] = temp(num("temperature"));
+    if (has("dewPoint"))    m_current["dewPoint"]    = temp(num("dewPoint"));
+    if (has("humidity"))
+        m_current["humidity"] = QString::number(qRound(num("humidity"))) + QStringLiteral("%");
+    if (has("pressure")) {
+        const double hPa = num("pressure") / 100.0;   // NWS reports pascals
+        m_current["pressure"] = us
+            ? QString::number(hPa * 0.0295299830714, 'f', 2)
+            : QString::number(hPa, 'f', 1) + QStringLiteral(" MB");
+    }
+    // Direction is null when the wind is calm or variable, and a bearing is the
+    // half of this line that can't be omitted — leave the model's value.
+    if (has("windDir") && has("windSpeed")) {
+        const double kmh = num("windSpeed");
+        m_current["wind"] = QStringLiteral("%1 %2")
+                                .arg(cardinal(num("windDir")))
+                                .arg(qRound(us ? kmh / 1.609344 : kmh));
+    }
+    if (has("visibility")) {
+        const double m = num("visibility");
+        m_current["visibility"] = us
+            ? QString::number(qRound(m / 1609.344)) + QStringLiteral(" MI.")
+            : QString::number(qRound(m / 1000.0))   + QStringLiteral(" KM");
+    }
 }
 
 void WeatherBackend::buildForecast(const QJsonObject &daily) {
@@ -732,10 +1138,14 @@ void WeatherBackend::fetchOthers() {
         else if (doc.isObject()) entries.append(doc.object());
 
         QVariantList rows;
+        // Rebuilt together: the table skips extras the API returned nothing
+        // for, so the overlay can't assume row index == point index.
+        m_otherRowPoint.clear();
         for (int i = 0; i < entries.size() && i < m_otherPoints.size(); ++i) {
             const QJsonObject cur = entries.at(i).toObject()["current"].toObject();
             if (cur.isEmpty()) continue;
             const double speed = cur["wind_speed_10m"].toDouble();
+            m_otherRowPoint.append(i);
             rows.append(QVariantMap{
                 { "name", m_otherPoints.at(i).toMap()["name"] },
                 { "temp", QString::number(qRound(cur["temperature_2m"].toDouble())) },
@@ -750,6 +1160,95 @@ void WeatherBackend::fetchOthers() {
             });
         }
         m_otherLocations = rows;
+        // Same reason as the primary screen: this handler rebuilds the rows
+        // from scratch and races the observation requests, so re-apply here.
+        applyOtherObservations();
         emit dataChanged();
     });
+}
+
+// The extras get the same treatment as the primary location, one point at a
+// time. They can't share the primary's batched Open-Meteo request — station
+// observations are per-station — so a table of US cities costs one request per
+// row per refresh instead of one for the whole table. That's the price of rows
+// that report what is actually happening; international rows cost nothing extra
+// because /points 404s once and is never asked again.
+void WeatherBackend::resolveOtherStations() {
+    m_otherStations.clear();
+    m_otherObs.clear();
+    m_otherObsTime.clear();
+
+    for (int i = 0; i < m_otherPoints.size(); ++i) {
+        const QVariantMap p = m_otherPoints.at(i).toMap();
+        const QString name  = p["name"].toString();
+        resolveStationsFor(p["lat"].toDouble(), p["lon"].toDouble(),
+                           [this, i, name](const QStringList &stations) {
+            if (stations.isEmpty()) return;   // international, or nothing close
+            m_otherStations.insert(i, stations);
+            qInfo("[Weather] %s observation stations: %s",
+                  qPrintable(name), qPrintable(stations.join(", ")));
+            fetchObservationChain(stations, 0,
+                                  [this, i, name](const QVariantMap &obs,
+                                                  const QDateTime &stamp,
+                                                  const QString &station) {
+                if (obs.isEmpty()) return;
+                m_otherObs.insert(i, obs);
+                m_otherObsTime.insert(i, stamp);
+                qInfo("[Weather] %s observations from %s -> %s", qPrintable(name),
+                      qPrintable(station),
+                      qPrintable(conditionShortForCode(obs["conditionCode"].toInt())));
+                applyOtherObservations();
+                emit dataChanged();
+            });
+        });
+    }
+}
+
+void WeatherBackend::fetchOtherObservations() {
+    for (auto it = m_otherStations.cbegin(); it != m_otherStations.cend(); ++it) {
+        const int i = it.key();
+        fetchObservationChain(it.value(), 0,
+                              [this, i](const QVariantMap &obs, const QDateTime &stamp,
+                                        const QString &) {
+            if (obs.isEmpty()) return;
+            m_otherObs.insert(i, obs);
+            m_otherObsTime.insert(i, stamp);
+            applyOtherObservations();
+            emit dataChanged();
+        });
+    }
+}
+
+void WeatherBackend::applyOtherObservations() {
+    if (m_otherObs.isEmpty() || m_otherLocations.isEmpty()) return;
+    const bool us = useUsUnits();
+
+    for (int row = 0; row < m_otherLocations.size() && row < m_otherRowPoint.size(); ++row) {
+        const int i = m_otherRowPoint.at(row);
+        if (!m_otherObs.contains(i)) continue;
+        const QDateTime stamp = m_otherObsTime.value(i);
+        if (!stamp.isValid()
+            || stamp.secsTo(QDateTime::currentDateTimeUtc()) > kObsMaxAgeSec) continue;
+
+        const QVariantMap obs = m_otherObs.value(i);
+        QVariantMap r = m_otherLocations.at(row).toMap();
+
+        // The abbreviated vocabulary, same as the model rows use — these
+        // columns are a third of the screen wide.
+        r["condition"] = conditionShortForCode(obs["conditionCode"].toInt());
+        if (obs["temperature"].isValid()) {
+            const double c = obs["temperature"].toDouble();
+            r["temp"] = QString::number(qRound(us ? c * 9.0 / 5.0 + 32.0 : c));
+        }
+        if (obs["windDir"].isValid() && obs["windSpeed"].isValid()) {
+            const double kmh   = obs["windSpeed"].toDouble();
+            const int    speed = qRound(us ? kmh / 1.609344 : kmh);
+            // The original showed CALM rather than a direction with no speed
+            // behind it.
+            r["wind"] = speed == 0
+                ? QStringLiteral("CALM")
+                : QStringLiteral("%1 %2").arg(cardinal(obs["windDir"].toDouble())).arg(speed);
+        }
+        m_otherLocations[row] = r;
+    }
 }

@@ -93,6 +93,29 @@ private:
     void resolveOthers(const QStringList &lines);
     void fetchOthers();
     void fetchWeather();
+
+    // Station observations (US only). Resolved once per location, then polled
+    // alongside fetchWeather(). Every failure here is non-fatal: the module
+    // keeps whatever Open-Meteo already put in m_current.
+    //
+    // Both the primary location and the Other Locations extras use the same two
+    // steps, so they are parameterised rather than duplicated: resolve nearby
+    // stations for a point, then walk them until one answers with something
+    // current.
+    void resolveStationsFor(double lat, double lon,
+                            const std::function<void(const QStringList &)> &done);
+    void fetchObservationChain(const QStringList &stations, int index,
+                               const std::function<void(const QVariantMap &,
+                                                        const QDateTime &,
+                                                        const QString &)> &done);
+
+    void resolveStations();
+    void fetchObservation();
+    void applyObservation();
+
+    void resolveOtherStations();
+    void fetchOtherObservations();
+    void applyOtherObservations();
     void buildForecast(const QJsonObject &daily);
     void buildAlmanac(const QJsonObject &daily);
     bool useTwelveHour() const;
@@ -116,6 +139,29 @@ private:
     double  m_lon = 0.0;
     bool    m_resolved = false;
     QString m_resolvedFrom;
+
+    // Nearest reporting stations, nearest first, cached for the life of the
+    // process for the same reason the location is: config.json is written only
+    // on direct user interaction. Empty outside the US, and after any failure.
+    QStringList m_stations;
+    bool        m_stationsResolved = false;
+    // Last good observation, kept raw (metric, as NWS always sends it) rather
+    // than formatted, so a units change re-formats without a re-fetch. Applied
+    // over m_current *after* every fetchWeather(), which rebuilds it wholesale
+    // and would otherwise wipe the overlay depending on which reply lands last.
+    QVariantMap m_obs;
+    QDateTime   m_obsTime;
+    QString     m_obsStation;
+
+    // Same three things per extra location, keyed by index into m_otherPoints.
+    // Sparse on purpose: an international extra simply has no entry, and the
+    // model's value for that row stands.
+    QHash<int, QStringList> m_otherStations;
+    QHash<int, QVariantMap> m_otherObs;
+    QHash<int, QDateTime>   m_otherObsTime;
+    // Row → m_otherPoints index. The table skips extras the API returned
+    // nothing for, so row order and point order are not the same list.
+    QList<int>              m_otherRowPoint;
 
     QVariantMap  m_current;
     QVariantList m_forecast;
