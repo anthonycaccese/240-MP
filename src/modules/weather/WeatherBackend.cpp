@@ -81,10 +81,17 @@ QString conditionForCode(int code) {
 // on Current Conditions, abbreviations across the three-day columns.
 //
 // These also read as a *forecast* rather than an observation: a clear day ahead
-// is SUNNY, whereas conditions right now are CLEAR.
-QString conditionShortForCode(int code) {
+// is SUNNY, whereas conditions right now are CLEAR. Hence isDay — the Extended
+// Forecast columns always pass true, because a forecast for a whole day is a
+// daytime characterisation by definition, but Other Locations reuses these
+// short forms for *current* conditions in a narrow column and would otherwise
+// call a clear sky SUNNY at three in the morning.
+QString conditionShortForCode(int code, bool isDay) {
     switch (code) {
-    case 0: case 1:              return QStringLiteral("SUNNY");
+    case 0:                      return isDay ? QStringLiteral("SUNNY")
+                                              : QStringLiteral("CLEAR");
+    case 1:                      return isDay ? QStringLiteral("SUNNY")
+                                              : QStringLiteral("MAINLY CLEAR");
     case 2:                      return QStringLiteral("PARTLY CLOUDY");  // wraps to two lines
     case 3:                      return QStringLiteral("CLOUDY");
     case 45: case 48:            return QStringLiteral("FOG");
@@ -105,6 +112,47 @@ QString conditionShortForCode(int code) {
     default: break;
     }
     return QStringLiteral("UNKNOWN");
+}
+
+// Asset name in modules/weather/assets/images/wx/, without the .svg.
+//
+// Named by what the icon depicts rather than by code, because the icon set is
+// far smaller than the code set — 61/63/65 are one rain picture, and three
+// files named for the codes would be three identical assets that drift apart
+// the first time one is edited.
+//
+// Only the four sky states take -day/-night variants: they are the ones with a
+// sun or moon in them. Rain looks the same at midnight.
+//
+// Returns empty for anything unmapped, which the views treat as "draw no icon"
+// rather than rendering a broken image.
+QString iconForCode(int code, bool isDay) {
+    const auto sky = [isDay](const char *base) {
+        return QString::fromLatin1(base) + (isDay ? QStringLiteral("-day")
+                                                  : QStringLiteral("-night"));
+    };
+    switch (code) {
+    case 0:                      return sky("clear");
+    case 1:                      return sky("mainly-clear");
+    case 2:                      return sky("partly-cloudy");
+    case kCodeMostlyCloudy:      return sky("mostly-cloudy");
+    case 3:                      return QStringLiteral("overcast");
+    case 45: case 48:            return QStringLiteral("fog");
+    case 51: case 53: case 55:   return QStringLiteral("drizzle");
+    case 56: case 57:            return QStringLiteral("freezing-drizzle");
+    case 61: case 63: case 65:   return QStringLiteral("rain");
+    case 66: case 67:            return QStringLiteral("freezing-rain");
+    case 71: case 73: case 75:   return QStringLiteral("snow");
+    case 77:                     return QStringLiteral("snow");
+    case 79:                     return QStringLiteral("sleet");
+    case 80: case 81: case 82:   return QStringLiteral("showers");
+    case 85: case 86:            return QStringLiteral("snow-showers");
+    case 89:                     return QStringLiteral("hail");
+    case 95:                     return QStringLiteral("thunderstorm");
+    case 96: case 99:            return QStringLiteral("thunderstorm-hail");
+    default: break;
+    }
+    return {};
 }
 
 // ── METAR → code ─────────────────────────────────────────────────────────────
@@ -667,7 +715,7 @@ void WeatherBackend::fetchWeather() {
     q.addQueryItem(QStringLiteral("current"),
                    QStringLiteral("temperature_2m,relative_humidity_2m,dew_point_2m,"
                                   "pressure_msl,wind_speed_10m,wind_direction_10m,"
-                                  "visibility,weather_code"));
+                                  "visibility,weather_code,is_day"));
     q.addQueryItem(QStringLiteral("daily"),
                    QStringLiteral("temperature_2m_min,temperature_2m_max,"
                                   "weather_code,sunrise,sunset"));
@@ -702,12 +750,18 @@ void WeatherBackend::fetchWeather() {
         // is the one field converted by hand.
         const double visMetres  = cur["visibility"].toDouble();
 
+        // Only Open-Meteo knows whether the sun is up — a station reports sky
+        // and weather, not daylight — so this is cached for the observation
+        // overlay to reuse rather than derived per source.
+        m_isDay = cur["is_day"].toInt(1) != 0;
+
         QVariantMap m;
         const int code = cur["weather_code"].toInt();
         m["condition"]     = conditionForCode(code);
         // Always populated, whichever source ends up winning, so anything
         // mapping from the code has a single field to read.
         m["conditionCode"] = code;
+        m["iconName"]      = iconForCode(code, m_isDay);
         m["temperature"] = QString::number(qRound(cur["temperature_2m"].toDouble())) + QStringLiteral("°");
         m["humidity"]    = QString::number(qRound(cur["relative_humidity_2m"].toDouble())) + QStringLiteral("%");
         m["dewPoint"]    = QString::number(qRound(cur["dew_point_2m"].toDouble())) + QStringLiteral("°");
@@ -902,6 +956,7 @@ void WeatherBackend::applyObservation() {
         const int code = m_obs["conditionCode"].toInt();
         m_current["condition"]     = conditionForCode(code);
         m_current["conditionCode"] = code;
+        m_current["iconName"]      = iconForCode(code, m_isDay);
     }
     if (has("temperature")) m_current["temperature"] = temp(num("temperature"));
     if (has("dewPoint"))    m_current["dewPoint"]    = temp(num("dewPoint"));
@@ -943,7 +998,11 @@ void WeatherBackend::buildForecast(const QJsonObject &daily) {
         day["name"] = date.isValid()
             ? QLocale::c().dayName(date.dayOfWeek(), QLocale::LongFormat).toUpper()
             : QString();
-        day["condition"] = conditionShortForCode(codes.at(i).toInt());
+        // Always daytime: a forecast for a whole day is a daytime
+        // characterisation, so these columns never show a moon.
+        const int code = codes.at(i).toInt();
+        day["condition"] = conditionShortForCode(code, true);
+        day["iconName"]  = iconForCode(code, true);
         day["lo"] = QString::number(qRound(mins.at(i).toDouble()));
         day["hi"] = QString::number(qRound(maxs.at(i).toDouble()));
 
@@ -1114,7 +1173,7 @@ void WeatherBackend::fetchOthers() {
     q.addQueryItem(QStringLiteral("longitude"), lons.join(QLatin1Char(',')));
     q.addQueryItem(QStringLiteral("current"),
                    QStringLiteral("temperature_2m,weather_code,wind_speed_10m,"
-                                  "wind_direction_10m"));
+                                  "wind_direction_10m,is_day"));
     q.addQueryItem(QStringLiteral("temperature_unit"),
                    us ? QStringLiteral("fahrenheit") : QStringLiteral("celsius"));
     q.addQueryItem(QStringLiteral("wind_speed_unit"),
@@ -1141,15 +1200,21 @@ void WeatherBackend::fetchOthers() {
         // Rebuilt together: the table skips extras the API returned nothing
         // for, so the overlay can't assume row index == point index.
         m_otherRowPoint.clear();
+        m_otherIsDay.clear();
         for (int i = 0; i < entries.size() && i < m_otherPoints.size(); ++i) {
             const QJsonObject cur = entries.at(i).toObject()["current"].toObject();
             if (cur.isEmpty()) continue;
             const double speed = cur["wind_speed_10m"].toDouble();
+            // Each city has its own daylight — Tokyo can be mid-morning while
+            // the primary location is in the small hours. Kept for the station
+            // overlay, which has no daylight of its own to report.
+            const bool isDay = cur["is_day"].toInt(1) != 0;
             m_otherRowPoint.append(i);
+            m_otherIsDay.insert(i, isDay);
             rows.append(QVariantMap{
                 { "name", m_otherPoints.at(i).toMap()["name"] },
                 { "temp", QString::number(qRound(cur["temperature_2m"].toDouble())) },
-                { "condition", conditionShortForCode(cur["weather_code"].toInt()) },
+                { "condition", conditionShortForCode(cur["weather_code"].toInt(), isDay) },
                 // The original showed CALM rather than a direction with no
                 // speed behind it.
                 { "wind", qRound(speed) == 0
@@ -1196,7 +1261,8 @@ void WeatherBackend::resolveOtherStations() {
                 m_otherObsTime.insert(i, stamp);
                 qInfo("[Weather] %s observations from %s -> %s", qPrintable(name),
                       qPrintable(station),
-                      qPrintable(conditionShortForCode(obs["conditionCode"].toInt())));
+                      qPrintable(conditionShortForCode(obs["conditionCode"].toInt(),
+                                                       m_otherIsDay.value(i, true))));
                 applyOtherObservations();
                 emit dataChanged();
             });
@@ -1234,8 +1300,11 @@ void WeatherBackend::applyOtherObservations() {
         QVariantMap r = m_otherLocations.at(row).toMap();
 
         // The abbreviated vocabulary, same as the model rows use — these
-        // columns are a third of the screen wide.
-        r["condition"] = conditionShortForCode(obs["conditionCode"].toInt());
+        // columns are a third of the screen wide. Daylight comes from the model
+        // row underneath: the observation reports sky and weather, never
+        // whether the sun is up.
+        r["condition"] = conditionShortForCode(obs["conditionCode"].toInt(),
+                                               m_otherIsDay.value(i, true));
         if (obs["temperature"].isValid()) {
             const double c = obs["temperature"].toDouble();
             r["temp"] = QString::number(qRound(us ? c * 9.0 / 5.0 + 32.0 : c));

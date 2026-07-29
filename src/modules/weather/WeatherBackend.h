@@ -139,6 +139,9 @@ private:
     double  m_lon = 0.0;
     bool    m_resolved = false;
     QString m_resolvedFrom;
+    // Whether the sun is up at the primary location, from Open-Meteo. Cached
+    // because the station overlay needs it and an observation cannot supply it.
+    bool    m_isDay = true;
 
     // Nearest reporting stations, nearest first, cached for the life of the
     // process for the same reason the location is: config.json is written only
@@ -162,6 +165,9 @@ private:
     // Row → m_otherPoints index. The table skips extras the API returned
     // nothing for, so row order and point order are not the same list.
     QList<int>              m_otherRowPoint;
+    // Daylight per extra, from the model row. Stations report sky and weather,
+    // never whether the sun is up, so the overlay borrows it from underneath.
+    QHash<int, bool>        m_otherIsDay;
 
     QVariantMap  m_current;
     QVariantList m_forecast;

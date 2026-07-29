@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 
 // One WeatherStar screen: a left-aligned column of fixed text lines.
 //
@@ -22,8 +23,45 @@ Item {
         color: root.primaryColor
         font.family: root.globalFont
         font.pixelSize: screen.lineSize
-        width: parent.width
+        // Stops short of the icon rather than the screen edge, so a long
+        // location name elides instead of running underneath it.
+        width: parent.width - icon.width - (root.sw * 0.02)
         elide: Text.ElideRight
+    }
+
+    // Anchored to the right edge rather than following the title, so its
+    // position doesn't move with the length of the location name.
+    //
+    // Tinted at runtime rather than shipped coloured — the app has a custom
+    // colour scheme feature, and a baked-in colour would be wrong the moment
+    // anyone changes theme. Same hidden-Image + MultiEffect pattern as
+    // nfc_reader/views/Items.qml.
+    Item {
+        id: icon
+        anchors.right: parent.right
+        anchors.verticalCenter: title.verticalCenter
+        width:  iconImage.width
+        height: root.sh * 0.11
+        // An unmapped code gives an empty name; draw nothing rather than a
+        // broken-image box.
+        visible: iconImage.source != ""
+
+        Image {
+            id: iconImage
+            visible: false
+            height: parent.height
+            sourceSize.height: height
+            fillMode: Image.PreserveAspectFit
+            source: screen.wx.iconName
+                ? "../../assets/images/wx/" + screen.wx.iconName + ".svg"
+                : ""
+        }
+        MultiEffect {
+            anchors.fill: iconImage
+            source: iconImage
+            colorization: 1.0
+            colorizationColor: root.accentColor
+        }
     }
 
     Text {
