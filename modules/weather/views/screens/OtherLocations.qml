@@ -1,25 +1,22 @@
 import QtQuick
 
 // Current conditions for the extra places listed in weather_location.txt.
-//
-// The 1980s original showed nearby airport observation stations here. Open-Meteo
-// has no station data and no "places near me" lookup, so this is a user-chosen
-// list instead — which also travels better: the places can be local, regional or
-// on the other side of the world.
+// Open-Meteo has no station data and no "places near me" lookup, so this is a user-chosen
+// list instead so it allows the places can be local, regional or on the other side of the world.
 Item {
     id: screen
 
     property var rows: []
     property string tempUnit: "°F"
 
-    readonly property real lineSize:   root.sh * 0.06
-    readonly property real headerSize: root.sh * 0.042
+    readonly property real lineSize: root.sh * 0.05 //24
+    readonly property real headerSize: root.sh * 0.0333333 //16
 
     // Fixed fractions rather than content-driven widths, so the columns stay put
     // as values change length through the day.
-    readonly property real nameWidth: width * 0.46
-    readonly property real tempWidth: width * 0.12
-    readonly property real wxWidth:   width * 0.24
+    readonly property real nameWidth: width * 0.4
+    readonly property real wxWidth:   width * 0.4375
+    readonly property real tempWidth: width * 0.125
 
     Text {
         id: title
@@ -28,46 +25,46 @@ Item {
         text: "OTHER LOCATIONS"
         color: root.primaryColor
         font.family: root.globalFont
-        font.pixelSize: root.sh * 0.07
+        font.pixelSize: screen.lineSize
     }
 
     Row {
         id: header
         anchors.top: title.bottom
-        anchors.topMargin: root.sh * 0.035
+        anchors.topMargin: root.sh * 0.0854167 //41
         anchors.left: parent.left
         anchors.right: parent.right
+        height: screen.lineSize
 
         Text {
             width: screen.nameWidth; text: "LOCATION"
-            color: root.secondaryColor; font.family: root.globalFont
+            color: root.accentColor
+            font.family: root.globalFont
             font.pixelSize: screen.headerSize
         }
+        Item { width: root.sw * 0.0140625; height: 1 }
+        Text {
+            width: screen.wxWidth; text: "CONDITIONS"
+            color: root.accentColor
+            font.family: root.globalFont
+            font.pixelSize: screen.headerSize
+        }
+        Item { width: root.sw * 0.0140625; height: 1 }
         Text {
             width: screen.tempWidth; text: screen.tempUnit
-            color: root.secondaryColor; font.family: root.globalFont
+            color: root.accentColor
+            font.family: root.globalFont
             font.pixelSize: screen.headerSize
             horizontalAlignment: Text.AlignRight
-        }
-        Item { width: root.sw * 0.02; height: 1 }
-        Text {
-            width: screen.wxWidth; text: "WEATHER"
-            color: root.secondaryColor; font.family: root.globalFont
-            font.pixelSize: screen.headerSize
-        }
-        Text {
-            text: "WIND"
-            color: root.secondaryColor; font.family: root.globalFont
-            font.pixelSize: screen.headerSize
         }
     }
 
     Column {
         anchors.top: header.bottom
-        anchors.topMargin: root.sh * 0.015
+        anchors.topMargin: root.sh * 0.0085 // 4.08
         anchors.left: parent.left
         anchors.right: parent.right
-        spacing: root.sh * 0.008
+        spacing: root.sh * 0.0138021 //6.625
 
         Repeater {
             model: screen.rows
@@ -82,23 +79,19 @@ Item {
                     color: root.primaryColor; font.family: root.globalFont
                     font.pixelSize: screen.lineSize
                 }
-                Text {
-                    width: screen.tempWidth; text: modelData.temp || ""
-                    color: root.primaryColor; font.family: root.globalFont
-                    font.pixelSize: screen.lineSize
-                    horizontalAlignment: Text.AlignRight
-                }
-                Item { width: root.sw * 0.02; height: 1 }
+                Item { width: root.sw * 0.0140625; height: 1 }
                 Text {
                     width: screen.wxWidth; text: modelData.condition || ""
                     elide: Text.ElideRight
                     color: root.primaryColor; font.family: root.globalFont
                     font.pixelSize: screen.lineSize
                 }
+                Item { width: root.sw * 0.0140625; height: 1 }
                 Text {
-                    text: modelData.wind || ""
+                    width: screen.tempWidth; text: modelData.temp || ""
                     color: root.primaryColor; font.family: root.globalFont
                     font.pixelSize: screen.lineSize
+                    horizontalAlignment: Text.AlignRight
                 }
             }
         }

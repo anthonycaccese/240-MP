@@ -15,7 +15,7 @@ Item {
 
     readonly property real lineSize: root.sh * 0.05 //24
     readonly property real colWidth: width / 3
-    readonly property real iconSize: root.sh * 0.12
+    readonly property real iconSize: root.sh * 0.1125 //54
 
     Text {
         id: title
@@ -54,14 +54,20 @@ Item {
                         width: parent.width
                         horizontalAlignment: Text.AlignHCenter
                     }
-                    Text {
-                        text: modelData.condition || ""
-                        color: root.secondaryColor
-                        font.family: root.globalFont
-                        font.pixelSize: screen.lineSize
+                    Rectangle {
+                        height: screen.lineSize
                         width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.WordWrap
+                        color: "transparent"
+                        Text {
+                            text: modelData.condition || ""
+                            color: root.secondaryColor
+                            font.family: root.globalFont
+                            font.pixelSize: root.sh * 0.0375 //18
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            anchors.verticalCenter: parent.verticalCenter
+                            wrapMode: Text.WordWrap
+                        }
                     }
                 }
 
@@ -131,10 +137,9 @@ Item {
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
-                    anchors.topMargin: root.sh * 0.01
-                    anchors.bottomMargin: root.sh * 0.01
-                    width: Math.max(1, root.sh * 0.0041667) //2
+                    width: Math.max(1, root.sh * 0.003125) //2
                     color: root.tertiaryColor
+                    opacity: 0.5
                     visible: index < screen.days.length - 1
                 }
             }

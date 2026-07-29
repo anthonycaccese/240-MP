@@ -14,15 +14,15 @@ Item {
     // Sized down from the other screens: this one carries the most rows (title,
     // three sun rows, a heading and four moon rows) and at 0.07 the last phase
     // overran the status bar.
-    readonly property real lineSize: root.sh * 0.06
-    readonly property real labelWidth: width * 0.30
-    readonly property real dayWidth:   width * 0.28
+    readonly property real lineSize: root.sh * 0.05 //24
+    readonly property real labelWidth: width * 0.25
+    readonly property real dayWidth:   width * 0.25
 
     Text {
         id: title
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
-        text: "THE WEATHERSTAR ALMANAC"
+        text: "ALMANAC"
         color: root.primaryColor
         font.family: root.globalFont
         font.pixelSize: screen.lineSize
@@ -32,34 +32,38 @@ Item {
     Column {
         id: sun
         anchors.top: title.bottom
-        anchors.topMargin: root.sh * 0.04
+        anchors.topMargin: root.sh * 0.075
         anchors.left: parent.left
         anchors.right: parent.right
-        spacing: root.sh * 0.012
+        spacing: root.sh * 0.01
 
         // Day headings, offset past the label column.
         Row {
+            anchors.horizontalCenter: parent.horizontalCenter
             Item { width: screen.labelWidth; height: 1 }
             Repeater {
                 model: screen.almanac.days || []
                 Text {
                     width: screen.dayWidth
                     text: modelData.name || ""
-                    color: root.primaryColor
+                    color: root.secondaryColor
                     font.family: root.globalFont
-                    font.pixelSize: screen.lineSize
+                    font.pixelSize: root.sh * 0.0333333 //16
                     horizontalAlignment: Text.AlignHCenter
                 }
             }
         }
 
         Row {
+            anchors.horizontalCenter: parent.horizontalCenter
             Text {
                 width: screen.labelWidth
                 text: "SUNRISE"
-                color: root.primaryColor
+                color: root.accentColor
                 font.family: root.globalFont
-                font.pixelSize: screen.lineSize
+                font.pixelSize: root.sh * 0.0375
+                horizontalAlignment: Text.AlignLeft
+                anchors.verticalCenter: parent.verticalCenter
             }
             Repeater {
                 model: screen.almanac.days || []
@@ -75,12 +79,15 @@ Item {
         }
 
         Row {
+            anchors.horizontalCenter: parent.horizontalCenter
             Text {
                 width: screen.labelWidth
                 text: "SUNSET"
-                color: root.primaryColor
+                color: root.accentColor
                 font.family: root.globalFont
-                font.pixelSize: screen.lineSize
+                font.pixelSize: root.sh * 0.0375
+                horizontalAlignment: Text.AlignLeft
+                anchors.verticalCenter: parent.verticalCenter
             }
             Repeater {
                 model: screen.almanac.days || []
@@ -97,44 +104,55 @@ Item {
     }
 
     // ── Moon ─────────────────────────────────────────────────────────────────
-    Text {
-        id: moonTitle
-        anchors.top: sun.bottom
-        anchors.topMargin: root.sh * 0.035
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: "MOON PHASES"
-        color: root.primaryColor
-        font.family: root.globalFont
-        font.pixelSize: screen.lineSize
-    }
 
     Column {
-        anchors.top: moonTitle.bottom
-        anchors.topMargin: root.sh * 0.015
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: root.sh * 0.012
+        id: moon
+        anchors.top: sun.bottom
+        anchors.topMargin: root.sh * 0.0625
+        anchors.left: parent.left
+        anchors.right: parent.right
 
-        Repeater {
-            model: screen.almanac.moons || []
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+        
+            Text {
+                width: screen.labelWidth
+                id: moonTitle
+                text: "MOON PHASES"
+                color: root.accentColor
+                font.family: root.globalFont
+                font.pixelSize: root.sh * 0.0375
+                horizontalAlignment: Text.AlignLeft
+            }
 
-            Row {
-                spacing: root.sw * 0.03
-                Text {
-                    width: screen.width * 0.16
-                    text: modelData.name || ""
-                    color: root.primaryColor
-                    font.family: root.globalFont
-                    font.pixelSize: screen.lineSize
-                    horizontalAlignment: Text.AlignRight
-                }
-                Text {
-                    width: screen.width * 0.16
-                    text: modelData.date || ""
-                    color: root.primaryColor
-                    font.family: root.globalFont
-                    font.pixelSize: screen.lineSize
+            Column {
+                spacing: root.sh * 0.01
+                Repeater {
+                    model: screen.almanac.moons || []
+
+                    Row {
+                        Text {
+                            width: screen.dayWidth
+                            text: modelData.name || ""
+                            color: root.primaryColor
+                            font.family: root.globalFont
+                            font.pixelSize: screen.lineSize
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Text {
+                            width: screen.dayWidth
+                            text: modelData.date || ""
+                            color: root.primaryColor
+                            font.family: root.globalFont
+                            font.pixelSize: screen.lineSize
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
                 }
             }
+
         }
+
+        
     }
 }

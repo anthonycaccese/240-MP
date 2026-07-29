@@ -71,6 +71,7 @@ Item {
         anchors.right: parent.right
         height: Math.max(1, root.sh * 0.0041667)//2
         color: root.tertiaryColor
+        opacity: 0.5
     }
 
     Item {

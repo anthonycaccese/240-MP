@@ -72,7 +72,6 @@ Item {
         color: root.accentColor
         font.family: root.globalFont
         font.pixelSize: root.sh * 0.0875 //42
-        elide: Text.ElideRight
     }
 
     Column {
@@ -87,35 +86,30 @@ Item {
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
-            elide: Text.ElideRight
         }
         Text {
             text: "DEWPOINT: " + (screen.wx.dewPoint || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
-            elide: Text.ElideRight
         }
         Text {
             text: "PRESSURE: " + (screen.wx.pressure || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
-            elide: Text.ElideRight
         }
         Text {
             text: "WIND: " + (screen.wx.wind || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
-            elide: Text.ElideRight
         }
         Text {
             text: "VISIBILITY: " + (screen.wx.visibility || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
-            elide: Text.ElideRight
         }
     }
 }
