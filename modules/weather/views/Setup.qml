@@ -17,7 +17,7 @@ FocusScope {
     property string headline: {
         switch (reason) {
         case "notfound":   return "LOCATION NOT FOUND"
-        case "network":    return "COULD NOT REACH THE LOCATION SERVICE"
+        case "network":    return "CAN'T REACH THE LOCATION SERVICE"
         case "unreadable": return "LOCATION FILE COULD NOT BE READ"
         case "empty":      return "LOCATION FILE IS EMPTY"
         default:           return "NO LOCATION SET"
@@ -27,17 +27,15 @@ FocusScope {
     property string detail: {
         switch (reason) {
         case "notfound":
-            return "No place matched that name — try adding a country, e.g. Paris, France"
+            return "Please check the wiki for setup instructions"
         case "network":
-            return "Check the network connection and try again"
+            return "Please check your network connection and try again"
         case "unreadable":
-            return "Check the file's permissions"
+            return "Please check the location file's permissions"
         default:
-            return "Create this file and put your location in it:"
+            return "Please check the wiki for setup instructions"
         }
     }
-
-    property bool showPath: reason !== "network"
 
     focus: true
 
@@ -83,29 +81,6 @@ FocusScope {
             width: parent.width
             wrapMode: Text.WordWrap
             font.pixelSize: root.sh * 0.0333333
-        }
-
-        Text {
-            visible: setupRoot.showPath && setupRoot.locationPath !== ""
-            text: setupRoot.locationPath
-            color: root.primaryColor
-            font.family: root.globalFont
-            horizontalAlignment: Text.AlignHCenter
-            width: parent.width
-            wrapMode: Text.WrapAnywhere
-            font.pixelSize: root.sh * 0.0291667
-        }
-
-        Text {
-            visible: setupRoot.showPath
-            text: "EXAMPLE:  CALDWELL, NJ, USA\n"
-                  + "OR COORDINATES:  40.8398, -74.2765\n"
-                  + "OR WITH A NAME:  40.8398, -74.2765, CALDWELL"
-            color: root.tertiaryColor
-            font.family: root.globalFont
-            horizontalAlignment: Text.AlignHCenter
-            width: parent.width
-            font.pixelSize: root.sh * 0.0291667
         }
     }
 

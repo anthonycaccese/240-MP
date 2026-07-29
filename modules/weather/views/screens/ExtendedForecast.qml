@@ -11,7 +11,7 @@ Item {
 
     property var days: []
 
-    readonly property real lineSize: root.sh * 0.075
+    readonly property real lineSize: root.sh * 0.05 //24
     readonly property real colWidth: width / 3
 
     Text {
@@ -27,7 +27,7 @@ Item {
     Row {
         id: columns
         anchors.top: title.bottom
-        anchors.topMargin: root.sh * 0.075
+        anchors.topMargin: root.sh * 0.0854167 //41
         anchors.left: parent.left
         anchors.right: parent.right
 
@@ -41,8 +41,7 @@ Item {
                 Column {
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.rightMargin: root.sw * 0.02
-                    spacing: root.sh * 0.012
+                    spacing: root.sh * 0.0138021 //6.625
 
                     Text {
                         text: modelData.name || ""
@@ -52,7 +51,7 @@ Item {
                     }
                     Text {
                         text: modelData.condition || ""
-                        color: root.primaryColor
+                        color: root.secondaryColor
                         font.family: root.globalFont
                         font.pixelSize: screen.lineSize
                         width: parent.width
@@ -66,7 +65,7 @@ Item {
                 Column {
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
-                    spacing: root.sh * 0.012
+                    spacing: root.sh * 0.0138021 //6.625
 
                     Text {
                         text: "LO: " + (modelData.lo || "")
@@ -90,6 +89,6 @@ Item {
     Binding {
         target: columns
         property: "height"
-        value: screen.height - title.height - (root.sh * 0.075)
+        value: screen.height - title.height - (root.sh * 0.13125) //64.125
     }
 }

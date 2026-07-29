@@ -14,45 +14,52 @@ Item {
     property string locationName: ""
 
     readonly property real lineSize: root.sh * 0.05 //24
-    readonly property real lineGap:  root.sh * 0.0083333 //4
+    readonly property real lineGap:  root.sh * 0.0138021 //6.625
+
+    Text {
+        id: title
+        text: "CURRENTLY IN " + screen.locationName
+        color: root.primaryColor
+        font.family: root.globalFont
+        font.pixelSize: screen.lineSize
+        width: parent.width
+        elide: Text.ElideRight
+    }
+
+    Text {
+        id: conditions
+        anchors.top: title.bottom
+        anchors.topMargin: root.sh * 0.0854167 //41
+        text: (screen.wx.condition || "") + " " + (screen.wx.temperature || "")
+        color: root.accentColor
+        font.family: root.globalFont
+        font.pixelSize: root.sh * 0.0875 //42
+        elide: Text.ElideRight
+    }
 
     Column {
+        anchors.top: conditions.bottom
+        anchors.topMargin: root.sh * 0.0395833 //19
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: parent.top
         spacing: screen.lineGap
 
         Text {
-            text: "CONDITIONS AT " + screen.locationName
-            color: root.primaryColor
-            font.family: root.globalFont
-            font.pixelSize: screen.lineSize
-            width: parent.width
-            elide: Text.ElideRight
-        }
-        Text {
-            text: screen.wx.condition || ""
-            color: root.primaryColor
-            font.family: root.globalFont
-            font.pixelSize: screen.lineSize
-            elide: Text.ElideRight
-        }
-        Text {
-            text: "TEMPERATURE: " + (screen.wx.temperature || "")
-            color: root.primaryColor
-            font.family: root.globalFont
-            font.pixelSize: screen.lineSize
-        }
-        Text {
             text: "HUMIDITY: " + (screen.wx.humidity || "")
-                  + "  DEWPOINT: " + (screen.wx.dewPoint || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize
             elide: Text.ElideRight
         }
         Text {
-            text: "BAROMETRIC PRESSURE: " + (screen.wx.pressure || "")
+            text: "DEWPOINT: " + (screen.wx.dewPoint || "")
+            color: root.primaryColor
+            font.family: root.globalFont
+            font.pixelSize: screen.lineSize
+            elide: Text.ElideRight
+        }
+        Text {
+            text: "PRESSURE: " + (screen.wx.pressure || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: screen.lineSize

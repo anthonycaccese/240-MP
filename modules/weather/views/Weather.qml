@@ -197,7 +197,7 @@ FocusScope {
             if (!weatherBackend.hasData) return []
             return [
                 weatherBackend.locationName,
-                c.condition + " " + c.temperature,
+                "CURRENTLY: " + c.condition + " " + c.temperature,
                 "HUMIDITY: " + c.humidity,
                 "DEWPOINT: " + c.dewPoint,
                 "PRESSURE: " + c.pressure,
