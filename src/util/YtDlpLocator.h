@@ -11,8 +11,9 @@
 //   1. <dataRoot>/bin/yt-dlp   — user-updatable drop-in (writable even on an
 //                                immutable SteamOS rootfs; `yt-dlp -U` in place)
 //   2. <appDir>/yt-dlp         — sibling of the app binary (future bundling/dev)
-//   3. yt-dlp on PATH          — brew / apt / ~/.local/bin (macOS Homebrew paths
-//                                are prepended so double-clicked .app bundles find it)
+//   3. yt-dlp on PATH          — brew / apt / ~/.local/bin (the macOS Homebrew
+//                                PATH fixup that double-clicked .app bundles need
+//                                is done once in main(), see util/ExecPath.h)
 namespace ytdlp {
 QString locate(const QString &dataRoot);
 }

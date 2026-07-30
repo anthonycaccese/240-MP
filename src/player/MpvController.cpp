@@ -1,6 +1,7 @@
 #include "MpvController.h"
 #include "../AppCore.h"
 #include "../util/YtDlpLocator.h"
+#include "../util/MpvLocator.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -145,28 +146,10 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     m_lastEndFileReason.clear();
     m_pendingStartClear = false;
 
-#ifdef Q_OS_MACOS
-    // .app bundles launched via double-click get a minimal PATH that excludes
-    // Homebrew. Prepend known install locations so findExecutable works.
-    {
-        const QStringList extraPaths = { "/opt/homebrew/bin", "/usr/local/bin" };
-        const QStringList currentPath = qEnvironmentVariable("PATH").split(":");
-        for (const QString &p : extraPaths) {
-            if (!currentPath.contains(p))
-                qputenv("PATH", (p + ":" + qEnvironmentVariable("PATH")).toUtf8());
-        }
-    }
-#endif
-    // Prefer an mpv bundled next to our own binary — inside the Linux AppImage,
-    // usr/bin/mpv sits beside usr/bin/240mp, and linuxdeploy's AppRun does not
-    // add usr/bin to PATH, so findExecutable() alone would miss it. Fall back to
-    // PATH for system installs (brew on macOS, apt on the Pi).
-    QString bin;
-    const QString siblingMpv = QCoreApplication::applicationDirPath() + "/mpv";
-    if (QFileInfo(siblingMpv).isExecutable())
-        bin = siblingMpv;
-    else
-        bin = QStandardPaths::findExecutable("mpv");
+    // Bundled sibling first, then PATH — see util/MpvLocator.h. Shared with the
+    // audio-only spawners so a bundled-mpv or user-drop-in change lands in one
+    // place.
+    const QString bin = mpvbin::locate();
     if (bin.isEmpty()) {
         qWarning("[MpvController] mpv not found (no bundled sibling, none on PATH)");
         QTimer::singleShot(0, this, [this]() {

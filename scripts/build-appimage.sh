@@ -95,9 +95,10 @@ DESTDIR="$SRC_ROOT/$APPDIR" cmake --install "$BUILD_DIR" --prefix /usr
 
 # ── 4. Bundle mpv ─────────────────────────────────────────────────────────────
 # Stock SteamOS has no system mpv, so ship our own next to the app binary
-# (usr/bin/mpv beside usr/bin/240mp). MpvController resolves mpv as a sibling of
-# its own executable first (linuxdeploy's AppRun does NOT add usr/bin to PATH,
-# so findExecutable alone would miss it). linuxdeploy pulls in mpv's own libs.
+# (usr/bin/mpv beside usr/bin/240mp). src/util/MpvLocator resolves mpv as a
+# sibling of its own executable first (linuxdeploy's AppRun does NOT add usr/bin
+# to PATH, so findExecutable alone would miss it) — and every spawner, video and
+# audio-only alike, goes through it. linuxdeploy pulls in mpv's own libs.
 # MPV_BIN should point at a modern mpv (>= 0.38); CI builds one with
 # scripts/build-mpv.sh because distro packages are often too old. Falls back to
 # the system mpv for local builds on a distro that already ships a recent one.

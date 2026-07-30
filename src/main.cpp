@@ -23,6 +23,7 @@
 #include "input/InputManager.h"
 #include "input/IdleTracker.h"
 #include "update/UpdateManager.h"
+#include "util/ExecPath.h"
 #ifdef Q_OS_MAC
 #include "macos_utils.h"
 #endif
@@ -74,6 +75,10 @@ int main(int argc, char *argv[]) {
 #endif
 
     setlocale(LC_NUMERIC, "C");
+
+    // Once, before anything looks for or spawns mpv / yt-dlp: the locators are
+    // pure queries and deliberately do not touch the environment themselves.
+    execpath::primeSystemPath();
 
     const QString appRoot  = resolveAppRoot();
     const QString dataRoot = resolveDataRoot();

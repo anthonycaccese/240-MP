@@ -21,18 +21,8 @@ QString locate(const QString &dataRoot) {
     if (sibling.isExecutable())
         return sibling.absoluteFilePath();
 
-    // 3. Fall back to PATH (brew / apt / ~/.local/bin).
-#ifdef Q_OS_MACOS
-    // .app bundles launched via double-click get a minimal PATH that excludes
-    // Homebrew. Prepend known install locations so findExecutable works.
-    const QStringList extraPaths = { QStringLiteral("/opt/homebrew/bin"),
-                                     QStringLiteral("/usr/local/bin") };
-    const QStringList currentPath = qEnvironmentVariable("PATH").split(QLatin1Char(':'));
-    for (const QString &p : extraPaths) {
-        if (!currentPath.contains(p))
-            qputenv("PATH", (p + QLatin1Char(':') + qEnvironmentVariable("PATH")).toUtf8());
-    }
-#endif
+    // 3. Fall back to PATH (brew / apt / ~/.local/bin). The macOS Homebrew PATH
+    //    fixup this relies on is done once in main() by execpath::primeSystemPath().
     return QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
 }
 
