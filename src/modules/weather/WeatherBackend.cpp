@@ -18,6 +18,7 @@
 #include <QDateTime>
 #include <QHash>
 #include <QLocale>
+#include <QTimeZone>
 #include <QtMath>
 #include <QDebug>
 
@@ -1243,8 +1244,12 @@ double phaseJde(double k, double phase) {
 }
 
 QDateTime jdToUtc(double jd) {
+    // QTimeZone::utc(), not Qt::UTC: the time-spec overload is deprecated as of
+    // Qt 6.9. QTimeZone::utc() has existed since Qt 5.2, so it warns on nothing
+    // — unlike QTimeZone::UTC, which would need Qt 6.5+ and break a build on a
+    // distro Qt 6.4 (Debian bookworm).
     return QDateTime::fromMSecsSinceEpoch(
-        qint64((jd - 2440587.5) * 86400.0 * 1000.0), Qt::UTC);
+        qint64((jd - 2440587.5) * 86400.0 * 1000.0), QTimeZone::utc());
 }
 
 } // namespace
