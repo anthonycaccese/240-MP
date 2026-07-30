@@ -78,7 +78,7 @@ fi
 
 # Matches what MpvController already does for the player process (it drops
 # WAYLAND_DISPLAY whenever DISPLAY is set) and the WAYLAND_DISPLAY → DISPLAY →
-# eglfs ladder in scripts/run-local.sh.
+# eglfs ladder in scripts/rpi-run-local.sh.
 if [ -n "${DISPLAY:-}" ]; then
     QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
     export QT_QPA_PLATFORM

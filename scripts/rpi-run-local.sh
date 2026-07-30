@@ -6,8 +6,8 @@
 # is otherwise missing when you run ./build/240mp directly.
 #
 # Usage (from anywhere):
-#   scripts/run-local.sh                       # runs ./build/240mp from the repo
-#   MP240_BIN=/path/to/240mp scripts/run-local.sh
+#   scripts/rpi-run-local.sh                       # runs ./build/240mp from the repo
+#   MP240_BIN=/path/to/240mp scripts/rpi-run-local.sh
 #
 # Headless (RPi Lite / EGLFS): run from the Pi's console VT, not over SSH, and
 # stop the autostart service first so it isn't holding the display:

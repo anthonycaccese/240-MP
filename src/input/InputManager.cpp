@@ -769,7 +769,7 @@ QString InputManager::mouseButtonName(int qtButton) {
 
 // HID media keys are a separate concern from navigation actions — they always
 // target mpv, never QML — so they bypass the Action enum and map straight to the
-// canonical mpv key names media-keys.lua binds.
+// canonical mpv key names mpv-media-keys.lua binds.
 QString InputManager::mpvKeyForMediaEvent(const QKeyEvent *ke) {
     switch (ke->key()) {
     case Qt::Key_VolumeUp:              return QStringLiteral("VOLUME_UP");

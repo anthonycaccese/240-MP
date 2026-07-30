@@ -25,7 +25,7 @@
 #include "update/UpdateManager.h"
 #include "util/ExecPath.h"
 #ifdef Q_OS_MAC
-#include "macos_utils.h"
+#include "util/MacosUtils.h"
 #endif
 
 static QString resolveAppRoot() {

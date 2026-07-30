@@ -74,8 +74,8 @@ MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
     }
 
     m_hasMpvOscScript     = QFile::exists(m_appRoot + "/scripts/mpv-osc.lua");
-    m_hasAmbientOscScript = QFile::exists(m_appRoot + "/scripts/ambient-osc.lua");
-    m_hasMediaKeysScript  = QFile::exists(m_appRoot + "/scripts/media-keys.lua");
+    m_hasAmbientOscScript = QFile::exists(m_appRoot + "/scripts/mpv-osc-ambient.lua");
+    m_hasMediaKeysScript  = QFile::exists(m_appRoot + "/scripts/mpv-media-keys.lua");
 
     m_ipc = new QLocalSocket(this);
     connect(m_ipc, &QLocalSocket::connected, this, [this] {
@@ -159,7 +159,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     }
 
     const bool hasOscScript = (oscMode == "ambient") ? m_hasAmbientOscScript : m_hasMpvOscScript;
-    const QString oscScript = m_appRoot + "/scripts/" + ((oscMode == "ambient") ? "ambient-osc.lua" : "mpv-osc.lua");
+    const QString oscScript = m_appRoot + "/scripts/" + ((oscMode == "ambient") ? "mpv-osc-ambient.lua" : "mpv-osc.lua");
 
     // Stamp the log file so each session is identifiable when tailing over SSH.
     // Owner-only perms: mpv logs its command line (incl. auth headers) at verbose
@@ -193,7 +193,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // Media-key handling + themed volume bar — loaded for every mode so HID
     // media keys work anytime mpv is playing, not just inside a given module.
     if (m_hasMediaKeysScript)
-        args << QString("--script=%1").arg(m_appRoot + "/scripts/media-keys.lua");
+        args << QString("--script=%1").arg(m_appRoot + "/scripts/mpv-media-keys.lua");
 
     // Screen saver Lua script — only loaded when the user has opted in via the
     // screensaver_timeout setting (a positive number of seconds; "OFF" parses
@@ -201,7 +201,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     int screensaverTimeout = 0;
     if (m_appCore) {
         const int n = m_appCore->get_setting(QString(), "screensaver_timeout").toString().toInt();
-        const QString ssScript = m_appRoot + "/scripts/screensaver.lua";
+        const QString ssScript = m_appRoot + "/scripts/mpv-screensaver.lua";
         if (n > 0 && QFile::exists(ssScript)) {
             screensaverTimeout = n;
             args << QString("--script=%1").arg(ssScript);
@@ -214,7 +214,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // nudges a render-affecting property on each playlist advance to force a
     // page-flip. Loaded only for image content, so video playback is untouched.
     if (imageContent) {
-        const QString slideshowScript = m_appRoot + "/scripts/slideshow-redraw.lua";
+        const QString slideshowScript = m_appRoot + "/scripts/mpv-slideshow-redraw.lua";
         if (QFile::exists(slideshowScript))
             args << QString("--script=%1").arg(slideshowScript);
     }

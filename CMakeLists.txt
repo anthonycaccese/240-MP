@@ -62,7 +62,7 @@ add_executable(240mp
     src/input/InputManager.cpp
     src/input/IdleTracker.cpp
     src/update/UpdateManager.cpp
-    $<$<BOOL:${APPLE}>:src/macos_utils.mm>
+    $<$<BOOL:${APPLE}>:src/util/MacosUtils.mm>
 )
 
 target_compile_definitions(240mp PRIVATE APP_VERSION="${APP_VERSION}")
@@ -107,7 +107,7 @@ set_target_properties(240mp PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.240mp.app"
-    MACOSX_BUNDLE_ICON_FILE "assets/images/240-mp"
+    MACOSX_BUNDLE_ICON_FILE "packaging/macos/240-mp"
     INSTALL_RPATH_USE_LINK_PATH TRUE
 )
 
@@ -144,6 +144,14 @@ if(APPLE)
         "${CMAKE_SOURCE_DIR}/assets"
         "${CMAKE_SOURCE_DIR}/scripts"
         DESTINATION "240mp.app/Contents/Resources"
+        COMPONENT Runtime)
+
+    # Icon lives under packaging/macos (not assets/) so it ships alongside the
+    # other macOS packaging inputs; installed at the same relative path so it
+    # keeps matching MACOSX_BUNDLE_ICON_FILE above.
+    install(DIRECTORY
+        "${CMAKE_SOURCE_DIR}/packaging/macos"
+        DESTINATION "240mp.app/Contents/Resources/packaging"
         COMPONENT Runtime)
 
     # macdeployqt is NOT run here — it requires Qt frameworks to be present and
