@@ -2,11 +2,11 @@
 
 # 240-MP
 
-240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV).
+240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV), Steam OS (and other Linux x86_64 distros) or MacOS (ARM).
 
-Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. There are 7 currently included playback modules; [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), Emby, [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
+Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. Try to think of each module as a different input on a VHS deck. There are 8 included modules currently: [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), Emby, [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader), [Weather](https://github.com/anthonycaccese/240-MP/wiki/Module:-Weather) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
-It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps outlined below.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" section.
+It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" section.
 
 ## Video Overview
 
@@ -22,9 +22,40 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 | --- | --- | --- |
 | <img src="https://github.com/user-attachments/assets/490e9ebd-fab2-4fd1-9959-35ebb619eff0" /> | <img src="https://github.com/user-attachments/assets/a3c768c7-6ede-4cdf-9d03-90aee7b8cdfb" /> | <img src="https://github.com/user-attachments/assets/0fd48977-8776-4334-b34e-d12256f23b97" /> |
 
-## Current Features
+## Modules
 
-### Local Files Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files))
+### Ambient:Mode ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode))
+- Supported video file types: `"mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob"`
+- Playlist support for audio tracks using `m3u` and `m3u8` files
+- Mix video with a different audio track
+- Loops forever until you stop it
+
+### Emby Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Emby))
+- Supported library types: `movies, tvshows, homevideos, boxsets`
+- Username / password authentication, or Emby Connect (emby.media cloud account, with server picker)
+- Select specific libraries to display
+- Continue Watching, Next Up and Resume Playback
+- Autoplay next episode in a season (optional, off by default)
+- Intro/Credit skip using the server's chapter markers (when detected)
+- Collections support
+- Select preferred audio/subtitle track before playback and switch tracks during playback
+- Full library browsing by letter
+- Show/Season browsing
+- Video quality selection: Direct Playback (Default) or Transcode options
+
+### Jellyfin ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin))
+- Supported library types: `movies, tvshows, homevideos, boxsets`
+- "Quick Connect" authentication
+- Select specific libraries to display
+- Continue Watching, Next Up and Resume Playback
+- Autoplay next episode in a season (optional, off by default)
+- Collections support
+- Select preferred audio/subtitle track before playback and switch tracks during playback
+- Full library browsing by letter
+- Show/Season browsing
+- Video quality selection: Direct Playback (Default) or Transcode options
+
+### Local Files ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files))
 - Supported file types: `"mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob"`
 - Playlist support using `m3u` and `m3u8` files
 - Folder browsing
@@ -33,8 +64,13 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Playback history
 - Switch audio/subtitle tracks during playback
 
-### Plex Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex))
-- Designed for CRT navigation (simple, fast, list browsing)
+### NFC Reader ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader))
+- Start video playback via NFC cards
+- Tested reader support: `ACS ACR122U`
+- Maps cards to videos via per-card text files in a `nfc_tags` data directory
+- Tapping an unknown card auto-creates a stub tag file for it
+
+### Plex ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex))
 - Supported library types: `Movies, TV Shows, Other Videos`
 - Server switching
 - User profile switching and auto sign in
@@ -48,71 +84,35 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Show/Season browsing
 - Video quality selection: Direct Playback (Default) or Transcode options
 
-### Jellyfin Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin))
-- Designed for CRT navigation (simple, fast, list browsing)
-- Supported library types: `movies, tvshows, homevideos, boxsets`
-- "Quick Connect" authentication
-- Select specific libraries to display
-- Continue Watching, Next Up and Resume Playback
-- Autoplay next episode in a season (optional, off by default)
-- Collections support
-- Select preferred audio/subtitle track before playback and switch tracks during playback
-- Full library browsing by letter
-- Show/Season browsing
-- Video quality selection: Direct Playback (Default) or Transcode options
+### Weather ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Weather))
+- Inspired by [WeatherStar 3000+](https://github.com/netbymatt/ws3kp) by netbymatt
+- Integrates with Open-Meteo to provide weather forecasts for worldwide locations
+- Integrates with NWS to provide current conditions for US locations
+- For your main location it displays Current Conditions and Extended (3-day forecast)
+- Can display forecast data for 6 additional locations
+- Supports background music, US/Metric Units and 12-hour/24-hour time display
 
-### Emby Module
-- Designed for CRT navigation (simple, fast, list browsing)
-- Supported library types: `movies, tvshows, homevideos, boxsets`
-- Username / password authentication, or Emby Connect (emby.media cloud account, with server picker)
-- Select specific libraries to display
-- Continue Watching, Next Up and Resume Playback
-- Autoplay next episode in a season (optional, off by default)
-- Intro/Credit skip using the server's chapter markers (when detected)
-- Collections support
-- Select preferred audio/subtitle track before playback and switch tracks during playback
-- Full library browsing by letter
-- Show/Season browsing
-- Video quality selection: Direct Playback (Default) or Transcode options
-
-### YouTube Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube))
-- Designed for CRT navigation (simple, fast, list browsing)
-- Built to list content from YouTube RSS feeds and playback via mpv + yt-dl (no auth required)
+### YouTube ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube))
+- List content from YouTube RSS feeds and playback via mpv + yt-dl (no auth required)
 - View Subscriptions: Browse the latest videos from your configured channels as a reverse chronological list
-- Browse by Channel: Browse videos by Channel
-- Save to Watch Later: Save videos to watch later. This is local to 240-MP (on device only), not associated to any account and the list can be cleared in settings at any time.
-- View Watch History: Displays a list of recently watch videos via the module. This is local to 240-MP (on device only), not associated to any account and the list can be cleared in settings at any time.
-- Resume Playback: Resume from your last playback position or restart from the beginning
+- Browse videos by Channel
+- Save to a local Watch Later list
+- View your local Watch History
+- Resume Playback
 - Set Playback Resolution: 480p (default and good for the RaspberryPi), 720p and 1080p
 - Choose to Display Shorts or not (default is On)
-
-### Ambient:Mode Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode))
-- Supported video file types: `"mp4", "mkv", "avi", "mov", "m4v", "webm", "wmv", "flv", "f4v", "mpg", "mpeg", "vob"`
-- Playlist support for audio tracks using `m3u` and `m3u8` files
-- Mix video with a different audio track
-- Loops forever until you stop it
-
-### NFC Reader Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader))
-- Start video playback via NFC cards
-- Tested reader support: `ACS ACR122U`
-- Maps cards to videos via per-card text files in the `nfc_tags` data directory — the filename is the display title, line 1 the card UID, line 2 the video path or URL
-- Tapping an unknown card auto-creates a stub tag file for it; rename the file and add a path line to map the card
-
-### Global
-- [Color Schemes](https://github.com/anthonycaccese/240-MP/wiki/Customizations)
-- [Keyboard & Controller](https://github.com/anthonycaccese/240-MP/wiki/Input) input support
-- Media Keys during video playback (volume +/-, mute, play/pause, stop, seek, next chapter, previous chapter)
 
 ## Install
 - [On a Raspberry Pi](INSTALL.md#on-a-raspberry-pi)
 - [On macOS (ARM)](INSTALL.md#on-macos-arm)
-- [On a Steam Deck / Linux x86_64](INSTALL.md#on-a-steam-deck--linux-x86_64) (self-contained AppImage)
+- [On SteamOS / Linux x86_64](INSTALL.md#on-steamos--linux-x86_64)
 
 ## Hardware Testing
 - [Raspberry Pi 3B](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#raspberry-pi-3b)
 - [Raspberry Pi 3B+](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#raspberry-pi-3b-1)
 - [Raspberry Pi 4B](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#raspberry-pi-4b)
 - [Raspberry Pi 5](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#raspberry-pi-5)
+- [Steam Deck](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing#steam-deck)
 
 ## FAQs
 
@@ -147,7 +147,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - The `VCR OSD Mono` font was created by Riciery Santos Leal (a.k.a. mrmanet) https://www.dafont.com/vcr-osd-mono.font
 - The `Unifont` font (used as a fallback for characters that VCR OSD Mono does not cover) is GNU Unifont by Roman Czyborra, Paul Hardy, et al., licensed under the SIL Open Font License v1.1. https://unifoundry.com/unifont/ — license text: [assets/fonts/LICENSE-unifont.txt](assets/fonts/LICENSE-unifont.txt)
 - Because this is a hobby project (and a fairly niche use case), I am using [Claude Code](https://www.anthropic.com/product/claude-code) to build a large part of the backend C++ code and structure the modules.  If you have concerns with that, I am glad to talk through it.  Also, please feel free to fork this repo, update any aspects and tailor things to your own use case; that's why the source is fully open and available.
-- Thank you to Plex for providing an open and free [API](https://developer.plex.tv/) with all the endpoints needed for me to make my own custom client
+- Thank you to Plex, Jellyfin, Emby and Open-Meteo for providing open and free apis to enable building modules for each.
 - Thank you to [the MPV team](https://mpv.io/) for a simple, extensible and cross platform media player
 - And thank you to the [Raspberry Pi Foundation](https://www.raspberrypi.org/) for helping me fill a drawer with SBCs to tinker with and inspire fun ideas like this project ❤️
 

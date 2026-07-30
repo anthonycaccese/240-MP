@@ -211,7 +211,7 @@ The Local Files module will be enabled by default and you can open settings to e
 
 ### Update
 
-**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Restart. Your settings will be retained.
+**From within the app (recommended):** go to `Settings → Update`, check for updates, download, and choose Apply & Restart. Your settings will be retained.
 
 > Installs made before in-app updates were possible need to re-run the install script **once** (just follow the steps below).  Doing that will pick up the new launcher.  There is a check on the Update screen that will let you know if that's the case for you.
 
@@ -265,7 +265,7 @@ If you don't have a Raspberry Pi and would like to try 240-MP, I also provide a 
 
 ### Update
 
-**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Relaunch — the app will swap itself in `/Applications` and reopen on the new version. Your settings will be retained.
+**From within the app (recommended):** go to `Settings → Update`, check for updates, download, and choose Apply & Relaunch — the app will swap itself in `/Applications` and reopen on the new version. Your settings will be retained.
 
 Or manually:
 1. Download the DMG archive from the latest release
@@ -276,47 +276,54 @@ Or manually:
 - Remove it just like you would any application on macOS
 - Remove the configuration files in `~/Library/Application Support/240-MP/`
 
-## On a Steam Deck / Linux x86_64
+## On SteamOS / Linux x86_64
 
-For the **Steam Deck** and other Intel/AMD Linux machines, 240-MP ships as an **AppImage** — a single self-contained file. mpv is bundled, so there is nothing else to install; it runs on stock SteamOS without needing Desktop Mode package installs.
+For **SteamOS** and other x86_64 Linux distros, 240-MP ships as an **AppImage**. mpv is bundled, so there is nothing else to install; it runs on stock SteamOS without any additional package installs.
 
 ### Requirements
 
-- A Steam Deck (any model) or an x86_64 Linux machine with a graphical desktop (X11 or Wayland)
+- SteamOS or an x86_64 Linux distro with a graphical desktop (X11 or Wayland) that can run AppImages
 - Internet access
 
-### Steps (Steam Deck)
+### Steps
 
-1. Switch to **Desktop Mode** (hold the power button → *Switch to Desktop*).
-2. Download `240-MP-linux-x86_64.AppImage` from the [latest release](https://github.com/anthonycaccese/240-mp/releases/latest).
-3. In the file manager (Dolphin), right-click the file → **Properties → Permissions** → tick *Is executable* (or run `chmod +x` on it in Konsole).
-4. Double-click to launch. The Local Files module is enabled by default; open Settings to enable others (see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki).
+> **SteamOS only**: please switch to Desktop Mode for the following steps
 
-### Launching from Gaming Mode
+1. Download `240-MP-linux-x86_64.AppImage` from the [latest release](https://github.com/anthonycaccese/240-mp/releases/latest).
+2. In your file manager, right-click the file → **Properties → Permissions** → tick *Is executable* (or run `chmod +x` on it from terminal).
+3. Double-click to launch. The Local Files module is enabled by default; open Settings to enable others (see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki for details on each).
 
-To run it from the Steam Deck's Gaming Mode like any other title:
+    #### SteamOS Gaming Mode
 
-1. In Desktop Mode, open **Steam → Games → Add a Non-Steam Game to My Library**, click **Browse**, and select the AppImage.
-2. Back in Gaming Mode it appears in your library and launches full-screen under gamescope. Controllers work out of the box (see the gamepad notes in [BUILDING.md](BUILDING.md#gamepad-input-inputcfg)).
+    To run 240-MP from SteamOS Gaming Mode:
 
-### YouTube (yt-dlp)
+    1. In Desktop Mode, open **Steam → Games → Add a Non-Steam Game to My Library**, click **Browse**, and select the 240-MP AppImage.
+    2. Back in Gaming Mode it will appear in your library under "Non Steam Games".
 
-The YouTube module needs `yt-dlp`, which is **not** bundled with the AppImage — YouTube breaks it every few weeks, so it has to be updatable independently of app releases. Because SteamOS is immutable (no `apt`/`pacman`), drop a single self-contained `yt-dlp` binary into the app's data directory and the app and its bundled mpv both use it automatically:
+    #### YouTube (yt-dlp)
 
-```bash
-mkdir -p ~/.local/share/240-MP/bin
-wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-  -O ~/.local/share/240-MP/bin/yt-dlp
-chmod +x ~/.local/share/240-MP/bin/yt-dlp
-```
+    The YouTube module requires `yt-dlp` in order to work which is not bundled with the AppImage.  Its updated frequently to work with new YouTube changes, so it has to be updatable independently of app releases. Because SteamOS is immutable you can drop a single self-contained `yt-dlp` binary into the 240-MP's data directory and the app and its bundled mpv will use it automatically.
 
-Keep it current with `~/.local/share/240-MP/bin/yt-dlp -U` (no app reinstall needed). If you already have `yt-dlp` on your `PATH` (e.g. in `~/.local/bin`), that works too — the data-dir copy just takes precedence.
+    Run the following:
+
+    ```bash
+    mkdir -p ~/.local/share/240-MP/bin
+    wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+     -O ~/.local/share/240-MP/bin/yt-dlp
+    chmod +x ~/.local/share/240-MP/bin/yt-dlp
+    ```
+
+    You can update it with `~/.local/share/240-MP/bin/yt-dlp -U`. 
+
+    That said, if you already have `yt-dlp` on your `PATH` (e.g. in `~/.local/bin`) then that will work too, the data-dir copy just provides a local to 240-MP option.
 
 ### Update
 
-**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Relaunch. The app verifies the download, swaps the new `.AppImage` over your current one in place (keeping a `.bak` of the previous version until the new one launches cleanly), and — in **Desktop Mode** — reopens on the new version. In **Gaming Mode** the app closes after applying; relaunch it from your Steam library to pick up the new version (the file path is unchanged, so the shortcut still works). Your settings in `~/.local/share/240-MP/` are retained.
-
-If the app is stored in a read-only location the in-app update can't write to, the update screen falls back to pointing you at the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) to download and replace the `.AppImage` manually.
+- **From within the app (recommended):** go to `Settings → Update`, check for updates, download, and choose Apply & Relaunch. 
+- The app verifies the download, swaps the new `.AppImage` over your current one in place (keeping a `.bak` of the previous version until the new one launches cleanly). 
+- In **Gaming Mode** the app needs to close after applying; so simply relaunch it from your Steam library to pick up the new version (the file path is unchanged, so your existing shortcut will still work). 
+- Your settings in `~/.local/share/240-MP/` are retained.
+- If the app is stored in a read-only location the in-app update can't write to then the update screen simply point you at the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) to download and replace the `.AppImage` manually.
 
 ### Uninstall
 
