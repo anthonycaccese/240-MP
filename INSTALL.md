@@ -282,10 +282,12 @@ For **SteamOS** and other x86_64 Linux distros, 240-MP ships as an **AppImage**.
 
 ### Requirements
 
-- SteamOS or an x86_64 Linux distro with a graphical desktop (X11 or Wayland) that can run AppImages
+- SteamOS or an x86_64 Linux machine running a graphical session: X11, or Wayland with XWayland available (the AppImage ships Qt's `xcb` platform plugin)
 - Internet access
 
-### Steps
+The AppImage carries its own copy of the Wayland client libraries and uses them only if the system has none, so X11-only distributions that ship no Wayland at all (e.g. Batocera and similar buildroot-based images) should be able to run it too.
+
+### Steps (Steam Deck)
 
 > **SteamOS only**: please switch to Desktop Mode for the following steps
 

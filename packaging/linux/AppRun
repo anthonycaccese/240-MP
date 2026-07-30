@@ -1,0 +1,87 @@
+#!/bin/sh
+# ──────────────────────────────────────────────────────────────────────────────
+# AppImage entry point for 240-MP (Linux x86_64).
+#
+# Installed over the symlink linuxdeploy generates (see scripts/build-appimage.sh
+# step 8). Two jobs, both about surviving hosts that are not a normal desktop:
+#
+#   1. Wayland client libraries. The bundled SDL2 and mpv both hard-link
+#      libwayland-client/-cursor/-egl (Debian/Ubuntu build them with the Wayland
+#      backend on), so ld.so needs all three even on a machine that will only
+#      ever run X11. Distros with a Wayland session provide them; minimal X11-only
+#      images — Batocera, buildroot-based handhelds, slim containers — do not, and
+#      the app dies in the loader before main() runs. We carry a copy in
+#      usr/lib/fallback and reach for it only when the host has none, so a real
+#      Wayland host keeps using its own (matching whatever its Mesa EGL loads).
+#
+#   2. Qt platform plugin. The bundle ships xcb only, so pin it when there is a
+#      DISPLAY rather than letting Qt probe for a wayland plugin that isn't here.
+#
+# Deliberately POSIX sh, no bashisms: the shell on a buildroot image is busybox
+# ash. Both behaviours yield to a value the user already set.
+# ──────────────────────────────────────────────────────────────────────────────
+
+HERE="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+
+# Ask the dynamic linker rather than guessing from filenames.
+# LD_TRACE_LOADED_OBJECTS makes ld.so resolve the binary's whole dependency tree
+# and print "=> not found" for whatever it cannot satisfy, using the host's real
+# search path and architecture. Checking for files by name cannot match that — it
+# is fooled by a multilib tree with a 32-bit copy in a directory we look in, by
+# libraries kept somewhere non-standard, and by a stale ld.so.cache. This asks
+# the question that actually matters: will this binary start?
+#
+# Only the three we carry spares of count. Other unresolved libraries are not
+# ours to fix — a host without Mesa is missing libGL whatever we do, and reacting
+# to that would wrongly pull our Wayland copies ahead of working host ones.
+# All-or-nothing across the three, so a host libwayland-client is never mixed
+# with our libwayland-egl.
+#
+# No readable answer (a non-glibc loader, or ld.so bailing out because a library
+# is present but unusable) means we cannot tell — then prefer our own known-good
+# copies. They ship in the image regardless, so the only cost of being wrong that
+# way is using ours where the host's would also have done.
+# Both binaries are traced: mpv is a separate executable the app hands off to,
+# with dependencies the app itself never has (libva-wayland is mpv's alone), so
+# tracing only the app would miss a host that can start the UI but not play.
+needs_fallback=1
+trace="$(LD_TRACE_LOADED_OBJECTS=1 "$HERE/usr/bin/240mp" 2>/dev/null
+         LD_TRACE_LOADED_OBJECTS=1 "$HERE/usr/bin/mpv" 2>/dev/null)"
+if [ -n "$trace" ]; then
+    needs_fallback=0
+    for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
+              libva-wayland.so.2 libvulkan.so.1; do
+        if printf '%s\n' "$trace" | grep -q "$so => not found"; then
+            needs_fallback=1
+            break
+        fi
+    done
+fi
+
+# A trace resolves libraries, not the symbols inside them. Batocera ships a
+# libvulkan.so.1 built without Wayland support, so mpv died on "undefined symbol:
+# vkCreateWaylandSurfaceKHR" (via libplacebo) while every library resolved fine.
+# Actually running mpv catches that, and anything else that stops it starting.
+# The app binary has no equivalent no-op flag, so it stays trace-only.
+if [ "$needs_fallback" = "0" ] && ! "$HERE/usr/bin/mpv" --version >/dev/null 2>&1; then
+    needs_fallback=1
+fi
+
+# usr/lib joins the path too, not just the fallback directory: linuxdeploy marks
+# the bundled binaries with RUNPATH, which — unlike RPATH — is not inherited by
+# their dependencies' own lookups. Without this, libwayland-client resolves but
+# its libffi does not on a host that has no system copy.
+if [ "$needs_fallback" = "1" ]; then
+    LD_LIBRARY_PATH="$HERE/usr/lib/fallback:$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH
+fi
+
+# Matches what MpvController already does for the player process (it drops
+# WAYLAND_DISPLAY whenever DISPLAY is set) and the WAYLAND_DISPLAY → DISPLAY →
+# eglfs ladder in scripts/run-local.sh.
+if [ -n "${DISPLAY:-}" ]; then
+    QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+    export QT_QPA_PLATFORM
+fi
+
+exec "$HERE/usr/bin/240mp" "$@"

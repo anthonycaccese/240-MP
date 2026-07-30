@@ -118,8 +118,9 @@ void UpdateManager::evaluateApplyCapability() {
                                      "240-MP will quit and open the disk image for manual install.");
     }
 #else
-    // AppImage (x86_64 / SteamDeck): AppRun exports APPIMAGE with the path of the
-    // running image — a plain file in the user's home (not the immutable rootfs).
+    // AppImage (x86_64 / SteamDeck): the AppImage runtime exports APPIMAGE with the
+    // path of the running image — a plain file in the user's home (not the
+    // immutable rootfs); our AppRun execs through and preserves it.
     // Apply swaps the new image over it (see applyAppImage). Only offer that when
     // the file and its directory are writable; otherwise degrade to the manual
     // Releases-page path.

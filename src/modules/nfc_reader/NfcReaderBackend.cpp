@@ -5,6 +5,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
+#include <QMetaType>
 #include <QTimer>
 #include <QDateTime>
 #include <QDebug>
@@ -26,6 +28,9 @@ static constexpr qint64 kStallDisconnectMs = 3000;
 static constexpr qint64 kStallRespawnMs = 10000;
 static constexpr int kMaxRespawns = 5;
 static const char *kTagsDirName = "nfc_tags";
+// Must track the "enabled" toggle's default in modules/nfc_reader/manifest.json,
+// which is what AppCore falls back to when config.json has no value yet.
+static constexpr bool kManifestEnabledDefault = false;
 
 // ---------------------------------------------------------------------------
 // NfcPollWorker — lives on its own QThread; owns all PC/SC state and calls.
@@ -182,21 +187,29 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
 {
     qDebug("[NfcReader] Initializing NFC reader backend");
 
-    // Resolve the configured tags directory (falls back to the dataRoot/nfc_tags default).
+    // Resolve module settings (the tags directory falls back to dataRoot/nfc_tags).
     m_tagsDir = m_dataRoot + "/" + kTagsDirName;
+    // Whether polling runs must match whether AppCore shows the module at all,
+    // so this mirrors AppCore::isModuleEnabled: an unwritten setting means the
+    // manifest default (OFF for this module), and a present-but-not-bool value
+    // means enabled — otherwise a hand-edited config could list the module in
+    // the menu while the reader silently never polls.
+    bool configuredEnabled = kManifestEnabledDefault;
     QFile f(m_dataRoot + "/config.json");
     if (f.open(QIODevice::ReadOnly)) {
-        const QString dir = QJsonDocument::fromJson(f.readAll()).object()
-            ["modules"].toObject()["com.240mp.nfc_reader"].toObject()
-            ["tags_directory"].toString();
+        const QJsonObject moduleConfig = QJsonDocument::fromJson(f.readAll()).object()
+            ["modules"].toObject()["com.240mp.nfc_reader"].toObject();
+        const QString dir = moduleConfig["tags_directory"].toString();
         if (!dir.isEmpty())
             m_tagsDir = dir;
+
+        if (moduleConfig.contains("enabled"))
+            configuredEnabled = moduleConfig["enabled"].toBool(true);
     }
     qDebug("[NfcReader] Tags dir: %s", qPrintable(tagsDirPath()));
 
     QDir().mkpath(tagsDirPath());
     scanTagsDir();
-    startWorker();
 
     // If the worker wedges inside a PC/SC call, first report the reader as
     // disconnected rather than showing a stale "tap a card" while taps go
@@ -204,6 +217,8 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
     m_watchdog = new QTimer(this);
     m_watchdog->setInterval(2000);
     connect(m_watchdog, &QTimer::timeout, this, [this]() {
+        if (!m_pollingEnabled || !m_workerThread || !m_worker) return;
+
         const qint64 stalledMs = QDateTime::currentMSecsSinceEpoch() - m_lastSampleMs;
         if (stalledMs < kStallDisconnectMs) return;
 
@@ -221,27 +236,90 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
             qWarning("[NfcReader] Poll thread wedged for %llds - restarting it (attempt %d/%d)",
                      static_cast<long long>(stalledMs / 1000), m_respawnCount, kMaxRespawns);
             abandonWorker(100);
+            if (!m_pollingEnabled) return;
             startWorker();
-            m_lastSampleMs = QDateTime::currentMSecsSinceEpoch();
             if (m_respawnCount == kMaxRespawns) {
-                qWarning("[NfcReader] Repeated PC/SC wedges - giving up until app restart");
+                qWarning("[NfcReader] Repeated PC/SC wedges - pausing restarts until polling recovers or NFC is re-enabled");
             }
         }
     });
-    m_watchdog->start();
+
+    if (configuredEnabled) {
+        setPollingEnabled(true);
+    } else {
+        qInfo("[NfcReader] Polling disabled by configuration");
+    }
 }
 
 NfcReaderBackend::~NfcReaderBackend() {
+    m_pollingEnabled = false;
+    m_watchdog->stop();
     abandonWorker(1500);
 }
 
+void NfcReaderBackend::setPollingEnabled(bool enabled) {
+    if (m_pollingEnabled == enabled) return;
+
+    m_pollingEnabled = enabled;
+    if (enabled)
+        startPolling();
+    else
+        stopPolling();
+}
+
+void NfcReaderBackend::startPolling() {
+    if (!m_pollingEnabled) return;
+
+    if (!available()) {
+        m_watchdog->stop();
+        qInfo("[NfcReader] Polling enabled but PC/SC support is unavailable");
+        return;
+    }
+
+    if (m_workerThread || m_worker) return;
+
+    m_respawnCount = 0;
+    startWorker();
+    if (!m_workerThread || !m_worker) return;
+
+    m_watchdog->start();
+    qInfo("[NfcReader] Polling started");
+}
+
+void NfcReaderBackend::stopPolling() {
+    m_watchdog->stop();
+
+    // Settings changes run on the main thread, so release logical ownership
+    // without waiting for a potentially wedged PC/SC call to return.
+    abandonWorker(0);
+    m_lastSampleMs = 0;
+    m_respawnCount = 0;
+
+    if (m_readerConnected) {
+        m_readerConnected = false;
+        emit readerConnectedChanged();
+    }
+    m_lastUid.clear();
+    m_playbackActive = false;
+    setCardState("none");
+
+    qInfo("[NfcReader] Polling disabled");
+}
+
 void NfcReaderBackend::startWorker() {
+    if (!m_pollingEnabled || !available() || m_workerThread || m_worker) return;
+
     m_lastSampleMs = QDateTime::currentMSecsSinceEpoch();
     m_workerThread = new QThread(this);
     m_worker = new NfcPollWorker;
     m_worker->moveToThread(m_workerThread);
     connect(m_workerThread, &QThread::started, m_worker, &NfcPollWorker::start);
     connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
+    // Set up here, not in abandonWorker(): a thread that exits between quit()
+    // and a connect() made afterwards has already emitted finished(), which
+    // would strand the QThread object. Harmless on the delete-after-wait path
+    // below — ~QObject drops the object's own pending deferred-delete event.
+    connect(m_workerThread, &QThread::finished, m_workerThread, &QObject::deleteLater);
     connect(m_worker, &NfcPollWorker::sampled, this, &NfcReaderBackend::onSampled);
     m_workerThread->start();
 }
@@ -254,13 +332,14 @@ void NfcReaderBackend::abandonWorker(int waitMs) {
     if (m_workerThread->wait(waitMs)) {
         delete m_workerThread;
     } else {
-        // The thread is stuck in an uninterruptible PC/SC call: it can't be
-        // terminated (mach_msg is not a cancellation point) and destroying a
-        // running QThread aborts the process. Unparent and leak it instead;
+        // Either the caller did not want to block (waitMs 0, from a settings
+        // change) or the thread is stuck in an uninterruptible PC/SC call: it
+        // can't be terminated (mach_msg is not a cancellation point) and
+        // destroying a running QThread aborts the process. Unparent it instead;
         // if the call ever returns, the thread exits (quit() was already
-        // requested) and deletes itself.
+        // requested) and the deleteLater wired up in startWorker() reaps both
+        // it and its worker.
         m_workerThread->setParent(nullptr);
-        connect(m_workerThread, &QThread::finished, m_workerThread, &QObject::deleteLater);
     }
     m_workerThread = nullptr;
     m_worker = nullptr;
@@ -279,8 +358,16 @@ void NfcReaderBackend::setTagsDir(const QString &path) {
 }
 
 void NfcReaderBackend::onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value) {
-    if (moduleId == QLatin1String("com.240mp.nfc_reader") && key == QLatin1String("tags_directory"))
+    if (moduleId != QLatin1String("com.240mp.nfc_reader")) return;
+
+    if (key == QLatin1String("enabled")) {
+        // Same rule as the constructor / AppCore::isModuleEnabled: only an
+        // explicit false turns polling off.
+        const bool enabled = value.metaType().id() != QMetaType::Bool || value.toBool();
+        setPollingEnabled(enabled);
+    } else if (key == QLatin1String("tags_directory")) {
         setTagsDir(value.toString());
+    }
 }
 
 // One .txt file per card: the filename (minus .txt) is the display title, the
@@ -533,6 +620,8 @@ QString NfcReaderBackend::resolveVideoPath(const QString &path) const {
 }
 
 void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid) {
+    if (!m_pollingEnabled || sender() != m_worker) return;
+
     m_lastSampleMs = QDateTime::currentMSecsSinceEpoch();
     m_respawnCount = 0;
 

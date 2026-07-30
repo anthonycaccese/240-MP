@@ -265,6 +265,8 @@ jobs:
             libxpresent-dev \
             libwayland-dev \
             wayland-protocols \
+            libva-wayland2 \
+            libvulkan1 \
             libgbm-dev \
             libegl-dev \
             libpulse-dev \

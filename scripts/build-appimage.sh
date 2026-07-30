@@ -129,17 +129,159 @@ log "Deploying Qt + libraries"
     --desktop-file "$SRC_ROOT/packaging/linux/240-mp.desktop" \
     --icon-file "$SRC_ROOT/packaging/linux/240-mp.png"
 
-# ── 6. Drop host-driver libraries ─────────────────────────────────────────────
+# ── 6. Stage the Wayland fallback set ─────────────────────────────────────────
+# Debian/Ubuntu build SDL2 and mpv with Wayland support on, so the bundle needs
+# the Wayland-facing libraries even on a machine that will only ever run X11.
+# Step 7 used to delete all of them along with the driver libs, which made the
+# app unlaunchable on X11-only images that ship no Wayland at all (Batocera and
+# other buildroot handhelds). Each is a vendor-neutral shim rather than a driver,
+# so a bundled copy is a safe substitute:
+#
+#   libwayland-client/-cursor/-egl  protocol shims (SDL2 and mpv link all three)
+#   libva-wayland.so.2              27 KB of vaGetDisplayWl glue; the real VA
+#                                   driver is still dlopened by host libva.so.2
+#   libvulkan.so.1                  the Khronos *loader*, not a driver — it
+#                                   dlopens the host's ICD from vulkan/icd.d, so
+#                                   hardware decode stays on the host driver
+#
+# libvulkan earns its place for a different reason than the rest: Batocera *has*
+# a libvulkan.so.1, but one built without Wayland support, so mpv died on
+# "undefined symbol: vkCreateWaylandSurfaceKHR" (via libplacebo). A missing
+# symbol inside a library that exists is invisible to ldd and to the build-time
+# audit — only the target can reveal it. Ours exports the full WSI set.
+#
+# AppRun reaches for these only when the host cannot satisfy them itself.
+FALLBACK_LIBS="libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1
+               libva-wayland.so.2 libvulkan.so.1"
+FALLBACK_DIR="$APPDIR/usr/lib/fallback"
+
+host_lib_path() {
+    local d
+    for d in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /lib64 /usr/lib64 /lib /usr/lib; do
+        if [ -e "$d/$1" ]; then echo "$d/$1"; return 0; fi
+    done
+    return 1
+}
+
+log "Staging Wayland client fallback libraries"
+mkdir -p "$FALLBACK_DIR"
+# Move whatever linuxdeploy bundled (soname symlinks and versioned files alike)…
+find "$APPDIR/usr/lib" -maxdepth 1 -name 'libwayland*' -print0 2>/dev/null |
+    while IFS= read -r -d '' f; do mv "$f" "$FALLBACK_DIR/"; done
+# …then fill the gaps. libwayland-client is on the upstream AppImage excludelist
+# so linuxdeploy never bundles it, and libva-wayland is not caught by the glob
+# above — both always land here, copied from the build host. (The libva-wayland
+# copy linuxdeploy did put in usr/lib is removed by step 7's libva* pattern.)
+for so in $FALLBACK_LIBS; do
+    [ -e "$FALLBACK_DIR/$so" ] && continue
+    src="$(host_lib_path "$so")" || {
+        echo "ERROR: $so is in neither the AppDir nor the build host's library path." >&2
+        echo "       Install it (apt-get install libwayland-client0 libwayland-cursor0" >&2
+        echo "       libwayland-egl1 libva-wayland2) — an incomplete fallback set" >&2
+        echo "       breaks every X11-only target." >&2
+        exit 1
+    }
+    cp -L "$src" "$FALLBACK_DIR/$so"
+done
+
+# ── 7. Drop host-driver libraries ─────────────────────────────────────────────
 # GPU/driver/display libs MUST come from the host to match the actual hardware —
 # bundling them breaks VA-API decode and GL on the target (e.g. the SteamDeck's
 # AMD stack). linuxdeploy excludes most of these already; belt-and-suspenders.
+# -maxdepth 1 keeps usr/lib/fallback out of scope.
 log "Pruning host-provided driver libraries"
+PRUNED_LIBS=""
 for pat in 'libva*' 'libvdpau*' 'libGL*' 'libEGL*' 'libGLX*' 'libGLdispatch*' \
-           'libdrm*' 'libgbm*' 'libwayland*' 'libxcb-dri*' 'libvulkan*'; do
-    find "$APPDIR/usr/lib" -maxdepth 1 -name "$pat" -delete 2>/dev/null || true
+           'libdrm*' 'libgbm*' 'libxcb-dri*' 'libvulkan*'; do
+    # Remember what we removed: deleting a library is itself the decision that the
+    # host provides it, so step 8 should not then complain about it. Deriving this
+    # instead of restating the names keeps the two lists from drifting apart.
+    PRUNED_LIBS="$PRUNED_LIBS $(find "$APPDIR/usr/lib" -maxdepth 1 -name "$pat" \
+        -printf '%f\n' -delete 2>/dev/null || true)"
 done
 
-# ── 7. Package ────────────────────────────────────────────────────────────────
+# ── 8. Audit the host-library contract ────────────────────────────────────────
+# Every DT_NEEDED soname that is not inside the AppDir has to come from the target
+# machine. That set is a promise about which distros can run this build, and it
+# used to be implicit — which is how the Wayland libs above silently became
+# mandatory and broke X11-only distros with no warning at build time. Make it
+# explicit: anything required but neither bundled nor listed here fails the build.
+#
+# The list below is the upstream AppImage excludelist — libraries linuxdeploy
+# refuses to bundle because they are tied to the host's kernel/driver/graphics
+# stack — and step 7's prunings are added to it automatically. Add an entry here
+# only when it genuinely is present on every target; otherwise bundle the library
+# instead. For a one-off unblock (toolchain bump mid-release, no time to rework
+# the bundle), set ALLOW_HOST_LIBS_EXTRA="soname …".
+ALLOWED_HOST_LIBS="
+ld-linux-x86-64.so.2 ld-linux.so.2 libanl.so.1 libasound.so.2 libBrokenLocale.so.1
+libc.so.6 libcidn.so.1 libcom_err.so.2 libdl.so.2 libexpat.so.1 libfontconfig.so.1
+libfreetype.so.6 libfribidi.so.0 libgcc_s.so.1 libglapi.so.0 libgmp.so.10
+libgpg-error.so.0 libharfbuzz.so.0 libICE.so.6 libjack.so.0 libm.so.6 libmvec.so.1
+libnss_compat.so.2 libnss_dns.so.2 libnss_files.so.2 libnss_hesiod.so.2
+libnss_nis.so.2 libnss_nisplus.so.2 libpipewire-0.3.so.0 libpthread.so.0
+libresolv.so.2 librt.so.1 libSM.so.6 libstdc++.so.6 libthread_db.so.1
+libusb-1.0.so.0 libutil.so.1 libuuid.so.1 libz.so.1
+libX11.so.6 libX11-xcb.so.1 libxcb.so.1 libxcb-dri2.so.0 libxcb-dri3.so.0
+libGL.so.1 libGLX.so.0 libGLdispatch.so.0 libOpenGL.so.0 libEGL.so.1 libGLESv2.so.2
+libdrm.so.2 libgbm.so.1 libvulkan.so.1 libvdpau.so.1
+libva.so.2 libva-drm.so.2 libva-x11.so.2 libva-wayland.so.2
+"
+
+audit=""
+if ! command -v objdump >/dev/null 2>&1; then
+    echo "WARN: objdump not found (install binutils) — skipping the host-library audit" >&2
+else
+    log "Auditing host library requirements"
+    # "soname<TAB>needing-file" for every ELF in the bundle. The same find also
+    # turns up scripts and assets, so objdump is expected to fail on some inputs —
+    # the trailing `|| true` is load-bearing under `set -o pipefail`, which would
+    # otherwise abort the whole build on the first non-ELF file.
+    needs="$(find "$APPDIR" -type f \( -name '*.so*' -o -perm -u+x \) -print0 |
+        while IFS= read -r -d '' f; do
+            objdump -p "$f" 2>/dev/null |
+                awk -v F="${f#"$APPDIR"/}" '$1 == "NEEDED" { print $2 "\t" F }' || true
+        done)"
+
+    # "soname<TAB>bundled|host": what the bundle satisfies itself, plus what the
+    # target is allowed to satisfy. Symlinks count as bundled — linuxdeploy
+    # sometimes lands a soname symlink beside the versioned real file. Passed as a
+    # file rather than via awk -v: mawk (Ubuntu's awk) rejects multi-line values.
+    known="$(
+        find "$APPDIR" \( -type f -o -type l \) -name '*.so*' -printf '%f\tbundled\n'
+        printf '%s\thost\n' $ALLOWED_HOST_LIBS $PRUNED_LIBS ${ALLOW_HOST_LIBS_EXTRA:-}
+    )"
+
+    audit="$(printf '%s\n' "$needs" | awk -F'\t' '
+        FNR == NR                { known[$1] = $2; next }
+        NF == 0                  { next }
+        known[$1] == "bundled"   { next }
+        known[$1] == "host"      { host[$1] = 1; next }
+                                 { bad[$1] = bad[$1] "\n    " $2 }
+        END {
+            for (s in host)  print "OK\t" s
+            for (s in bad)   print "BAD\t" s bad[s]
+        }
+    ' <(printf '%s\n' "$known") -)"
+fi
+
+# Both reports are no-ops when the audit was skipped ($audit empty).
+if printf '%s\n' "$audit" | grep -q '^BAD'; then
+    echo "ERROR: the bundle needs libraries that are neither included in it nor allowed" >&2
+    echo "       to come from the host — this AppImage would fail to start on any target" >&2
+    echo "       that lacks them. Bundle them, or add them to ALLOWED_HOST_LIBS if every" >&2
+    echo "       supported target really does provide them. Required by:" >&2
+    printf '%s\n' "$audit" | sed -n 's/^BAD\t/  /p; /^ \{4\}/p' >&2
+    exit 1
+fi
+printf '%s\n' "$audit" | sed -n 's/^OK\t//p' | sort | sed 's/^/  host must provide: /' >&2
+
+# ── 9. Install the AppRun ─────────────────────────────────────────────────────
+# Overwrites the symlink linuxdeploy generated. Must land after the deploy step
+# and before packaging.
+install -Dm755 "$SRC_ROOT/packaging/linux/AppRun" "$APPDIR/AppRun"
+
+# ── 10. Package ───────────────────────────────────────────────────────────────
 log "Packaging $OUTPUT"
 ARCH=x86_64 "$APPIMAGETOOL" "$APPDIR" "$OUTPUT"
 log "Done: $OUTPUT"

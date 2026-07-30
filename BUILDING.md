@@ -176,7 +176,7 @@ This directory is created automatically on first run. It is separate from the ap
 
 For Intel/AMD desktops and the **Steam Deck**, 240-MP ships as a self-contained **AppImage** — a single executable that bundles Qt, SDL2 and mpv, so it runs on immutable distros like SteamOS with no package-install step. (This differs from the Raspberry Pi arm64 build, which is a `.tar.gz` that relies on `apt` via `install.sh`.)
 
-The app itself is architecture-agnostic — the same C++/QML builds on x86_64 unchanged. On a desktop compositor (SteamOS gamescope / KDE, X11/Wayland) it uses `--hwdec=auto-safe`, letting mpv pick VA-API on Intel/AMD GPUs (overridable via `mpv_video_args`).
+The app itself is architecture-agnostic — the same C++/QML builds on x86_64 unchanged. On a desktop compositor (SteamOS gamescope / KDE, X11/Wayland) it passes `--hwdec=vaapi,nvdec,vaapi-copy,nvdec-copy,no`, letting mpv pick VA-API on Intel/AMD GPUs and NVDEC on NVIDIA, and degrading to software otherwise (overridable via `mpv_video_args`). This is an explicit list rather than `auto-safe` because `auto-safe` also considers Vulkan video decode: on a host where neither NVDEC nor VA-API initialises, mpv reaches it, shows one frame and then deadlocks. Vulkan *output* is unaffected and still used.
 
 ### Prerequisites (one-time)
 
@@ -207,7 +207,21 @@ CMAKE_PREFIX_PATH=/path/to/Qt/6.7.x/gcc_64 scripts/build-appimage.sh --configure
 
 This produces `240-MP-linux-x86_64.AppImage` in the repo root. On first run the script downloads `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` into `.appimage-tools/` (cached). Drop `--configure` if you have already built into `build/` yourself.
 
-The script installs into an `AppDir` using the FHS layout (`usr/bin/240mp`, `usr/share/240mp`), bundles a copy of `mpv`, deploys Qt, then prunes host-provided GPU/driver libraries (VA-API, GL, libdrm, Wayland…) so the target's own drivers are used.
+The script installs into an `AppDir` using the FHS layout (`usr/bin/240mp`, `usr/share/240mp`), bundles a copy of `mpv`, deploys Qt, then prunes host-provided GPU/driver libraries (VA-API, GL, libdrm…) so the target's own drivers are used.
+
+#### Wayland client libraries and X11-only targets
+
+Debian/Ubuntu build SDL2 and mpv with the Wayland backend on, so both hard-link `libwayland-client`, `libwayland-cursor` and `libwayland-egl`, and mpv additionally hard-links `libva-wayland`. The dynamic loader therefore needs all of them **even on a machine that will only ever run X11** — and minimal X11-only images (Batocera, other buildroot handhelds, slim containers) ship none of them, so the app used to die before `main()` with `error while loading shared libraries: libwayland-egl.so.1`.
+
+`libvulkan.so.1` is carried for a subtler reason: Batocera *has* one, but built without Wayland support, so mpv died on `undefined symbol: vkCreateWaylandSurfaceKHR` (via libplacebo) even though every library resolved. None of these are driver libraries — the `libwayland` ones are protocol shims, `libva-wayland` is 27 KB of `vaGetDisplayWl` glue delegating to `libva.so.2`, and `libvulkan.so.1` is the Khronos *loader*, which `dlopen`s the host's ICD from `vulkan/icd.d`. Hardware decode therefore still runs on the host's own driver in every case. So the build stages a copy in `usr/lib/fallback/` instead of pruning them, and `packaging/linux/AppRun` prepends that directory to `LD_LIBRARY_PATH` **only when the host cannot satisfy them itself**. A real Wayland host keeps using its own copies, matching whatever its Mesa EGL loads.
+
+`AppRun` decides by running both bundled binaries (`240mp` and `mpv`) through `LD_TRACE_LOADED_OBJECTS=1` and looking for `=> not found`, rather than checking whether files of that name exist. That distinction is load-bearing: Batocera keeps *32-bit* Wayland libraries in `/lib32` and registers them in `ld.so.cache` while shipping no 64-bit copies, so a filename check reports "the host has it" for libraries the 64-bit loader will correctly refuse. mpv is traced too because it is a separate executable with dependencies the app never has — `libva-wayland` is mpv's alone, so tracing only the app would miss a host that can start the UI but not play. Only the libraries we carry spares of are considered — a host missing Mesa reports `libGL => not found`, and reacting to that would wrongly pull our copies ahead of a host's working ones. A trace resolves libraries but not the symbols inside them, so `AppRun` additionally runs `mpv --version`: that is what catches a library which exists but is missing an entry point, and it is not something the build-time audit can ever detect — only the target can. `AppRun` also pins `QT_QPA_PLATFORM=xcb` when `DISPLAY` is set — the bundle ships the xcb platform plugin only.
+
+#### Host-library audit
+
+After pruning, the script walks every ELF in the `AppDir`, collects the `DT_NEEDED` sonames, and fails the build if any of them is neither bundled nor allowed to come from the host. The allowed set is `ALLOWED_HOST_LIBS` (the upstream AppImage excludelist) plus whatever the pruning step just deleted, added automatically so the two lists can't drift apart. That set is the explicit promise about which machines can run the build — the Wayland breakage above was exactly this promise growing silently.
+
+If the audit fails it prints each unsatisfied soname and the files needing it. Usually the fix is to bundle the library. Only add it to `ALLOWED_HOST_LIBS` if every supported target genuinely provides it; to unblock a release without editing the script, pass `ALLOW_HOST_LIBS_EXTRA="soname …"`.
 
 ### Run
 

@@ -139,8 +139,18 @@ FocusScope {
         clip: true
         focus: !remapRoot.capturing
 
-        Keys.onUpPressed:   currentIndex = Math.max(0, currentIndex - 1)
-        Keys.onDownPressed: currentIndex = Math.min(rows.length - 1, currentIndex + 1)
+        Keys.onUpPressed: {
+            if (currentIndex > 0) currentIndex-- 
+            else {
+                currentIndex = rows.length-1
+            }
+            rowList.positionViewAtIndex(currentIndex, ListView.Contain)
+        }
+        Keys.onDownPressed: {
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            rowList.positionViewAtIndex(currentIndex, ListView.Contain)
+        }
         Keys.onReturnPressed: {
             var row = remapRoot.rows[currentIndex]
             if (!row) return
