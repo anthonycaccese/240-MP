@@ -398,9 +398,13 @@ FocusScope {
                 Text {
                     id: rowText
                     text: {
-                        var base = (modelData.type === "episode" && modelData.grandparentTitle)
-                                   ? (modelData.grandparentTitle + ": " + (modelData.title || ""))
-                                   : (modelData.title || "")
+                        if (modelData.type === "episode" && modelData.grandparentTitle) {
+                            var sNum = (modelData.parentIndex != null) ? modelData.parentIndex : "?"
+                            var eNum = (modelData.index != null) ? modelData.index : "?"
+                            return modelData.grandparentTitle + " S" + sNum + "E" + eNum
+                                   + ": " + (modelData.title || "")
+                        }
+                        var base = modelData.title || ""
                         return modelData.editionTitle ? base + " (" + modelData.editionTitle + ")" : base
                     }
                     color: (itemList.currentIndex === index && !letterNavActive)
