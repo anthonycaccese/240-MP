@@ -33,7 +33,8 @@ FocusScope {
     property bool   pendingRetryTranscode: false
     // Set when the user changed the subtitle mid-transcode: mpv is quitting so we
     // can re-request the stream with a different burned-in track (not a real stop).
-    property bool   pendingSubtitleSwitch: false
+    property bool pendingSubtitleSwitch: false
+    property bool pendingAudioSwitch: false
     property string carryAudioLang:     ""
     property string carrySubLang:       "__off__"
     // Full stream metadata used to disambiguate when several streams share a language.
@@ -383,9 +384,9 @@ FocusScope {
     }
 
     function doStartPlayback(offsetMs) {
-        var jfToken = jellyfinBackend.get_access_token()
-        if (isTranscoding) {
-            // The HLS manifest bakes in the selected audio, and the chosen subtitle
+    var jfToken = jellyfinBackend.get_access_token()
+    if (isTranscoding) {
+        // The HLS manifest bakes in the selected audio, and the chosen subtitle
             // is burned into the video — so there's no soft sub track for mpv to
             // pick (subTrack -2 = --sid=no) or to cycle. Instead the OSC gets:
             //   sub-cycle     — show a SUBTITLE button that asks us to switch
@@ -393,30 +394,40 @@ FocusScope {
             //   transcode-sub — the burned-in track's name, for the info line
             // Both go through --script-opts-append: a plain --script-opts= would
             // replace the list MpvController already built (screensaver, hide-crop…).
-            var subName = "Off"
-            if (subtitleIdx >= 0 && subtitleStreams[subtitleIdx]) {
-                var s = subtitleStreams[subtitleIdx]
-                subName = s.displayTitle || s.title || s.language || "Unknown"
-            }
-            // script-opts is a comma-separated key=value list, so the value can
-            // carry neither a comma nor an "="; spaces round-trip as underscores.
-            subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
-            var extra = ["--script-opts-append=transcode-sub=" + subName,
-                         "--script-opts-append=sub-cycle=" + (subtitleStreams.length > 0 ? "1" : "0")]
-
-            mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                       -1, -2, [], [], false, -1, 0.0, "",
-                                       false, "", false, [], 0.0, false, extra, jfToken)
-        } else {
-            // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
-            // --aid; subtitles come from buildSubArgs (sidecars + --sid).
-            var audioTrack = audioStreams.length > 0 ? audioIdx + 1 : 0
-            var sub = buildSubArgs()
-            mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                       audioTrack, sub.track, sub.urls, [], false, -1, 0.0, "",
-                                       false, "", false, sub.titles, 0.0, false, [], jfToken)
+        var subName = "Off"
+        if (subtitleIdx >= 0 && subtitleStreams[subtitleIdx]) {
+            var s = subtitleStreams[subtitleIdx]
+            subName = s.displayTitle || s.title || s.language || "Unknown"
         }
+        subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
+
+        var audioName = "Off"
+        if (audioIdx >= 0 && audioStreams[audioIdx]) {
+            var a = audioStreams[audioIdx]
+            audioName = a.displayTitle || a.title || a.language || "Unknown"
+        }
+        audioName = audioName.replace(/ /g, "_").replace(/[,=]/g, "")
+
+        var extra = [
+            "--script-opts-append=transcode-sub=" + subName,
+            "--script-opts-append=sub-cycle=" + (subtitleStreams.length > 0 ? "1" : "0"),
+            "--script-opts-append=transcode-audio=" + audioName,
+            "--script-opts-append=audio-cycle=1"
+        ]
+
+        mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
+                                   -1, -2, [], [], false, -1, 0.0, "",
+                                   (audioIdx === -1), "", false, [], 0.0, false, extra, jfToken)
+    } else {
+        // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
+        // --aid; subtitles come from buildSubArgs (sidecars + --sid).
+        var audioTrack = audioStreams.length > 0 ? audioIdx + 1 : 0
+        var sub = buildSubArgs()
+        mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
+        audioTrack, sub.track, sub.urls, [], false, -1, 0.0, "",
+        (audioIdx === -1), "", false, sub.titles, 0.0, false, [], jfToken)
     }
+}
 
     function formatTime(ms) {
         var s = Math.floor(ms / 1000)
@@ -564,7 +575,32 @@ FocusScope {
             mpvController.stop()
         }
 
+        function onAudioCycleRequested() {
+            if (!isTranscoding || audioStreams.length === 0) return
+            playerRoot.lastKnownPositionMs = mpvController.position
+            playerRoot.pendingAudioSwitch = true
+            mpvController.stop()
+        }
+
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
+            if (pendingAudioSwitch) {
+            pendingAudioSwitch = false
+            reportStopped(finalPositionMs, finalDurationMs)
+            stoppedReported = false
+
+            // Cycle to the next audio track
+            audioIdx++
+            if (audioIdx >= audioStreams.length) audioIdx = -1
+            selectedAudioId = audioIdx >= 0 ? audioStreams[audioIdx].id : ""
+            captureCarryLanguages()
+
+            // Re-request the stream URL from Jellyfin with the new audio index
+            pendingRetryTranscode = true
+            var newAIdx = selectedAudioId ? parseInt(selectedAudioId) : -1
+            var newSIdx = selectedSubtitleId ? parseInt(selectedSubtitleId) : -1
+            jellyfinBackend.get_playback_url(itemId, mediaSourceId, newAIdx, newSIdx, true)
+            return
+        }
             if (pendingSubtitleSwitch) {
                 // mpv exited because we asked it to (onSubtitleCycleRequested), not
                 // because the user stopped. Close out the old transcode session so

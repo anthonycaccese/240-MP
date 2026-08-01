@@ -35,6 +35,13 @@ local A_TRANS  = "&HFF&"
 local A_DIM    = "&H99&"  -- 40% opacity for unfocused seek fill
 
 local function get_audio_str()
+    -- Transcoded stream: read track info passed explicitly from QML
+    local transcode_audio = mp.get_opt("transcode-audio")
+    if transcode_audio and transcode_audio ~= "" then
+        if transcode_audio == "Off" then return "(NONE)" end
+        return (transcode_audio:gsub("_", " ")):upper()
+    end
+
     local id = mp.get_property_number("current-tracks/audio/id", 0)
     if id == 0 then return "(NONE)" end
     local title    = (mp.get_property("current-tracks/audio/title", "") or ""):upper()
@@ -81,10 +88,18 @@ end
 -- Set by the app when the subtitle is burned into the stream and only the module
 -- can change it (Jellyfin transcode): mpv has no sub track to cycle, so the
 -- SUBTITLE button asks the module to re-request the stream instead.
-local sub_cycle = mp.get_opt("sub-cycle") == "1"
+-- Set by the app during transcoding when audio track changes require re-requesting the stream
+local sub_cycle   = mp.get_opt("sub-cycle") == "1"
+local audio_cycle = mp.get_opt("audio-cycle") == "1"
 
 local btn_actions = {
-    function() mp.command("no-osd cycle audio") end,
+    function()
+        if audio_cycle then
+            mp.commandv("script-message", "cycle-audio")
+        else
+            mp.command("no-osd cycle audio")
+        end
+    end,
     function()
         if sub_cycle then
             mp.commandv("script-message", "cycle-sub")

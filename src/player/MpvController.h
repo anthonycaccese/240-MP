@@ -86,6 +86,7 @@ signals:
     // has nothing to cycle (see `sub-cycle` in scripts/mpv-osc.lua). The module
     // owns the change — typically stop, re-request the stream, relaunch.
     void subtitleCycleRequested();
+    void audioCycleRequested();
 
 private slots:
     void onProcessFinished();
