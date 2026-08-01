@@ -109,6 +109,9 @@ private:
     // playback ON): --panscan blanks the video there. Gates auto-crop and tells
     // the OSC scripts to hide their CROP button.
     bool cropUnavailable() const;
+    // App-level "video_output_levels" setting (default "Auto"). Returns the mpv
+    // value for --video-output-levels ("limited"/"full"), or empty on Auto/unset.
+    QString videoOutputLevels() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;

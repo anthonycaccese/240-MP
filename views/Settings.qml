@@ -112,6 +112,23 @@ FocusScope {
             moduleId: ""
         })
 
+        // Video Output Range, the RGB range mpv converts YUV into. mpv's default
+        // is full range; a display expecting studio (limited) levels renders that
+        // as crushed blacks and blown whites, and the reverse reads as washed-out
+        // gray. Takes effect on the next video.
+        // The key keeps mpv's own name for the option; the label uses the wording
+        // TVs and GPU drivers use for the same control (HDMI RGB range, DRM
+        // "Broadcast RGB"), since that's what the setting is matching.
+        items.push({
+            type: "list_single",
+            key: "video_output_levels",
+            label: "Video Levels",
+            options: ["Auto", "Limited", "Full"],
+            value: appSettings["video_output_levels"] || "Auto",
+            description: "Match the color range your display expects\n[LIMITED] If blacks crush  [FULL] If blacks look gray",
+            moduleId: ""
+        })
+
         // SCREEN SAVER section — single control: OFF disables, a number sets the
         // timeout for both menu idle and playback pause (handled inside mpv).
         items.push({
@@ -121,19 +138,6 @@ FocusScope {
             options: ["OFF", "30", "60", "120"],
             value: appSettings["screensaver_timeout"] || "OFF",
             description: "Prevent CRT burn-in after seconds of inactivity or pause",
-            moduleId: ""
-        })
-
-        // Video Levels: overrides mpv's auto-detected output range. Auto trusts
-        // the source's tagged range; force Limited/Full if content looks washed
-        // out or crushed on your display regardless of what the file is tagged.
-        items.push({
-            type: "list_single",
-            key: "video_output_levels",
-            label: "Video Levels",
-            options: ["Auto", "Limited", "Full"],
-            value: appSettings["video_output_levels"] || "Auto",
-            description: "Override output color range if video looks washed out or crushed\n[AUTO] Trust the source file's tagged range",
             moduleId: ""
         })
 

@@ -211,17 +211,6 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         }
     }
 
-    // Video Levels: leave mpv's auto-detection alone unless the user has
-    // explicitly overridden it (e.g. content looking washed out/crushed on a
-    // given display regardless of the source file's tagged range).
-    if (m_appCore) {
-        const QString levels = m_appCore->get_setting(QString(), "video_output_levels").toString();
-        if (levels == QLatin1String("Limited"))
-            args << QStringLiteral("--video-output-levels=limited");
-        else if (levels == QLatin1String("Full"))
-            args << QStringLiteral("--video-output-levels=full");
-    }
-
     // Still-image playback only: mpv's KMS output (--vo=drm) won't repaint the
     // primary plane between two consecutive same-size/format stills, so a photo
     // playlist freezes on the first frame while the clock advances. This script
@@ -335,6 +324,15 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // matching the 1080p Playback trade-off. The OSC CROP button still toggles live.
     if (autoCropEnabled() && !cropUnavailable())
         args << QStringLiteral("--panscan=1");
+
+    // Video Levels: the RGB range mpv converts YUV into. Emitted only when the
+    // user has overridden it, so "Auto" leaves both mpv's own default and
+    // anything in their mpv.conf untouched. Sits before appendVideoArgs so an
+    // explicit --video-output-levels inside the mpv_video_args override still
+    // wins (later on the command line).
+    const QString outputLevels = videoOutputLevels();
+    if (!outputLevels.isEmpty())
+        args << QStringLiteral("--video-output-levels=%1").arg(outputLevels);
 
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -728,6 +726,21 @@ bool MpvController::autoCropEnabled() const {
         return false;
     const QVariant v = m_appCore->get_setting(QString(), "auto_crop");
     return v.toString().compare(QStringLiteral("On"), Qt::CaseInsensitive) == 0;
+}
+
+QString MpvController::videoOutputLevels() const {
+    // Default "Auto" → no flag at all, leaving mpv's own default (full-range RGB
+    // out) and anything the user set in mpv.conf in place. Stored by Settings as
+    // a string ("Auto"/"Limited"/"Full") via the list_single row, so compare on
+    // the string form.
+    if (!m_appCore)
+        return {};
+    const QString v = m_appCore->get_setting(QString(), "video_output_levels").toString();
+    if (v.compare(QStringLiteral("Limited"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("limited");
+    if (v.compare(QStringLiteral("Full"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("full");
+    return {};
 }
 
 bool MpvController::cropUnavailable() const {
