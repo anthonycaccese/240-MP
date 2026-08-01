@@ -208,6 +208,34 @@ The Local Files module will be enabled by default and you can open settings to e
 - Run `amixer sset PCM 100%`
 - If that solves it and you want to keep the level across reboots, run `sudo alsactl store`
 
+**If there is no audio at all:** 
+- ALSA's `default` device resolves to whichever sound card enumerated first and sometimes that may not be the one your audio is actually plugged into, which will result in missing audio.
+- To see the cards your Pi enumerated run `cat /proc/asound/cards` (or `aplay -l`).  The short name in brackets is the card id you'll in one of the options below.  The ids you see will also depend on which config.txt from step 2 you used. (the Pi 3 / Pi 4 run fake KMS where analog / composite audio shows up as `Headphones`, while the Pi 5 blocks run Full KMS where HDMI audio shows up as `vc4hdmi0` and `vc4hdmi1`).  Any USB audio devices you've attached will have their own entries too, so please read the ids off your own Pi vs copying from here.
+- Once you have the ID for your audio device there are two options to fix it, please pick whichever fits your setup best:
+
+    **Option 1: change the default at the OS level**
+
+    Create `/etc/asound.conf` to set the card that ALSA should treat as the default, substituting the card id you read above:
+
+    ```
+    defaults.pcm.card "your-card-id"
+    defaults.ctl.card "your-card-id"
+    ```
+
+    Every program on the Pi picks this up (not just 240-MP) so this is recommened if you want to set audio output for all applications you have running on your OS.  This works on Raspberry Pi OS Lite (the image these steps use), where plain ALSA is in charge of the `default` device.  If you are running a Desktop image instead then PipeWire typically owns `default` and you should pick your output there rather than in `/etc/asound.conf`.
+
+    **Option 2: change it for mpv only**
+
+    Create (or add to your existing) `~/.config/mpv/mpv.conf` and add a single line naming the device:
+
+    ```
+    audio-device=alsa/plughw:CARD=your-card-id,DEV=0
+    ```
+
+    Run `mpv --audio-device=help` to see the exact device strings mpv will accept and copy the one that matches your audio output device.
+
+- In both options the change applies the next time playback starts and will cover every mpv instance that 240-MP launches.  Please see [ARCHITECTURE.md → How mpv flags are layered](ARCHITECTURE.md#how-mpv-flags-are-layered-the-precedence-cascade) for why audio output is left to your ALSA / mpv config rather than being set by 240-MP.
+
 **Exit to Terminal:** 
 - If you have the autostart service installed, the Quit dialog gains an `Exit to Terminal` option alongside `Power Off`. Choosing that will drop you to a login shell on the Pi instead of powering off, and leaves autostart intact for subsequent reboots. 
 - To get back into 240-MP from that shell you can do one of the following:
