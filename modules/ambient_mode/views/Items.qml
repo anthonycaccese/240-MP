@@ -189,13 +189,40 @@ FocusScope {
                     font.pixelSize: root.sh * 0.0375 //18
                     visible: videoSlotCount > 1
                 }
-                Text {
-                    text: videoShuffleSelected ? "SHUFFLE" : videoFiles[videoIndex].name
-                    color: focusRow === 0 ? root.surfaceColor : root.primaryColor
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    anchors.verticalCenter: parent.verticalCenter
-                    font.pixelSize: root.sh * 0.0416667 //20
+                // Capped and clipped so a long filename can't run under the row
+                // label, with the same marquee scroll as views/ModuleSettings.qml.
+                Item {
+                    id: videoValueClip
+                    width: Math.min(videoValueText.implicitWidth, root.sw * 0.35)
+                    height: parent.height
+                    clip: true
+
+                    Text {
+                        id: videoValueText
+                        text: videoShuffleSelected ? "SHUFFLE" : videoFiles[videoIndex].name
+                        color: focusRow === 0 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 0
+                        font.pixelSize: root.sh * 0.0416667 //20
+                    }
+
+                    SequentialAnimation {
+                        running: focusRow === 0 && videoValueText.implicitWidth > videoValueClip.width
+                        loops: Animation.Infinite
+                        onRunningChanged: if (!running) videoValueText.x = 0
+
+                        PauseAnimation { duration: 1500 }
+                        NumberAnimation {
+                            target: videoValueText
+                            property: "x"
+                            to: videoValueClip.width - videoValueText.implicitWidth
+                            duration: Math.abs(to) * 20
+                        }
+                        PauseAnimation { duration: 2000 }
+                        PropertyAction { target: videoValueText; property: "x"; value: 0 }
+                    }
                 }
                 Text {
                     text: "►"
@@ -246,15 +273,40 @@ FocusScope {
                     font.pixelSize: root.sh * 0.0375 //18
                     visible: audioSlotCount > 1
                 }
-                Text {
-                    text: audioShuffleSelected ? "SHUFFLE"
-                        : audioIndex === 0 ? "VIDEO AUDIO"
-                        : audioFiles[audioIndex - 1].name
-                    color: focusRow === 1 ? root.surfaceColor : root.primaryColor
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    anchors.verticalCenter: parent.verticalCenter
-                    font.pixelSize: root.sh * 0.0416667 //20
+                Item {
+                    id: audioValueClip
+                    width: Math.min(audioValueText.implicitWidth, root.sw * 0.35)
+                    height: parent.height
+                    clip: true
+
+                    Text {
+                        id: audioValueText
+                        text: audioShuffleSelected ? "SHUFFLE"
+                            : audioIndex === 0 ? "VIDEO AUDIO"
+                            : audioFiles[audioIndex - 1].name
+                        color: focusRow === 1 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 0
+                        font.pixelSize: root.sh * 0.0416667 //20
+                    }
+
+                    SequentialAnimation {
+                        running: focusRow === 1 && audioValueText.implicitWidth > audioValueClip.width
+                        loops: Animation.Infinite
+                        onRunningChanged: if (!running) audioValueText.x = 0
+
+                        PauseAnimation { duration: 1500 }
+                        NumberAnimation {
+                            target: audioValueText
+                            property: "x"
+                            to: audioValueClip.width - audioValueText.implicitWidth
+                            duration: Math.abs(to) * 20
+                        }
+                        PauseAnimation { duration: 2000 }
+                        PropertyAction { target: audioValueText; property: "x"; value: 0 }
+                    }
                 }
                 Text {
                     text: "►"
