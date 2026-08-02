@@ -72,9 +72,12 @@ QVariantList AmbientModeBackend::getAudioFiles() const
     return scanFiles(kAudioExts);
 }
 
-void AmbientModeBackend::startAudio(const QString &path)
+void AmbientModeBackend::startAudio(const QStringList &paths, bool shuffle)
 {
     stopAudio();
+
+    if (paths.isEmpty())
+        return;
 
 #ifdef Q_OS_MACOS
     {
@@ -94,15 +97,26 @@ void AmbientModeBackend::startAudio(const QString &path)
     }
 
     QStringList args;
-    args << path
+    // Playlist entries first — absolute paths from scanFiles(), so they can't be
+    // mistaken for flags. An .m3u/.m3u8 counts as ONE entry here: mpv expands it
+    // lazily when playback reaches it, so shuffling picks whole playlists as units
+    // and the tracks inside one still play in their listed order.
+    args << paths
          << QStringLiteral("--no-video")
          << QStringLiteral("--loop-playlist=inf")
          << QStringLiteral("--no-terminal")
          << QStringLiteral("--really-quiet");
+    // mpv shuffles once, at load — with --loop-playlist=inf the same shuffled order
+    // replays on every wrap rather than being reshuffled each cycle.
+    if (shuffle)
+        args << QStringLiteral("--shuffle");
 
     m_audioProcess = new QProcess(this);
     m_audioProcess->start(bin, args);
-    qDebug("[AmbientMode] audio process started: %s", qPrintable(path));
+    qDebug("[AmbientMode] audio process started: %lld entr%s%s",
+           static_cast<long long>(paths.size()),
+           paths.size() == 1 ? "y" : "ies",
+           shuffle ? ", shuffled" : "");
 }
 
 void AmbientModeBackend::stopAudio()

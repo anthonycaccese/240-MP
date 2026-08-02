@@ -7,29 +7,17 @@ FocusScope {
 
     signal goBack()
 
+    // A single picked file, or a non-empty *Paths list when the picker's SHUFFLE
+    // slot was chosen for that row — never both.
     property string videoPath:      navParams.videoPath || ""
     property string audioPath:      navParams.audioPath || ""
-    property bool   hasCustomAudio: audioPath !== ""
-    property bool   shuffleVideo:   navParams.shuffleVideo || false
-    property bool   shuffleAudio:   navParams.shuffleAudio || false
     property var    videoPaths:     navParams.videoPaths || []
     property var    audioPaths:     navParams.audioPaths || []
+    property bool   shuffleVideo:   videoPaths.length > 0
+    property bool   shuffleAudio:   audioPaths.length > 0
+    property bool   hasCustomAudio: audioPath !== "" || audioPaths.length > 0
 
     focus: true
-
-    // Fisher-Yates. mpv's own --shuffle reshuffles the *entire* playlist it's
-    // given, including whatever was passed as the first entry, so a manually
-    // picked item is not guaranteed to play first once --shuffle is set. Instead
-    // we shuffle everything but the picked item ourselves and hand mpv a fixed
-    // order (no --shuffle), which keeps the pick first and randomizes the rest.
-    function shuffled(list) {
-        var arr = list.slice()
-        for (var i = arr.length - 1; i > 0; i--) {
-            var j = Math.floor(Math.random() * (i + 1))
-            var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp
-        }
-        return arr
-    }
 
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back) {
@@ -71,29 +59,27 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (videoPath === "") {
+        if (videoPath === "" && videoPaths.length === 0) {
             goBack()
             return
         }
 
-        // Shuffle wins: hand mpv the rest of the library, pre-shuffled by us, as
-        // extra playlist entries and let --loop-playlist=inf cycle through it on
-        // its own, rather than the app detecting each clip's end and reloading a
-        // new one. videoPath stays first in the list so the pick you made (or the
-        // random start auto-launch chose) actually plays first.
-        var otherVideos = (shuffleVideo && videoPaths.length > 1)
-            ? shuffled(videoPaths.filter(function(p) { return p !== videoPath }))
-            : []
-        mpvController.loadAndPlay(videoPath, 0.0, 0, -1, [], [], true, -1, 0.0, "", hasCustomAudio, "ambient", false, [], 0.0, false, otherVideos)
+        // Shuffling hands mpv the whole library as one playlist and lets --shuffle
+        // plus --loop-playlist=inf (from loop: true) cycle it, rather than the app
+        // detecting each clip's end and loading a new one. First entry goes in as
+        // the url, the rest as extra playlist entries.
+        var first = shuffleVideo ? videoPaths[0] : videoPath
+        var rest  = shuffleVideo ? videoPaths.slice(1) : []
+        mpvController.loadAndPlay(first, 0.0, 0, -1, [], [], true, -1, 0.0, "",
+                                  hasCustomAudio, "ambient", shuffleVideo, [], 0.0,
+                                  false, [], "", rest)
 
-        if (hasCustomAudio) {
-            if (shuffleAudio && audioPaths.length > 1) {
-                var otherAudio = shuffled(audioPaths.filter(function(p) { return p !== audioPath }))
-                ambientModeBackend.startAudio([audioPath].concat(otherAudio), false)
-            } else {
-                ambientModeBackend.startAudio([audioPath], false)
-            }
-        }
+        // Companion audio is a second, independent mpv process — it does its own
+        // shuffling and looping (see AmbientModeBackend::startAudio).
+        if (audioPaths.length > 0)
+            ambientModeBackend.startAudio(audioPaths, shuffleAudio)
+        else if (audioPath !== "")
+            ambientModeBackend.startAudio([audioPath], false)
     }
 
     Rectangle {

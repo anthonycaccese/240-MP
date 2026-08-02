@@ -443,6 +443,8 @@ FocusScope {
 - Use `root.sh` / `root.sw` for all margins and sizes — never hardcoded pixels. This keeps layouts responsive across CRT (240p/480i, watch overscan) and HDMI/LCD.
 - Access shared state via `moduleRoot.moduleName`, `moduleRoot.moduleIcon`.
 - Navigate via signals — never call router functions directly.
+- `navParams.fromAppStartup` is `true` only when the app booted straight into this module because it's the configured **Start On Module** — never when the user navigated in from the main menu. `Main.qml` sets it on the startup-module `setSource`; a module's `Root.qml` forwards it by passing `navParams` into its first `navigateTo`. Use it to gate boot-only behaviour such as Ambient Mode's Auto-Launch Playback, so the module's normal screens stay reachable from the menu.
+- A view that emits `navigateTo` from its own `Component.onCompleted` must defer it with `Qt.callLater` — the router's `Connections { target: internalLoader.item }` only rebinds after `setSource()` returns, so a synchronous emit goes out before anything is listening.
 
 ## Components (WIP)
 

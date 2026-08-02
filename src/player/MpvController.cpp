@@ -120,7 +120,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
                                  const QString &plexToken, bool muteAudio,
                                  const QString &oscMode, bool shuffle,
                                  const QStringList &subTitles, float imageDurationSec,
-                                 bool imageContent, const QStringList &extraArgs, const QString &jellyfinToken) {
+                                 bool imageContent, const QStringList &extraArgs, const QString &jellyfinToken,
+                                 const QStringList &extraUrls) {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -184,8 +185,12 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     }
 
     QStringList args;
-    args << url
-         << QString("--input-ipc-server=%1").arg(m_socketPath)
+    args << url;
+    // Additional playlist entries, straight after the primary url — mpv builds its
+    // playlist from every non-option argument. These must be absolute paths or URLs
+    // (so they can't be mistaken for flags); pass mpv options via extraArgs instead.
+    args << extraUrls;
+    args << QString("--input-ipc-server=%1").arg(m_socketPath)
          << QString("--log-file=%1").arg(m_logFilePath)
          << (hasOscScript ? "--osc=no" : "--osc=yes")
          << "--osd-level=0";

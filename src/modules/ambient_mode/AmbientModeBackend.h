@@ -1,6 +1,7 @@
 #pragma once
 #include <QObject>
 #include <QProcess>
+#include <QStringList>
 #include <QVariantList>
 
 class AmbientModeBackend : public QObject {
@@ -13,7 +14,7 @@ public:
     Q_INVOKABLE QVariantList getAudioFiles() const;
     Q_INVOKABLE QString      mediaRoot() const;
     Q_INVOKABLE void         setMediaRoot(const QString &path);
-    Q_INVOKABLE void         startAudio(const QString &path);
+    Q_INVOKABLE void         startAudio(const QStringList &paths, bool shuffle = false);
     Q_INVOKABLE void         stopAudio();
 
 public slots:
