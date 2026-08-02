@@ -31,10 +31,10 @@ FocusScope {
     property bool   pendingNextEpisode: false
     // Set when a direct-play attempt fails and we re-request forcing a transcode.
     property bool   pendingRetryTranscode: false
-    // Set when the user changed the subtitle mid-transcode: mpv is quitting so we
-    // can re-request the stream with a different burned-in track (not a real stop).
-    property bool pendingSubtitleSwitch: false
-    property bool pendingAudioSwitch: false
+    // Set when the user changed a track mid-transcode: mpv is quitting so we can
+    // re-request the stream with a different audio track / burned-in subtitle
+    // (not a real stop). "audio", "sub", or "" for none.
+    property string pendingTrackSwitch: ""
     property string carryAudioLang:     ""
     property string carrySubLang:       "__off__"
     // Full stream metadata used to disambiguate when several streams share a language.
@@ -384,50 +384,59 @@ FocusScope {
     }
 
     function doStartPlayback(offsetMs) {
-    var jfToken = jellyfinBackend.get_access_token()
-    if (isTranscoding) {
-        // The HLS manifest bakes in the selected audio, and the chosen subtitle
-            // is burned into the video — so there's no soft sub track for mpv to
-            // pick (subTrack -2 = --sid=no) or to cycle. Instead the OSC gets:
-            //   sub-cycle     — show a SUBTITLE button that asks us to switch
-            //                   (handled in onSubtitleCycleRequested → new transcode)
-            //   transcode-sub — the burned-in track's name, for the info line
-            // Both go through --script-opts-append: a plain --script-opts= would
+        var jfToken = jellyfinBackend.get_access_token()
+        if (isTranscoding) {
+            // The HLS manifest bakes in the selected audio, and the chosen subtitle
+            // is burned into the video — so there's no soft track for mpv to pick
+            // (subTrack -2 = --sid=no) or to cycle, for either audio or subs.
+            // Instead the OSC gets:
+            //   sub-cycle       — show a SUBTITLE button that asks us to switch
+            //                     (handled in onSubtitleCycleRequested → new transcode)
+            //   transcode-sub   — the burned-in track's name, for the info line
+            //   audio-cycle     — same deal for the AUDIO button
+            //                     (onAudioCycleRequested → new transcode)
+            //   transcode-audio — the baked-in audio track's name, for the info line
+            // All go through --script-opts-append: a plain --script-opts= would
             // replace the list MpvController already built (screensaver, hide-crop…).
-        var subName = "Off"
-        if (subtitleIdx >= 0 && subtitleStreams[subtitleIdx]) {
-            var s = subtitleStreams[subtitleIdx]
-            subName = s.displayTitle || s.title || s.language || "Unknown"
+            //
+            // script-opts is a comma-separated key=value list, so neither value can
+            // carry a comma or an "="; spaces round-trip as underscores.
+            var subName = "Off"
+            if (subtitleIdx >= 0 && subtitleStreams[subtitleIdx]) {
+                var s = subtitleStreams[subtitleIdx]
+                subName = s.displayTitle || s.title || s.language || "Unknown"
+            }
+            subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
+
+            // "Off" only when the item has no audio at all — the cycle itself never
+            // lands there (see onPlaybackEnded).
+            var audioName = "Off"
+            if (audioIdx >= 0 && audioStreams[audioIdx]) {
+                var a = audioStreams[audioIdx]
+                audioName = a.displayTitle || a.title || a.language || "Unknown"
+            }
+            audioName = audioName.replace(/ /g, "_").replace(/[,=]/g, "")
+
+            var extra = [
+                "--script-opts-append=transcode-sub=" + subName,
+                "--script-opts-append=sub-cycle=" + (subtitleStreams.length > 0 ? "1" : "0"),
+                "--script-opts-append=transcode-audio=" + audioName,
+                "--script-opts-append=audio-cycle=" + (audioStreams.length > 0 ? "1" : "0")
+            ]
+
+            mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
+                                       -1, -2, [], [], false, -1, 0.0, "",
+                                       false, "", false, [], 0.0, false, extra, jfToken)
+        } else {
+            // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
+            // --aid; subtitles come from buildSubArgs (sidecars + --sid).
+            var audioTrack = audioStreams.length > 0 ? audioIdx + 1 : 0
+            var sub = buildSubArgs()
+            mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
+                                       audioTrack, sub.track, sub.urls, [], false, -1, 0.0, "",
+                                       false, "", false, sub.titles, 0.0, false, [], jfToken)
         }
-        subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
-
-        var audioName = "Off"
-        if (audioIdx >= 0 && audioStreams[audioIdx]) {
-            var a = audioStreams[audioIdx]
-            audioName = a.displayTitle || a.title || a.language || "Unknown"
-        }
-        audioName = audioName.replace(/ /g, "_").replace(/[,=]/g, "")
-
-        var extra = [
-            "--script-opts-append=transcode-sub=" + subName,
-            "--script-opts-append=sub-cycle=" + (subtitleStreams.length > 0 ? "1" : "0"),
-            "--script-opts-append=transcode-audio=" + audioName,
-            "--script-opts-append=audio-cycle=1"
-        ]
-
-        mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                   -1, -2, [], [], false, -1, 0.0, "",
-                                   (audioIdx === -1), "", false, [], 0.0, false, extra, jfToken)
-    } else {
-        // Direct play: file served whole. audioIdx is 0-based → mpv's 1-based
-        // --aid; subtitles come from buildSubArgs (sidecars + --sid).
-        var audioTrack = audioStreams.length > 0 ? audioIdx + 1 : 0
-        var sub = buildSubArgs()
-        mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-        audioTrack, sub.track, sub.urls, [], false, -1, 0.0, "",
-        (audioIdx === -1), "", false, sub.titles, 0.0, false, [], jfToken)
     }
-}
 
     function formatTime(ms) {
         var s = Math.floor(ms / 1000)
@@ -571,49 +580,43 @@ FocusScope {
         function onSubtitleCycleRequested() {
             if (!isTranscoding || subtitleStreams.length === 0) return
             playerRoot.lastKnownPositionMs = mpvController.position
-            playerRoot.pendingSubtitleSwitch = true
+            playerRoot.pendingTrackSwitch = "sub"
             mpvController.stop()
         }
 
+        // OSC AUDIO button during a transcode. The audio is baked into the HLS
+        // manifest, so switching means a new transcode — same deferred-until-exit
+        // contract as onSubtitleCycleRequested above.
         function onAudioCycleRequested() {
             if (!isTranscoding || audioStreams.length === 0) return
             playerRoot.lastKnownPositionMs = mpvController.position
-            playerRoot.pendingAudioSwitch = true
+            playerRoot.pendingTrackSwitch = "audio"
             mpvController.stop()
         }
 
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
-            if (pendingAudioSwitch) {
-            pendingAudioSwitch = false
-            reportStopped(finalPositionMs, finalDurationMs)
-            stoppedReported = false
-
-            // Cycle to the next audio track
-            audioIdx++
-            if (audioIdx >= audioStreams.length) audioIdx = -1
-            selectedAudioId = audioIdx >= 0 ? audioStreams[audioIdx].id : ""
-            captureCarryLanguages()
-
-            // Re-request the stream URL from Jellyfin with the new audio index
-            pendingRetryTranscode = true
-            var newAIdx = selectedAudioId ? parseInt(selectedAudioId) : -1
-            var newSIdx = selectedSubtitleId ? parseInt(selectedSubtitleId) : -1
-            jellyfinBackend.get_playback_url(itemId, mediaSourceId, newAIdx, newSIdx, true)
-            return
-        }
-            if (pendingSubtitleSwitch) {
-                // mpv exited because we asked it to (onSubtitleCycleRequested), not
-                // because the user stopped. Close out the old transcode session so
-                // the server tears the encode down, advance to the next subtitle,
-                // and re-request — onStreamUrlReady's pendingRetryTranscode branch
-                // resumes at lastKnownPositionMs. Deliberately no goBack().
-                pendingSubtitleSwitch = false
+            if (pendingTrackSwitch !== "") {
+                // mpv exited because we asked it to (onAudio/onSubtitleCycleRequested),
+                // not because the user stopped. Close out the old transcode session so
+                // the server tears the encode down, advance to the next track, and
+                // re-request — onStreamUrlReady's pendingRetryTranscode branch resumes
+                // at lastKnownPositionMs. Deliberately no goBack().
+                var which = pendingTrackSwitch
+                pendingTrackSwitch = ""
                 reportStopped(finalPositionMs, finalDurationMs)
                 stoppedReported = false
 
-                subtitleIdx++
-                if (subtitleIdx >= subtitleStreams.length) subtitleIdx = -1
-                selectedSubtitleId = subtitleIdx >= 0 ? subtitleStreams[subtitleIdx].id : ""
+                if (which === "audio") {
+                    // No "off" stop in the audio cycle: silence isn't worth a
+                    // transcode restart, and direct play still gets mpv's own
+                    // no-audio step from `cycle audio`.
+                    audioIdx = (audioIdx + 1) % audioStreams.length
+                    selectedAudioId = String(audioStreams[audioIdx].id || "")
+                } else {
+                    subtitleIdx++
+                    if (subtitleIdx >= subtitleStreams.length) subtitleIdx = -1
+                    selectedSubtitleId = subtitleIdx >= 0 ? subtitleStreams[subtitleIdx].id : ""
+                }
                 // Keep the autoplay carry-over hints in step with the new choice so
                 // the next episode inherits it.
                 captureCarryLanguages()

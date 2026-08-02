@@ -88,8 +88,9 @@ end
 -- Set by the app when the subtitle is burned into the stream and only the module
 -- can change it (Jellyfin transcode): mpv has no sub track to cycle, so the
 -- SUBTITLE button asks the module to re-request the stream instead.
--- Set by the app during transcoding when audio track changes require re-requesting the stream
 local sub_cycle   = mp.get_opt("sub-cycle") == "1"
+-- Same for audio when the track is baked into the stream (Jellyfin transcode):
+-- the AUDIO button asks the module to re-request rather than cycling locally.
 local audio_cycle = mp.get_opt("audio-cycle") == "1"
 
 local btn_actions = {
