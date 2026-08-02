@@ -23,7 +23,7 @@ FocusScope {
 
     // A–Z letter-jump panel — only for the alphabetized full-library list
     // ("browse"); resume/up_next are not alpha-sorted.
-    property bool showLetterNav: mode === "browse" || mode === "folder"
+    property bool showLetterNav: mode === "browse" || mode === "folder" || itemListRoot.mode === "boxset"
     property bool letterNavActive: false
     property var letterIndex: []
 
@@ -91,6 +91,8 @@ FocusScope {
             if (itemListRoot.mode !== "boxset") return
             itemListRoot.isLoading = false
             itemListRoot.items = loadedItems
+            if (itemListRoot.showLetterNav)
+                itemListRoot.letterIndex = itemListRoot.buildLetterIndex(loadedItems)
             if (loadedItems.length > 0) {
                 var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
                 itemList.currentIndex = Math.min(restore, loadedItems.length - 1)
@@ -226,9 +228,40 @@ FocusScope {
         height: root.sh * 0.525 //252
         clip: true
         focus: true
-
-        Keys.onUpPressed: if (currentIndex > 0) currentIndex--
-        Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) {
+                currentIndex-- 
+                var curLetter = sortKey((items[itemList.currentIndex] && items[itemList.currentIndex].title) || "")
+                for (var i = 0; i < letterIndex.length; i++) {
+                    if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
+                }
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+            else {
+                currentIndex = count-1
+                itemList.positionViewAtIndex(currentIndex, ListView.Contain)
+                letterList.currentIndex = letterIndex.length-1
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) {
+                currentIndex++
+                var curLetter = sortKey((items[itemList.currentIndex] && items[itemList.currentIndex].title) || "")
+                for (var i = 0; i < letterIndex.length; i++) {
+                    if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
+                }
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+            else {
+                currentIndex = 0
+                itemList.positionViewAtIndex(currentIndex, ListView.Contain)
+                letterList.currentIndex = 0
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+        }
         Keys.onReturnPressed: itemListRoot.selectItem()
         Keys.onPressed: function(event) {
             // Right hands focus to the letter panel, synced to the current letter.
@@ -262,9 +295,12 @@ FocusScope {
                 Text {
                     id: rowText
                     text: {
-                        var base = (modelData.type === "episode" && modelData.grandparentTitle)
-                                   ? (modelData.grandparentTitle + ": " + (modelData.title || ""))
-                                   : (modelData.title || "")
+                        if (modelData.type === "episode" && modelData.grandparentTitle) {
+                            var sNum = (modelData.parentIndex != null) ? modelData.parentIndex : "?"
+                            var eNum = (modelData.index || modelData.index === 0) ? modelData.index : "?"
+                            return modelData.grandparentTitle + " S" + sNum + "E" + eNum + ": " + (modelData.title || "")
+                        }
+                        var base = modelData.title || ""
                         return modelData.year ? base + " (" + String(modelData.year) + ")" : base
                     }
                     color: (itemList.currentIndex === index && !letterNavActive)
@@ -313,18 +349,29 @@ FocusScope {
         focus: false
 
         Keys.onUpPressed: {
+            if (count === 0) return
             if (currentIndex > 0) {
-                currentIndex--
-                itemList.currentIndex = letterIndex[currentIndex].firstIndex
-                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
+                currentIndex-- 
             }
+            else {
+                currentIndex = count - 1
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Beginning)
+            }
+            itemList.currentIndex = letterIndex[currentIndex].firstIndex
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
+            
         }
         Keys.onDownPressed: {
+            if (count === 0) return
             if (currentIndex < count - 1) {
                 currentIndex++
-                itemList.currentIndex = letterIndex[currentIndex].firstIndex
-                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
             }
+            else {
+                currentIndex = 0
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Beginning)
+            }
+            itemList.currentIndex = letterIndex[currentIndex].firstIndex
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
         }
         Keys.onReturnPressed: { letterNavActive = false; itemList.forceActiveFocus() }
         Keys.onLeftPressed:   { letterNavActive = false; itemList.forceActiveFocus() }

@@ -1,0 +1,51 @@
+{
+  "id": "com.240mp.weather",
+  "name": "WEATHER",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "displays",
+      "label": "Displays",
+      "type": "multiselect_submenu",
+      "options_source": "dynamic",
+      "options_slot": "getDisplays",
+      "description": "Which screens the forecast loop cycles through"
+    },
+    {
+      "key": "music",
+      "label": "Music",
+      "type": "toggle",
+      "default": "ON",
+      "description": "Background music while the forecast is up. Optional playlist: weather_music.txt in the data directory"
+    },
+    {
+      "key": "units",
+      "label": "Units",
+      "type": "list_single",
+      "options": ["Metric", "US"],
+      "default": "Metric"
+    },
+    {
+      "key": "screen_time",
+      "label": "Screen Time",
+      "type": "list_single",
+      "options": ["10 SEC", "30 SEC", "60 SEC"],
+      "default": "10 SEC",
+      "description": "How long each screen stays up before the loop advances"
+    },
+    {
+      "key": "hours_format",
+      "label": "Hours Format",
+      "type": "list_single",
+      "options": ["24-hour", "12-hour"],
+      "default": "24-hour"
+    }
+  ]
+}

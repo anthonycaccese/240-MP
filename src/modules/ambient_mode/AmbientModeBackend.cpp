@@ -1,4 +1,5 @@
 #include "AmbientModeBackend.h"
+#include "../../util/MpvLocator.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -79,18 +80,8 @@ void AmbientModeBackend::startAudio(const QStringList &paths, bool shuffle)
     if (paths.isEmpty())
         return;
 
-#ifdef Q_OS_MACOS
-    {
-        const QStringList extraPaths = { "/opt/homebrew/bin", "/usr/local/bin" };
-        const QStringList current = qEnvironmentVariable("PATH").split(":");
-        for (const QString &p : extraPaths) {
-            if (!current.contains(p))
-                qputenv("PATH", (p + ":" + qEnvironmentVariable("PATH")).toUtf8());
-        }
-    }
-#endif
+    const QString bin = mpvbin::locate();
 
-    const QString bin = QStandardPaths::findExecutable("mpv");
     if (bin.isEmpty()) {
         qWarning("[AmbientMode] mpv not found in PATH — audio will not play");
         return;

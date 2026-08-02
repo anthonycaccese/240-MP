@@ -172,6 +172,68 @@ On Raspberry Pi OS all user configuration is stored at:
 
 This directory is created automatically on first run. It is separate from the app itself, so deleting or rebuilding the app will not wipe your settings.
 
+## Linux x86_64 (AppImage)
+
+For Intel/AMD desktops and the **Steam Deck**, 240-MP ships as a self-contained **AppImage** — a single executable that bundles Qt, SDL2 and mpv, so it runs on immutable distros like SteamOS with no package-install step. (This differs from the Raspberry Pi arm64 build, which is a `.tar.gz` that relies on `apt` via `install.sh`.)
+
+The app itself is architecture-agnostic — the same C++/QML builds on x86_64 unchanged. On a desktop compositor (SteamOS gamescope / KDE, X11/Wayland) it passes `--hwdec=vaapi,nvdec,vaapi-copy,nvdec-copy,no`, letting mpv pick VA-API on Intel/AMD GPUs and NVDEC on NVIDIA, and degrading to software otherwise (overridable via `mpv_video_args`). This is an explicit list rather than `auto-safe` because `auto-safe` also considers Vulkan video decode: on a host where neither NVDEC nor VA-API initialises, mpv reaches it, shows one frame and then deadlocks. Vulkan *output* is unaffected and still used.
+
+### Prerequisites (one-time)
+
+On a Debian/Ubuntu x86_64 build host:
+
+```bash
+sudo apt-get install -y build-essential cmake \
+  libdrm-dev libssl-dev libsdl2-dev libpcsclite-dev \
+  libgl1-mesa-dev libxkbcommon-dev mpv
+```
+
+Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qml6-module-qtquick*`) or from the [Qt online installer](https://www.qt.io/download-qt-installer) (set `CMAKE_PREFIX_PATH` to it, matching CI's Qt 6.7).
+
+> **The bundled `mpv` must be modern (≥ 0.38)** — the app's "forced subtitles only" option (`--subs-with-matching-audio=forced`) was added in mpv 0.38, and distro packages are often older (Ubuntu 24.04 ships 0.37, 22.04 ships 0.34.1). If your distro's mpv is too old, build one first and point `MPV_BIN` at it:
+>
+> ```bash
+> MPV_BIN=$(scripts/build-mpv.sh) scripts/build-appimage.sh --configure
+> ```
+>
+> `scripts/build-mpv.sh` compiles mpv 0.40 against your system FFmpeg (needs the meson + FFmpeg/libass/libplacebo/lua/vaapi `-dev` packages — see the CI job). If your distro already ships mpv ≥ 0.38, you can skip it and `build-appimage.sh` uses the system mpv. Note the build host sets the AppImage's glibc floor.
+
+### Build the AppImage
+
+```bash
+# Configure + build, then bundle into a portable AppImage in one step:
+CMAKE_PREFIX_PATH=/path/to/Qt/6.7.x/gcc_64 scripts/build-appimage.sh --configure
+```
+
+This produces `240-MP-linux-x86_64.AppImage` in the repo root. On first run the script downloads `linuxdeploy`, `linuxdeploy-plugin-qt` and `appimagetool` into `.appimage-tools/` (cached). Drop `--configure` if you have already built into `build/` yourself.
+
+The script installs into an `AppDir` using the FHS layout (`usr/bin/240mp`, `usr/share/240mp`), bundles a copy of `mpv`, deploys Qt, then prunes host-provided GPU/driver libraries (VA-API, GL, libdrm…) so the target's own drivers are used.
+
+#### Wayland client libraries and X11-only targets
+
+Debian/Ubuntu build SDL2 and mpv with the Wayland backend on, so both hard-link `libwayland-client`, `libwayland-cursor` and `libwayland-egl`, and mpv additionally hard-links `libva-wayland`. The dynamic loader therefore needs all of them **even on a machine that will only ever run X11** — and minimal X11-only images (Batocera, other buildroot handhelds, slim containers) ship none of them, so the app used to die before `main()` with `error while loading shared libraries: libwayland-egl.so.1`.
+
+`libvulkan.so.1` is carried for a subtler reason: Batocera *has* one, but built without Wayland support, so mpv died on `undefined symbol: vkCreateWaylandSurfaceKHR` (via libplacebo) even though every library resolved. None of these are driver libraries — the `libwayland` ones are protocol shims, `libva-wayland` is 27 KB of `vaGetDisplayWl` glue delegating to `libva.so.2`, and `libvulkan.so.1` is the Khronos *loader*, which `dlopen`s the host's ICD from `vulkan/icd.d`. Hardware decode therefore still runs on the host's own driver in every case. So the build stages a copy in `usr/lib/fallback/` instead of pruning them, and `packaging/linux/AppRun` prepends that directory to `LD_LIBRARY_PATH` **only when the host cannot satisfy them itself**. A real Wayland host keeps using its own copies, matching whatever its Mesa EGL loads.
+
+`AppRun` decides by running both bundled binaries (`240mp` and `mpv`) through `LD_TRACE_LOADED_OBJECTS=1` and looking for `=> not found`, rather than checking whether files of that name exist. That distinction is load-bearing: Batocera keeps *32-bit* Wayland libraries in `/lib32` and registers them in `ld.so.cache` while shipping no 64-bit copies, so a filename check reports "the host has it" for libraries the 64-bit loader will correctly refuse. mpv is traced too because it is a separate executable with dependencies the app never has — `libva-wayland` is mpv's alone, so tracing only the app would miss a host that can start the UI but not play. Only the libraries we carry spares of are considered — a host missing Mesa reports `libGL => not found`, and reacting to that would wrongly pull our copies ahead of a host's working ones. A trace resolves libraries but not the symbols inside them, so `AppRun` additionally runs `mpv --version`: that is what catches a library which exists but is missing an entry point, and it is not something the build-time audit can ever detect — only the target can. `AppRun` also pins `QT_QPA_PLATFORM=xcb` when `DISPLAY` is set — the bundle ships the xcb platform plugin only.
+
+#### Host-library audit
+
+After pruning, the script walks every ELF in the `AppDir`, collects the `DT_NEEDED` sonames, and fails the build if any of them is neither bundled nor allowed to come from the host. The allowed set is `ALLOWED_HOST_LIBS` (the upstream AppImage excludelist) plus whatever the pruning step just deleted, added automatically so the two lists can't drift apart. That set is the explicit promise about which machines can run the build — the Wayland breakage above was exactly this promise growing silently.
+
+If the audit fails it prints each unsatisfied soname and the files needing it. Usually the fix is to bundle the library. Only add it to `ALLOWED_HOST_LIBS` if every supported target genuinely provides it; to unblock a release without editing the script, pass `ALLOW_HOST_LIBS_EXTRA="soname …"`.
+
+### Run
+
+```bash
+chmod +x 240-MP-linux-x86_64.AppImage
+./240-MP-linux-x86_64.AppImage
+```
+
+Configuration lives at `~/.local/share/240-MP/` (same as the Pi). See [INSTALL.md](INSTALL.md) for the Steam Deck end-user flow (Desktop Mode + adding it to Steam for Gaming Mode).
+
+`yt-dlp` is deliberately **not** bundled (it needs to be updatable independently of app releases). For the YouTube module on an immutable distro, drop a copy at `~/.local/share/240-MP/bin/yt-dlp` (`chmod +x`, update with `yt-dlp -U`); the app resolves it there first, then a `yt-dlp` sibling of the binary, then `PATH`, and hands the chosen path to mpv's ytdl hook via `--script-opts=ytdl_hook-ytdl_path=…` so both use the same copy. See [INSTALL.md](INSTALL.md#youtube-yt-dlp).
+
 ## Gamepad input (input.cfg)
 
 USB game controllers should work out of the box as SDL's built-in controller database normalizes most pads (Xbox, PlayStation, 8BitDo, NES-style clones etc...) to a standard layout. 240-MP maps that stanard layout to its navigation actions:
@@ -232,7 +294,7 @@ If you find the need to tune for your hardware, you can add an `mpv_video_args` 
 }
 ```
 
-This config is read at each playback event, so a change applies on the next playback (no rebuild or restart needed). Only set video-output/decode flags here though; the app owns the rest (the IPC control channel, OSC, input) and for other mpv preferences (things like deinterlace, cache, subtitle styling...) please just create a standard `~/.config/mpv/mpv.conf`. MPV will read that automatically every launch. Please check out [ARCHITECTURE.md → How mpv flags are layered](ARCHITECTURE.md#how-mpv-flags-are-layered-the-precedence-cascade) if you are interested in the background on this approach.
+This config is read at each playback event, so a change applies on the next playback (no rebuild or restart needed). Only set video-output/decode flags here though; the app owns the rest (the IPC control channel, OSC, input) and for other mpv preferences (things like deinterlace, cache, subtitle styling, audio output device...) please just create a standard `~/.config/mpv/mpv.conf`. MPV will read that automatically every launch. Please check out [ARCHITECTURE.md → How mpv flags are layered](ARCHITECTURE.md#how-mpv-flags-are-layered-the-precedence-cascade) if you are interested in the background on this approach.
 
 **Enabling crop on a Pi 3** — the Pi 3 default uses a zero-copy overlay path for performance, and a hardware overlay plane can't zoom/crop, so the OSC crop button blanks the video there. To allow crop to work on the Pi3 you can override to the copy path (so frames go through the scaler, where crop works):
 
@@ -317,14 +379,17 @@ These build jobs run in parallel:
 
 | Job | Runner | Output |
 |---|---|---|
-| `build-macos-arm64` | `macos-latest` (Apple Silicon) | `240-MP-<tag>-macOS-arm64.dmg` |
+| `build-macos-arm64` | `macos-15` (Apple Silicon) | `240-MP-<tag>-macOS-arm64.dmg` |
 | `build-linux-arm64` | `ubuntu-24.04-arm` (native arm64) | `240-MP-<tag>-linux-arm64.tar.gz` |
+| `build-linux-x86_64` | `ubuntu-24.04` | `240-MP-linux-x86_64.AppImage` (version-less — self-updates in place) |
 
-macOS jobs: installs Qt via the Qt CDN, builds, runs `macdeployqt` to embed Qt frameworks (including `libSDL2.dylib`), ad-hoc codesign, package as `.dmg`. mpv is not bundled — users install it via `brew install mpv`.
+macOS job: installs Qt via the Qt CDN, builds, runs `macdeployqt` to embed Qt frameworks (including `libSDL2.dylib`), ad-hoc codesign, package as `.dmg`. mpv is not bundled — users install it via `brew install mpv`.
 
 Linux arm64 job: installs Qt from apt, builds, package as `.tar.gz`. mpv and SDL2 are not bundled — end users install them via `apt install mpv libsdl2-2.0-0` or by running the `install.sh` that is bundled with each release where they are installed as part of the dependency list.
 
-A final `release` job waits for all three builds, then creates a GitHub Release with all artifacts attached (including `install.sh`).
+Linux x86_64 job: installs Qt via the Qt CDN, builds the app, builds **mpv 0.40 from source** (`scripts/build-mpv.sh`, against 24.04's stock FFmpeg 6.1 — apt's mpv 0.37 is one release too old for the app's forced-subtitle option, and the savoury1 PPA for a newer one is now gated), then runs `scripts/build-appimage.sh` to bundle Qt, SDL2 **and** that mpv into a self-contained `.AppImage`. Built on `ubuntu-24.04`, which sets a glibc 2.39 floor (a current Steam Deck and modern distros — not Ubuntu 22.04 / Debian 12 / older SteamOS). Nothing to install on the target — it runs on immutable distros like SteamOS.
+
+A final `release` job waits for all three build jobs, then creates a GitHub Release with all artifacts attached (including `install.sh`).
 
 ### Output
 
@@ -334,4 +399,4 @@ Go to **Actions** → select the workflow run → each build job has an **Artifa
 
 **After the workflow completes:**
 
-Go to the repository on GitHub → **Releases** → select the release for the tag you set. All three artifacts are listed under Assets.
+Go to the repository on GitHub → **Releases** → select the release for the tag you set. All build artifacts (the `.dmg`, both Linux packages, `SHA256SUMS` and `install.sh`) are listed under Assets.

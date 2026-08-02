@@ -86,8 +86,18 @@ FocusScope {
         clip: true
         focus: true
 
-        Keys.onUpPressed: if (currentIndex > 0) currentIndex--
-        Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+            menuList.positionViewAtIndex(menuList.currentIndex, ListView.Contain)
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            menuList.positionViewAtIndex(menuList.currentIndex, ListView.Contain)
+        }
 
         Keys.onReturnPressed: {
             var item = menuItems[currentIndex]

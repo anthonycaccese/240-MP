@@ -52,6 +52,14 @@ local function get_audio_str()
 end
 
 local function get_sub_str()
+    -- Burned-in transcode sub: there is no mpv track to read, so the app passes
+    -- the selected track's name (spaces as underscores) for display.
+    local transcode_sub = mp.get_opt("transcode-sub")
+    if transcode_sub and transcode_sub ~= "" then
+        if transcode_sub == "Off" then return "(NONE)" end
+        return (transcode_sub:gsub("_", " ")):upper()
+    end
+
     local id = mp.get_property_number("current-tracks/sub/id", 0)
     if id == 0 then return "(NONE)" end
     -- External sidecar with an app-provided friendly name (e.g. Jellyfin): use it
@@ -70,9 +78,20 @@ local function get_sub_str()
     return table.concat(parts, " ")
 end
 
+-- Set by the app when the subtitle is burned into the stream and only the module
+-- can change it (Jellyfin transcode): mpv has no sub track to cycle, so the
+-- SUBTITLE button asks the module to re-request the stream instead.
+local sub_cycle = mp.get_opt("sub-cycle") == "1"
+
 local btn_actions = {
     function() mp.command("no-osd cycle audio") end,
-    function() mp.command("no-osd cycle sub") end,
+    function()
+        if sub_cycle then
+            mp.commandv("script-message", "cycle-sub")
+        else
+            mp.command("no-osd cycle sub")
+        end
+    end,
     function() mp.command("no-osd cycle-values panscan 0 1") end,
     function() mp.command("quit") end,
     function() mp.command("playlist-prev") end,
@@ -80,6 +99,8 @@ local btn_actions = {
 }
 
 local function has_subtitle_tracks()
+    -- Burned-in transcode subs never appear in the track list.
+    if sub_cycle then return true end
     local tracks = mp.get_property_native("track-list", {})
     for _, t in ipairs(tracks) do
         if t.type == "sub" then return true end
@@ -331,7 +352,7 @@ local function toggle_menu()
         mp.remove_key_binding("menu-esc")
         mp.remove_key_binding("menu-bs")
     else
-        -- Tell the volume bar (media-keys.lua) to stand down — the two OSDs
+        -- Tell the volume bar (mpv-media-keys.lua) to stand down — the two OSDs
         -- share the same spot and are mutually exclusive.
         mp.commandv("script-message", "240mp-osd-volume-hide")
         menu_visible = true
@@ -350,13 +371,13 @@ local function toggle_menu()
     end
 end
 
--- The volume bar (media-keys.lua) broadcasts this when it appears; close the
+-- The volume bar (mpv-media-keys.lua) broadcasts this when it appears; close the
 -- menu so the two OSDs never overlap. toggle_menu() runs the full teardown.
 mp.register_script_message("240mp-osd-menu-hide", function()
     if menu_visible then toggle_menu() end
 end)
 
--- media-keys.lua broadcasts this on seek / chapter changes so the nav menu
+-- mpv-media-keys.lua broadcasts this on seek / chapter changes so the nav menu
 -- pops up to show the new position. Open it if closed; otherwise just redraw
 -- and restart the auto-hide timer.
 mp.register_script_message("240mp-osd-menu-show", function()

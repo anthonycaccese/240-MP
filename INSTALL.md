@@ -56,6 +56,7 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     **Option 1: For composite out on a CRT TV (NTSC)...**
     ```
     # --- Global ---
+    auto_initramfs=1
     disable_splash=1
     disable_overscan=1
     dtparam=audio=on
@@ -114,6 +115,7 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     or **Option 2: for HDMI out on a modern TV...**
     ```
     # --- Global ---
+    auto_initramfs=1
     disable_splash=1
     disable_overscan=1
 
@@ -169,7 +171,7 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
 
 3) Place the SD card in your Raspberry Pi and let it run through its first boot sequence
 
-    - Raspberry Pi OS Lite does **not** boot to a desktop. On first boot you may see boot log text, a text login console, or sometimes just a blinking cursor for a bit while it finishes booting.
+    - Raspberry Pi OS Lite does **not** boot to a desktop. On first boot you may see boot log text, a text login console, or sometimes just a blinking cursor for a bit while it finishes booting. (If you later choose the optional boot splash in step 5, a 240-MP logo replaces all of that from then on.)
 
 4) Once complete, SSH in and run `sudo raspi-config`
 
@@ -193,6 +195,10 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     - If you type `Y` and press enter it will set up 240-MP to autostart when your Raspberry Pi boots which creates a nice appliance experience (bascially a dedicated 240-MP device).
     - If you choose that option please make sure to enter your primary user for the pi at the next prompt.  If you don't provide one it will set it up for the `Pi` user.
     - If you ever need to inspect the autostart logs later, use `sudo journalctl -u 240mp -f`
+    - Choosing autostart also gets you a third prompt: `Install boot splash screen? [y/N]`
+        - Answering `Y` replaces the kernel logo, boot log text and blinking cursor with a 240-MP logo that stays on screen until the app appears, so the Pi boots like an appliance rather than a computer
+        - It uses the official `rpi-splash-screen-support` package (Raspberry Pi OS Trixie or newer) and takes effect from the **next reboot**
+        - It relies on `auto_initramfs=1` being in your `config.txt`.  For new installs that's included in the above configs but if you are on a previous set up then you will need to add that to your config.txt file in order for it to work (the installer will warn you if it's missing so you'll know then and there)
 
 At this point you can type `240mp` at any time to start up the app.  And if you installed the autostart service then the next time you boot your Pi it will boot directly into 240-MP.
 
@@ -201,6 +207,34 @@ The Local Files module will be enabled by default and you can open settings to e
 **If analog / composite audio is unusually quiet:** 
 - Run `amixer sset PCM 100%`
 - If that solves it and you want to keep the level across reboots, run `sudo alsactl store`
+
+**If there is no audio at all:** 
+- ALSA's `default` device resolves to whichever sound card enumerated first and sometimes that may not be the one your audio is actually plugged into, which will result in missing audio.
+- To see the cards your Pi enumerated run `cat /proc/asound/cards` (or `aplay -l`).  The short name in brackets is the card id you'll in one of the options below.  The ids you see will also depend on which config.txt from step 2 you used. (the Pi 3 / Pi 4 run fake KMS where analog / composite audio shows up as `Headphones`, while the Pi 5 blocks run Full KMS where HDMI audio shows up as `vc4hdmi0` and `vc4hdmi1`).  Any USB audio devices you've attached will have their own entries too, so please read the ids off your own Pi vs copying from here.
+- Once you have the ID for your audio device there are two options to fix it, please pick whichever fits your setup best:
+
+    **Option 1: change the default at the OS level**
+
+    Create `/etc/asound.conf` to set the card that ALSA should treat as the default, substituting the card id you read above:
+
+    ```
+    defaults.pcm.card "your-card-id"
+    defaults.ctl.card "your-card-id"
+    ```
+
+    Every program on the Pi picks this up (not just 240-MP) so this is recommened if you want to set audio output for all applications you have running on your OS.  This works on Raspberry Pi OS Lite (the image these steps use), where plain ALSA is in charge of the `default` device.  If you are running a Desktop image instead then PipeWire typically owns `default` and you should pick your output there rather than in `/etc/asound.conf`.
+
+    **Option 2: change it for mpv only**
+
+    Create (or add to your existing) `~/.config/mpv/mpv.conf` and add a single line naming the device:
+
+    ```
+    audio-device=alsa/plughw:CARD=your-card-id,DEV=0
+    ```
+
+    Run `mpv --audio-device=help` to see the exact device strings mpv will accept and copy the one that matches your audio output device.
+
+- In both options the change applies the next time playback starts and will cover every mpv instance that 240-MP launches.  Please see [ARCHITECTURE.md → How mpv flags are layered](ARCHITECTURE.md#how-mpv-flags-are-layered-the-precedence-cascade) for why audio output is left to your ALSA / mpv config rather than being set by 240-MP.
 
 **Exit to Terminal:** 
 - If you have the autostart service installed, the Quit dialog gains an `Exit to Terminal` option alongside `Power Off`. Choosing that will drop you to a login shell on the Pi instead of powering off, and leaves autostart intact for subsequent reboots. 
@@ -211,7 +245,7 @@ The Local Files module will be enabled by default and you can open settings to e
 
 ### Update
 
-**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Restart. Your settings will be retained.
+**From within the app (recommended):** go to `Settings → Update`, check for updates, download, and choose Apply & Restart. Your settings will be retained.
 
 > Installs made before in-app updates were possible need to re-run the install script **once** (just follow the steps below).  Doing that will pick up the new launcher.  There is a check on the Update screen that will let you know if that's the case for you.
 
@@ -226,6 +260,7 @@ The Local Files module will be enabled by default and you can open settings to e
     - If you already have autostart set up please answer `Y` (that's needed to keep the app files owned by the service user, which in-app updates rely on)
     - If you don't have autostart installed and want to keep it that way just answer `N`
     - And if you want to turn on autostart please answer `Y`
+    - If you answered `Y` you'll also be asked about the boot splash. If you've done that in the past then answering `Y` a second time is harmless (it just rewrites the same settings).  If you've not installed the boot splash before then answering `Y` will set it up at this step.
 4) Once that completes just run `sudo reboot` and when your pi restarts you'll be on the latest version
 
 ### Uninstall
@@ -246,6 +281,16 @@ The Local Files module will be enabled by default and you can open settings to e
     sudo systemctl daemon-reload
     ```
 
+3) If you installed the boot splash and want to go back to a normal text boot then please run the following:
+
+    ```bash
+    sudo mv /boot/firmware/cmdline.txt.bak /boot/firmware/cmdline.txt
+    sudo rm -f /lib/firmware/logo.tga /etc/initramfs-tools/hooks/splash-screen-hook.sh
+    sudo update-initramfs -k all -u
+    ```
+
+    Note: `cmdline.txt.bak` is the backup that `configure-splash` made before its edit to add boot splash support.  If that backup file isn't there then just remove the `fullscreen_logo=1`, `fullscreen_logo_name=logo.tga` and `vt.global_cursor_default=0` options from `/boot/firmware/cmdline.txt` by hand and add `console=tty1` back.)
+
 ## On macOS (ARM)
 
 If you don't have a Raspberry Pi and would like to try 240-MP, I also provide a build for macOS on Apple Silicon.  You can download a DMG archive from the latest release and run it on your mac following these steps...
@@ -265,7 +310,7 @@ If you don't have a Raspberry Pi and would like to try 240-MP, I also provide a 
 
 ### Update
 
-**From within the app (recommended):** go to `Settings → Update 240-MP`, check for updates, download, and choose Apply & Relaunch — the app will swap itself in `/Applications` and reopen on the new version. Your settings will be retained.
+**From within the app (recommended):** go to `Settings → Update`, check for updates, download, and choose Apply & Relaunch — the app will swap itself in `/Applications` and reopen on the new version. Your settings will be retained.
 
 Or manually:
 1. Download the DMG archive from the latest release
@@ -275,3 +320,59 @@ Or manually:
 
 - Remove it just like you would any application on macOS
 - Remove the configuration files in `~/Library/Application Support/240-MP/`
+
+## On SteamOS / Linux x86_64
+
+For **SteamOS** and other x86_64 Linux distros, 240-MP ships as an **AppImage**. mpv is bundled, so there is nothing else to install; it runs on stock SteamOS without any additional package installs.
+
+### Requirements
+
+- SteamOS or an x86_64 Linux machine running a graphical session: X11, or Wayland with XWayland available (the AppImage ships Qt's `xcb` platform plugin)
+- Internet access
+
+The AppImage carries its own copy of the Wayland client libraries and uses them only if the system has none, so X11-only distributions that ship no Wayland at all (e.g. Batocera and similar buildroot-based images) should be able to run it too.
+
+### Steps (Steam Deck)
+
+> **SteamOS only**: please switch to Desktop Mode for the following steps
+
+1. Download `240-MP-linux-x86_64.AppImage` from the [latest release](https://github.com/anthonycaccese/240-mp/releases/latest).
+2. In your file manager, right-click the file → **Properties → Permissions** → tick *Is executable* (or run `chmod +x` on it from terminal).
+3. Double-click to launch. The Local Files module is enabled by default; open Settings to enable others (see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki for details on each).
+
+    #### SteamOS Gaming Mode
+
+    To run 240-MP from SteamOS Gaming Mode:
+
+    1. In Desktop Mode, open **Steam → Games → Add a Non-Steam Game to My Library**, click **Browse**, and select the 240-MP AppImage.
+    2. Back in Gaming Mode it will appear in your library under "Non Steam Games".
+
+    #### YouTube (yt-dlp)
+
+    The YouTube module requires `yt-dlp` in order to work which is not bundled with the AppImage.  Its updated frequently to work with new YouTube changes, so it has to be updatable independently of app releases. Because SteamOS is immutable you can drop a single self-contained `yt-dlp` binary into the 240-MP's data directory and the app and its bundled mpv will use it automatically.
+
+    Run the following:
+
+    ```bash
+    mkdir -p ~/.local/share/240-MP/bin
+    wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+     -O ~/.local/share/240-MP/bin/yt-dlp
+    chmod +x ~/.local/share/240-MP/bin/yt-dlp
+    ```
+
+    You can update it with `~/.local/share/240-MP/bin/yt-dlp -U`. 
+
+    That said, if you already have `yt-dlp` on your `PATH` (e.g. in `~/.local/bin`) then that will work too, the data-dir copy just provides a local to 240-MP option.
+
+### Update
+
+- **From within the app (recommended):** go to `Settings → Update`, check for updates, download, and choose Apply & Relaunch. 
+- The app verifies the download, swaps the new `.AppImage` over your current one in place (keeping a `.bak` of the previous version until the new one launches cleanly). 
+- In **Gaming Mode** the app needs to close after applying; so simply relaunch it from your Steam library to pick up the new version (the file path is unchanged, so your existing shortcut will still work). 
+- Your settings in `~/.local/share/240-MP/` are retained.
+- If the app is stored in a read-only location the in-app update can't write to then the update screen simply point you at the [Releases page](https://github.com/anthonycaccese/240-mp/releases/latest) to download and replace the `.AppImage` manually.
+
+### Uninstall
+
+- Delete the `.AppImage` file (and remove it from Steam if you added it as a non-Steam game)
+- Remove the configuration files in `~/.local/share/240-MP/`

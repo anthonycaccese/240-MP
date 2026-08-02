@@ -15,6 +15,11 @@ class QNetworkReply;
 //     /opt/240mp before the next exec. Under the autostart service, "Apply &
 //     Restart" exits with code 11 so systemd relaunches immediately (see
 //     240mp-stop); otherwise the update applies on the next manual launch.
+//   - Linux (AppImage, x86_64/SteamDeck): no launcher layer — the AppImage IS
+//     the entry point. Apply swaps the verified image over $APPIMAGE in-process
+//     (keeping a .bak), then in Desktop Mode a detached helper waits for the app
+//     to quit and relaunches; in Gaming Mode (gamescope/Steam) it just quits and
+//     the user relaunches from Steam.
 //   - macOS: spawns a detached helper script that waits for the app to quit,
 //     mounts the DMG, swaps /Applications/240mp.app, and relaunches.
 class UpdateManager : public QObject {
@@ -61,6 +66,7 @@ private:
     void startAssetDownload();
     void finishDownload();
     void applyLinux();
+    void applyAppImage();
     void applyMacos();
     QString updatesDir() const;
     QString stagedJsonPath() const;

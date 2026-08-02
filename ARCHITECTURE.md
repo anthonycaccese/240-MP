@@ -217,23 +217,26 @@ I think of it like this:
 ```
 app constants → 
   app per-playback → 
-    device decode (user-overridable in config) → 
-      ~/.config/mpv/mpv.conf
+    app presentation (user-set in Settings) → 
+      device decode (user-overridable in config) → 
+        ~/.config/mpv/mpv.conf
 ```
 
 | Layer | Examples | Owner | Where |
 |---|---|---|---|
 | **App constants** | `--input-ipc-server`, `--input-conf`, `--osc`, `--script`, `--log-file`, `--no-input-terminal` | App only | command-line |
 | **App per-playback** | `--start`, `--aid`, `--sub-file`, `--http-header-fields` (stream URL, tokens) | App only | command-line |
+| **App presentation** | `--panscan` (Auto Crop), `--video-output-levels` (Video Levels) | User, via a Settings row | command-line |
 | **Device decode** | `--vo` / `--gpu-context` / `--hwdec` | App auto-detects; user may override via `mpv_video_args` | command-line |
-| **User prefs** | `deinterlace`, `cache`, `sub-scale`, profiles | User | `mpv.conf` |
+| **User prefs** | `deinterlace`, `cache`, `sub-scale`, `audio-device`, profiles | User | `mpv.conf` |
 
-- The first three layers are app-owned and the first two are load-bearing because they wire the IPC control channel, the input/OSC bridge, and (headless) the DRM/VT hand-off. Changing them would break functionality in the app, not just playback, so they are never user-overridable. The 3rd layer (*device decode*) allows a direct user path to override video decode settings if per device tweaks are needed.
+- The first four layers are app-owned and the first two are load-bearing because they wire the IPC control channel, the input/OSC bridge, and (headless) the DRM/VT hand-off. Changing them would break functionality in the app, not just playback, so they are never user-overridable. The last two app layers are the ones the user can steer: *app presentation* through a Settings row (Auto Crop, Video Levels) for the knobs worth reaching without a keyboard, and *device decode* through the `mpv_video_args` override if per device tweaks are needed.
+- A presentation setting left at its default emits **no flag at all** (Video Levels on `Auto`, Auto Crop `Off`), so a `video-output-levels=` line in someone's `mpv.conf` still applies; picking Limited/Full puts it on the command line, where it wins.
 - And all app layers are command-line, so they all win over `mpv.conf`. I do pass no `--no-config`, so mpv will look to read `~/.config/mpv/mpv.conf` on launch, which means users can add anything the app doesn't set explicitly direclty in their MPV config.
 
 ### Custom OSC (Lua)
 
-The on-screen controls mpv shows during playback are custom Lua scripts in `scripts/` (`mpv-osc.lua` for normal playback, `ambient-osc.lua` for Ambient Mode), loaded via mpv's `--script=` flag. Options are passed in with `--script-opts=` (e.g. `transcode-offset=<sec>`). The remote's key events reach these scripts through the `keypress` IPC bridge described above.
+The on-screen controls mpv shows during playback are custom Lua scripts in `scripts/` (`mpv-osc.lua` for normal playback, `mpv-osc-ambient.lua` for Ambient Mode), loaded via mpv's `--script=` flag. Options are passed in with `--script-opts=` (e.g. `transcode-offset=<sec>`). The remote's key events reach these scripts through the `keypress` IPC bridge described above.
 
 ### Raspberry Pi headless hand-off (EGLFS)
 
@@ -395,6 +398,22 @@ FocusScope {
             positionViewAtIndex(currentIndex, ListView.Contain)
         }
 
+        // Up/Down with wraparound. The positionViewAtIndex call is required:
+        // changing currentIndex alone does not scroll a clipped ListView, so
+        // without it a wrap moves the selection off-screen.
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+        }
+
         Keys.onReturnPressed: {
             navigateTo("Detail.qml", { item: model[currentIndex] }, { currentIndex: currentIndex })
         }
@@ -438,7 +457,8 @@ FocusScope {
 **View rules:**
 - Always declare `property var navParams: ({})` — the router passes params via `Loader.setSource`.
 - List views also declare `property var navListState: navParams.navListState || ({})` and restore position in `Component.onCompleted`.
-- `navigateTo` always takes 3 args: `(path, params, listState)` — pass `{ currentIndex: listView.currentIndex }` as listState when pushing to a detail view.
+- `navigateTo` always takes 3 args: `(path, params, listState)` — pass `{ currentIndex: listView.currentIndex }` as listState when pushing to a detail view. Detail views with multiple focus rows (play button / list) also pass `focusRow` in listState and restore it in their data-loaded handler, so backing in lands on the row the user left.
+- Up/Down navigation wraps: past the last item returns to the first and vice versa, always followed by `positionViewAtIndex(..., ListView.Contain)` (see the handlers in Items.qml above). Views with an A–Z letter panel additionally keep `letterList.currentIndex` in sync on every move and wrap the panel itself — `modules/jellyfin/views/Items.qml` is the reference.
 - Leaf views only need `signal goBack()` — no `navigateTo`.
 - Use `root.sh` / `root.sw` for all margins and sizes — never hardcoded pixels. This keeps layouts responsive across CRT (240p/480i, watch overscan) and HDMI/LCD.
 - Access shared state via `moduleRoot.moduleName`, `moduleRoot.moduleIcon`.

@@ -83,8 +83,18 @@ FocusScope {
         clip: true
         focus: true
 
-        Keys.onUpPressed: if (currentIndex > 0) currentIndex--
-        Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+            channelList.positionViewAtIndex(channelList.currentIndex, ListView.Contain)
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            channelList.positionViewAtIndex(channelList.currentIndex, ListView.Contain)
+        }
 
         Keys.onReturnPressed: {
             if (channels.length === 0) return

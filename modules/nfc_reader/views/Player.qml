@@ -13,9 +13,11 @@ FocusScope {
     property bool   playbackStarted: false
     property string errorMessage:    ""
     property int    lastStartMs:     0   // what the last attempt started from, for retry
+    property int    lastPlPos:       -1
 
     property bool   overlayVisible:  false
     property int    savedPositionMs: 0
+    property int    savedPlaylistPos: -1
     property int    choiceIndex:     0
     property string resumeSetting:   "ask"
     property var    ytdlArgs:        []
@@ -29,15 +31,28 @@ FocusScope {
     // resume-playback setting (mirrors the other module players).
     property int    lastKnownPositionMs: 0
     property int    lastKnownDurationMs: 0
+    property int    lastKnownPlaylistPos: -1
 
     focus: true
 
-    function doPlay(startMs) {
+    // Playlists get their item index saved alongside the timecode so a card
+    // resumes at "video N" rather than replaying the whole list: .m3u/.m3u8
+    // by extension (same set as local_files), YouTube playlist URLs by the
+    // list= query param.
+    function isPlaylist(path) {
+        var lower = path.toLowerCase()
+        if (/\.m3u8?$/.test(lower)) return true
+        return (lower.indexOf("youtube.") !== -1 || lower.indexOf("youtu.be") !== -1)
+               && lower.indexOf("list=") !== -1
+    }
+
+    function doPlay(startMs, plPos) {
         lastStartMs = startMs
+        lastPlPos   = plPos
         // extraArgs opts into yt-dlp so YouTube-page URLs in the mapping
         // resolve; safe for local files and direct media URLs, which the
         // native demuxer handles before the ytdl hook ever runs.
-        mpvController.loadAndPlay(videoPath, startMs / 1000.0, -1, subFlag, [], subtitleLangs, false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
+        mpvController.loadAndPlay(videoPath, startMs / 1000.0, -1, subFlag, [], subtitleLangs, false, plPos, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
     }
 
     // Starting mpv runs synchronously and, on the Pi, immediately switches VT
@@ -48,11 +63,13 @@ FocusScope {
         interval: 50
         repeat: false
         property int pendingStartMs: 0
-        onTriggered: doPlay(pendingStartMs)
+        property int pendingPlPos:   -1
+        onTriggered: doPlay(pendingStartMs, pendingPlPos)
     }
 
-    function play(startMs) {
+    function play(startMs, plPos) {
         startTimer.pendingStartMs = startMs
+        startTimer.pendingPlPos   = plPos
         startTimer.restart()
     }
 
@@ -63,7 +80,7 @@ FocusScope {
                 event.accepted = true
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 errorMessage = ""
-                play(lastStartMs)
+                play(lastStartMs, lastPlPos)
                 event.accepted = true
             }
         } else if (overlayVisible) {
@@ -78,7 +95,8 @@ FocusScope {
                 event.accepted = true
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 overlayVisible = false
-                play(choiceIndex === 0 ? savedPositionMs : 0)
+                play(choiceIndex === 0 ? savedPositionMs : 0,
+                     choiceIndex === 0 ? savedPlaylistPos : -1)
                 event.accepted = true
             }
         } else {
@@ -122,6 +140,12 @@ FocusScope {
         function onDurationChanged(ms) {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
         }
+        function onPlaylistPosChanged(pos) {
+            if (pos >= 0) {
+                playerRoot.lastKnownPlaylistPos = pos
+                playerRoot.lastKnownPositionMs  = 0
+            }
+        }
 
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
             // A bad mapping path or missing yt-dlp surfaces as an mpv failure
@@ -130,14 +154,28 @@ FocusScope {
                 playerRoot.errorMessage = "PLAYBACK FAILED\n\nCHECK THE MAPPED PATH OR URL\n(YOUTUBE LINKS REQUIRE YT-DLP)"
                 return
             }
-            // Same completion rule as local_files: near the end clears the
-            // resume point, meaningful progress saves it.
-            var pos = lastKnownPositionMs || finalPositionMs
-            var dur = lastKnownDurationMs || finalDurationMs
-            if (dur > 0 && pos >= dur * 0.95)
-                nfcReaderBackend.clearPosition(videoPath)
-            else if (pos > 5000)
-                nfcReaderBackend.savePosition(videoPath, pos)
+            var pos   = lastKnownPositionMs || finalPositionMs
+            var dur   = lastKnownDurationMs || finalDurationMs
+            var plPos = lastKnownPlaylistPos
+            if (isPlaylist(videoPath)) {
+                // The per-item duration can't tell "finished the list" from
+                // "finished one video of it", but the exit reason can: mpv only
+                // ends with "eof" when the final item played to its end (a quit
+                // mid-list leaves a trailing quit/stop end-file event). A
+                // completed playlist clears its resume point like a completed
+                // single video; anything else saves item + timecode.
+                if (reason === "eof")
+                    nfcReaderBackend.clearPosition(videoPath)
+                else if (pos > 0 || plPos >= 0)
+                    nfcReaderBackend.savePosition(videoPath, pos, plPos)
+            } else {
+                // Same completion rule as local_files: near the end clears the
+                // resume point, meaningful progress saves it.
+                if (dur > 0 && pos >= dur * 0.95)
+                    nfcReaderBackend.clearPosition(videoPath)
+                else if (pos > 5000)
+                    nfcReaderBackend.savePosition(videoPath, pos, -1)
+            }
             goBack()
         }
     }
@@ -164,20 +202,24 @@ FocusScope {
 
         resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "ask"
         if (resumeSetting === "no") {
-            play(0)
+            play(0, -1)
             return
         }
 
         var saved    = nfcReaderBackend.getSavedPosition(videoPath)
         var savedPos = saved.pos || 0
+        var savedPl  = (saved.plPos !== undefined && saved.plPos !== null) ? saved.plPos : -1
 
         if (resumeSetting === "yes") {
-            play(savedPos)
-        } else if (savedPos > 0) {
-            savedPositionMs = savedPos
+            play(savedPos, savedPl)
+        } else if (savedPos > 0 || savedPl >= 0) {
+            // plPos alone is enough to offer resume: stopping early in video N
+            // of a playlist saves the item index with a near-zero timecode.
+            savedPositionMs  = savedPos
+            savedPlaylistPos = savedPl
             overlayVisible = true
         } else {
-            play(0)
+            play(0, -1)
         }
     }
 
@@ -272,7 +314,9 @@ FocusScope {
                 Column {
                     Repeater {
                         model: [
-                            "Resume from " + formatTime(savedPositionMs),
+                            savedPlaylistPos >= 0
+                                ? "Resume video " + (savedPlaylistPos + 1) + " at " + formatTime(savedPositionMs)
+                                : "Resume from " + formatTime(savedPositionMs),
                             "Start from the beginning"
                         ]
                         delegate: Item {

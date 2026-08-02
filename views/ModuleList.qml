@@ -134,6 +134,21 @@ FocusScope {
                 }
             }
         }
+
+        Keys.onUpPressed: {
+            if (currentIndex > 0) {
+                currentIndex--
+            } else {
+                currentIndex = menuList.model.length-1
+            }
+        }
+        Keys.onDownPressed: {
+            if (currentIndex < menuList.model.length-1) {
+                currentIndex++
+            } else {
+                currentIndex = 0
+            }
+        }
         
         Keys.onReturnPressed: {
             var selectedModulePath = menuList.model[menuList.currentIndex].entry_point

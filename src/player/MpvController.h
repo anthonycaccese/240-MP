@@ -30,8 +30,8 @@ class MpvController : public QObject {
     Q_PROPERTY(int playlistPos READ playlistPos NOTIFY playlistPosChanged)
 
 public:
-    explicit MpvController(const QString &appRoot, AppCore *appCore = nullptr,
-                           QObject *parent = nullptr);
+    explicit MpvController(const QString &appRoot, const QString &dataRoot,
+                           AppCore *appCore = nullptr, QObject *parent = nullptr);
     ~MpvController() override;
 
     int position()    const { return m_position;    }
@@ -83,6 +83,10 @@ signals:
     void playbackEnded(int finalPositionMs, int finalDurationMs, const QString &reason);
 
     void skipRequested();
+    // The OSC's SUBTITLE button when the sub is burned into the stream and mpv
+    // has nothing to cycle (see `sub-cycle` in scripts/mpv-osc.lua). The module
+    // owns the change — typically stop, re-request the stream, relaunch.
+    void subtitleCycleRequested();
 
 private slots:
     void onProcessFinished();
@@ -110,6 +114,9 @@ private:
     // playback ON): --panscan blanks the video there. Gates auto-crop and tells
     // the OSC scripts to hide their CROP button.
     bool cropUnavailable() const;
+    // App-level "video_output_levels" setting (default "Auto"). Returns the mpv
+    // value for --video-output-levels ("limited"/"full"), or empty on Auto/unset.
+    QString videoOutputLevels() const;
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;
@@ -128,6 +135,7 @@ private:
     qint64        m_lastIpcEventMs = 0;
     bool          m_paused         = false;  // mirrors mpv's pause property (watchdog exemption)
     QString       m_appRoot;
+    QString       m_dataRoot;
     QString       m_socketPath;
     QString       m_inputConfPath;
     QString       m_logFilePath;

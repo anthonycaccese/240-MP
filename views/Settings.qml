@@ -112,6 +112,23 @@ FocusScope {
             moduleId: ""
         })
 
+        // Video Output Range, the RGB range mpv converts YUV into. mpv's default
+        // is full range; a display expecting studio (limited) levels renders that
+        // as crushed blacks and blown whites, and the reverse reads as washed-out
+        // gray. Takes effect on the next video.
+        // The key keeps mpv's own name for the option; the label uses the wording
+        // TVs and GPU drivers use for the same control (HDMI RGB range, DRM
+        // "Broadcast RGB"), since that's what the setting is matching.
+        items.push({
+            type: "list_single",
+            key: "video_output_levels",
+            label: "Video Levels",
+            options: ["Auto", "Limited", "Full"],
+            value: appSettings["video_output_levels"] || "Auto",
+            description: "Match the color range your display expects\n[LIMITED] If blacks crush  [FULL] If blacks look gray",
+            moduleId: ""
+        })
+
         // SCREEN SAVER section — single control: OFF disables, a number sets the
         // timeout for both menu idle and playback pause (handled inside mpv).
         items.push({
@@ -144,11 +161,17 @@ FocusScope {
         items.push({ type: "section", label: "Application" })
         items.push({
             type: "submenu",
-            key: "software_update",
-            label: "Update 240-MP",
+            key: "remap_controls",
+            label: "Controls",
             moduleId: ""
         })
-        items.push({ type: "quit", label: "Quit 240-MP" })
+        items.push({
+            type: "submenu",
+            key: "software_update",
+            label: "Update",
+            moduleId: ""
+        })
+        items.push({ type: "quit", label: "Quit" })
 
         settingsItems = items
 
@@ -206,12 +229,22 @@ FocusScope {
         focus: true
 
         Keys.onUpPressed: {
-            var prev = settingsRoot.firstSelectableBefore(currentIndex)
-            if (prev !== currentIndex) currentIndex = prev
+            if (currentIndex > 0) currentIndex-- 
+            else {
+                currentIndex = settingsItems.length-1
+            }
+            while (settingsItems[currentIndex].type == "section") {
+                currentIndex--
+            }
+            settingsList.positionViewAtIndex(currentIndex, ListView.Contain)
         }
         Keys.onDownPressed: {
-            var next = settingsRoot.firstSelectableAfter(currentIndex)
-            if (next !== currentIndex) currentIndex = next
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            while (settingsItems[currentIndex].type == "section") {
+                currentIndex++
+            }
+            settingsList.positionViewAtIndex(currentIndex, ListView.Contain)
         }
 
         Keys.onLeftPressed: {
@@ -255,6 +288,8 @@ FocusScope {
             if (row && row.type === "submenu") {
                 if (row.key === "software_update")
                     settingsRoot.navigateTo("views/Update.qml", {}, { currentIndex: settingsList.currentIndex })
+                else if (row.key === "remap_controls")
+                    settingsRoot.navigateTo("views/RemapControls.qml", {}, { currentIndex: settingsList.currentIndex })
                 else
                     settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
             } else if (row && row.type === "quit") {

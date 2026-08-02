@@ -81,10 +81,16 @@ FocusScope {
         focus: true
 
         Keys.onUpPressed: {
+            if (count === 0) return
             if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+            optionsList.positionViewAtIndex(optionsList.currentIndex, ListView.Contain)
         }
         Keys.onDownPressed: {
+            if (count === 0) return
             if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+            optionsList.positionViewAtIndex(optionsList.currentIndex, ListView.Contain)
         }
 
         Keys.onLeftPressed: {

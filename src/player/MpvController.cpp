@@ -1,7 +1,11 @@
 #include "MpvController.h"
 #include "../AppCore.h"
+#include "../util/YtDlpLocator.h"
+#include "../util/MpvLocator.h"
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -43,10 +47,12 @@ static QString writeFontconfigOverride(const QString &fontsDir) {
 }
 #endif
 
-MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *parent)
+MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
+                             AppCore *appCore, QObject *parent)
     : QObject(parent)
     , m_appCore(appCore)
     , m_appRoot(appRoot)
+    , m_dataRoot(dataRoot)
     , m_socketPath(QDir::tempPath() + "/240mp-mpv.sock")
     , m_inputConfPath(QDir::tempPath() + "/240mp-input.conf")
     , m_logFilePath(QDir::tempPath() + "/240mp-mpv.log")
@@ -68,8 +74,8 @@ MpvController::MpvController(const QString &appRoot, AppCore *appCore, QObject *
     }
 
     m_hasMpvOscScript     = QFile::exists(m_appRoot + "/scripts/mpv-osc.lua");
-    m_hasAmbientOscScript = QFile::exists(m_appRoot + "/scripts/ambient-osc.lua");
-    m_hasMediaKeysScript  = QFile::exists(m_appRoot + "/scripts/media-keys.lua");
+    m_hasAmbientOscScript = QFile::exists(m_appRoot + "/scripts/mpv-osc-ambient.lua");
+    m_hasMediaKeysScript  = QFile::exists(m_appRoot + "/scripts/mpv-media-keys.lua");
 
     m_ipc = new QLocalSocket(this);
     connect(m_ipc, &QLocalSocket::connected, this, [this] {
@@ -141,21 +147,12 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     m_lastEndFileReason.clear();
     m_pendingStartClear = false;
 
-#ifdef Q_OS_MACOS
-    // .app bundles launched via double-click get a minimal PATH that excludes
-    // Homebrew. Prepend known install locations so findExecutable works.
-    {
-        const QStringList extraPaths = { "/opt/homebrew/bin", "/usr/local/bin" };
-        const QStringList currentPath = qEnvironmentVariable("PATH").split(":");
-        for (const QString &p : extraPaths) {
-            if (!currentPath.contains(p))
-                qputenv("PATH", (p + ":" + qEnvironmentVariable("PATH")).toUtf8());
-        }
-    }
-#endif
-    const QString bin = QStandardPaths::findExecutable("mpv");
+    // Bundled sibling first, then PATH — see util/MpvLocator.h. Shared with the
+    // audio-only spawners so a bundled-mpv or user-drop-in change lands in one
+    // place.
+    const QString bin = mpvbin::locate();
     if (bin.isEmpty()) {
-        qWarning("[MpvController] mpv not found in PATH");
+        qWarning("[MpvController] mpv not found (no bundled sibling, none on PATH)");
         QTimer::singleShot(0, this, [this]() {
             emit playbackEnded(0, 0, QStringLiteral("stopped"));
         });
@@ -163,7 +160,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     }
 
     const bool hasOscScript = (oscMode == "ambient") ? m_hasAmbientOscScript : m_hasMpvOscScript;
-    const QString oscScript = m_appRoot + "/scripts/" + ((oscMode == "ambient") ? "ambient-osc.lua" : "mpv-osc.lua");
+    const QString oscScript = m_appRoot + "/scripts/" + ((oscMode == "ambient") ? "mpv-osc-ambient.lua" : "mpv-osc.lua");
 
     // Stamp the log file so each session is identifiable when tailing over SSH.
     // Owner-only perms: mpv logs its command line (incl. auth headers) at verbose
@@ -201,7 +198,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // Media-key handling + themed volume bar — loaded for every mode so HID
     // media keys work anytime mpv is playing, not just inside a given module.
     if (m_hasMediaKeysScript)
-        args << QString("--script=%1").arg(m_appRoot + "/scripts/media-keys.lua");
+        args << QString("--script=%1").arg(m_appRoot + "/scripts/mpv-media-keys.lua");
 
     // Screen saver Lua script — only loaded when the user has opted in via the
     // screensaver_timeout setting (a positive number of seconds; "OFF" parses
@@ -209,7 +206,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     int screensaverTimeout = 0;
     if (m_appCore) {
         const int n = m_appCore->get_setting(QString(), "screensaver_timeout").toString().toInt();
-        const QString ssScript = m_appRoot + "/scripts/screensaver.lua";
+        const QString ssScript = m_appRoot + "/scripts/mpv-screensaver.lua";
         if (n > 0 && QFile::exists(ssScript)) {
             screensaverTimeout = n;
             args << QString("--script=%1").arg(ssScript);
@@ -222,7 +219,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // nudges a render-affecting property on each playlist advance to force a
     // page-flip. Loaded only for image content, so video playback is untouched.
     if (imageContent) {
-        const QString slideshowScript = m_appRoot + "/scripts/slideshow-redraw.lua";
+        const QString slideshowScript = m_appRoot + "/scripts/mpv-slideshow-redraw.lua";
         if (QFile::exists(slideshowScript))
             args << QString("--script=%1").arg(slideshowScript);
     }
@@ -256,6 +253,15 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (!subLangs.isEmpty())
         args << QString("--slang=%1").arg(subLangs.join(QStringLiteral(",")));
 
+    // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
+    // playback with spurious 401/400 errors — disabled unless the caller
+    // explicitly opts in via extraArgs (e.g. YouTube passes --ytdl=yes).
+    bool ytdlEnabled = false;
+    for (const QString &a : extraArgs) {
+        if (a == QLatin1String("--ytdl") || a.startsWith(QLatin1String("--ytdl=")))
+            ytdlEnabled = true;
+    }
+
     QStringList scriptOpts;
     if (transcodeOffsetSec > 0.5f)
         scriptOpts << QString("transcode-offset=%1").arg(double(transcodeOffsetSec), 0, 'f', 3);
@@ -286,6 +292,17 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             scriptOpts << QString("subinfo-file=%1").arg(m_subInfoPath);
         }
     }
+    // Point mpv's ytdl_hook at the same user-updatable yt-dlp the app resolves,
+    // so both agree on one copy even when it isn't on the global PATH (the
+    // SteamOS story). Merged into the single --script-opts below — a second
+    // --script-opts flag would replace, not append, clobbering the entries above.
+    // The comma guard mirrors the subinfo-file constraint (a path with a comma
+    // would break the join); realistically never hit.
+    if (ytdlEnabled) {
+        const QString ytdlPath = ytdlp::locate(m_dataRoot);
+        if (!ytdlPath.isEmpty() && !ytdlPath.contains(QLatin1Char(',')))
+            scriptOpts << QString("ytdl_hook-ytdl_path=%1").arg(ytdlPath);
+    }
     if (!scriptOpts.isEmpty())
         args << QString("--script-opts=%1").arg(scriptOpts.join(QStringLiteral(",")));
 
@@ -300,15 +317,8 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--image-display-duration=%1").arg(double(imageDurationSec), 0, 'f', 1);
     if (muteAudio)
         args << QStringLiteral("--no-audio");
-    // yt-dlp hook intercepts HTTP media URLs and can break Plex/Jellyfin
-    // playback with spurious 401/400 errors — disabled unless the caller
-    // explicitly opts in via extraArgs (e.g. YouTube passes --ytdl=yes).
-    bool ytdlOverridden = false;
-    for (const QString &a : extraArgs) {
-        if (a == QLatin1String("--ytdl") || a.startsWith(QLatin1String("--ytdl=")))
-            ytdlOverridden = true;
-    }
-    if (!ytdlOverridden)
+    // See ytdlEnabled above: default the hook off unless the caller opted in.
+    if (!ytdlEnabled)
         args << QStringLiteral("--ytdl=no");
     args << extraArgs;
     if (!plexToken.isEmpty()) {
@@ -329,6 +339,15 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     // matching the 1080p Playback trade-off. The OSC CROP button still toggles live.
     if (autoCropEnabled() && !cropUnavailable())
         args << QStringLiteral("--panscan=1");
+
+    // Video Levels: the RGB range mpv converts YUV into. Emitted only when the
+    // user has overridden it, so "Auto" leaves both mpv's own default and
+    // anything in their mpv.conf untouched. Sits before appendVideoArgs so an
+    // explicit --video-output-levels inside the mpv_video_args override still
+    // wins (later on the command line).
+    const QString outputLevels = videoOutputLevels();
+    if (!outputLevels.isEmpty())
+        args << QStringLiteral("--video-output-levels=%1").arg(outputLevels);
 
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -406,13 +425,19 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         m_connectTimer->start();
     } else {
         // Desktop: X11 or Wayland compositor present.
-        // Remove WAYLAND_DISPLAY so mpv uses X11/Xwayland — the Wayland VO
-        // stalls waiting for wl_surface frame-done callbacks from labwc.
+        // Prefer X11/Xwayland for mpv — the Wayland VO stalls waiting for
+        // wl_surface frame-done callbacks from labwc (the Pi compositor). But
+        // only strip WAYLAND_DISPLAY when there is a DISPLAY to fall back to:
+        // on a pure-Wayland session with no Xwayland DISPLAY exported to us
+        // (e.g. the Steam Deck's KDE session launched from the file manager),
+        // removing it would leave mpv with no output at all and it exits
+        // instantly. In that case keep Wayland so mpv can open a window.
         // --no-native-fs avoids macOS Space-transition delays that can
         // prevent early OSD renders from appearing.
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("APP_ROOT", m_appRoot);
-        env.remove("WAYLAND_DISPLAY");
+        if (!qEnvironmentVariable("DISPLAY").trimmed().isEmpty())
+            env.remove("WAYLAND_DISPLAY");
 #ifdef Q_OS_LINUX
         const QString fcConf = writeFontconfigOverride(m_appRoot + "/assets/fonts");
         if (!fcConf.isEmpty())
@@ -505,6 +530,8 @@ void MpvController::onIpcReadyRead() {
                     const QString msg = args[0].toString();
                     if (msg == "skip-segment")
                         emit skipRequested();
+                    else if (msg == "cycle-sub")
+                        emit subtitleCycleRequested();
                 }
             }
             continue;
@@ -696,11 +723,27 @@ void MpvController::appendVideoArgs(QStringList &args) const {
             args << "--vo=drm" << "--hwdec=auto-safe";
         }
     } else {
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS)
         // Apple Silicon: enable VideoToolbox HW decode (mpv's default is none).
         args << "--hwdec=videotoolbox";
+#elif defined(Q_OS_LINUX)
+        // Desktop compositor (SteamDeck gamescope / KDE, x86_64 Intel/AMD): mpv
+        // sets no hwdec by default, so decode falls back to software. This is an
+        // explicit priority list rather than auto-safe because auto-safe also
+        // considers Vulkan video decode, and on a host where neither NVDEC nor
+        // VA-API can initialise it walks all the way down to that: on Batocera
+        // with an NVIDIA GPU (no usable nvidia_drv_video.so, "Could not create
+        // device" for cuda) mpv picked h264-vulkan, presented exactly one frame
+        // and then deadlocked with the demuxer still buffering — a hard freeze
+        // needing SIGKILL. The Vulkan *output* path is fine and stays in use; only
+        // Vulkan decoding is excluded. VA-API still wins on the Deck's AMD APU and
+        // on Intel/AMD, NVDEC covers NVIDIA where it actually initialises, the
+        // -copy variants catch hosts whose VO interop is unavailable, and the
+        // trailing "no" degrades to software instead of hanging.
+        // Fully overridable via the mpv_video_args setting handled above.
+        args << "--hwdec=vaapi,nvdec,vaapi-copy,nvdec-copy,no";
 #endif
-        // Other desktop (X11/Wayland dev): leave mpv's defaults untouched.
+        // Any other desktop: leave mpv's defaults untouched.
     }
 }
 
@@ -722,6 +765,21 @@ bool MpvController::autoCropEnabled() const {
         return false;
     const QVariant v = m_appCore->get_setting(QString(), "auto_crop");
     return v.toString().compare(QStringLiteral("On"), Qt::CaseInsensitive) == 0;
+}
+
+QString MpvController::videoOutputLevels() const {
+    // Default "Auto" → no flag at all, leaving mpv's own default (full-range RGB
+    // out) and anything the user set in mpv.conf in place. Stored by Settings as
+    // a string ("Auto"/"Limited"/"Full") via the list_single row, so compare on
+    // the string form.
+    if (!m_appCore)
+        return {};
+    const QString v = m_appCore->get_setting(QString(), "video_output_levels").toString();
+    if (v.compare(QStringLiteral("Limited"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("limited");
+    if (v.compare(QStringLiteral("Full"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("full");
+    return {};
 }
 
 bool MpvController::cropUnavailable() const {

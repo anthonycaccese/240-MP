@@ -22,8 +22,11 @@ body:
       options:
         - Local Files module
         - Plex module
+        - Jellyfin module
+        - YouTube module
         - Ambient Mode module
-        - App shell (browsing, settings, navigation)
+        - NFC Reader module
+        - App shell / general (browsing, settings, navigation)
         - Build (compiling from source)
         - Install (install.sh / DMG / setup)
         - Not sure

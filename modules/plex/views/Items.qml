@@ -329,8 +329,40 @@ FocusScope {
         clip: true
         focus: true
 
-        Keys.onUpPressed: if (currentIndex > 0) currentIndex--
-        Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) {
+                currentIndex--
+                var curLetter = sortKey((items[itemList.currentIndex] && items[itemList.currentIndex].title) || "")
+                for (var i = 0; i < letterIndex.length; i++) {
+                    if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
+                }
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+            else {
+                currentIndex = count - 1
+                itemList.positionViewAtIndex(currentIndex, ListView.Contain)
+                letterList.currentIndex = letterIndex.length - 1
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) {
+                currentIndex++
+                var curLetter = sortKey((items[itemList.currentIndex] && items[itemList.currentIndex].title) || "")
+                for (var i = 0; i < letterIndex.length; i++) {
+                    if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
+                }
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+            else {
+                currentIndex = 0
+                itemList.positionViewAtIndex(currentIndex, ListView.Contain)
+                letterList.currentIndex = 0
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+            }
+        }
         Keys.onReturnPressed: itemListRoot.selectItem()
         Keys.onPressed: function(event) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
@@ -366,9 +398,13 @@ FocusScope {
                 Text {
                     id: rowText
                     text: {
-                        var base = (modelData.type === "episode" && modelData.grandparentTitle)
-                                   ? (modelData.grandparentTitle + ": " + (modelData.title || ""))
-                                   : (modelData.title || "")
+                        if (modelData.type === "episode" && modelData.grandparentTitle) {
+                            var sNum = (modelData.parentIndex != null) ? modelData.parentIndex : "?"
+                            var eNum = (modelData.index != null) ? modelData.index : "?"
+                            return modelData.grandparentTitle + " S" + sNum + "E" + eNum
+                                   + ": " + (modelData.title || "")
+                        }
+                        var base = modelData.title || ""
                         return modelData.editionTitle ? base + " (" + modelData.editionTitle + ")" : base
                     }
                     color: (itemList.currentIndex === index && !letterNavActive)
@@ -417,18 +453,28 @@ FocusScope {
         focus: false
 
         Keys.onUpPressed: {
+            if (count === 0) return
             if (currentIndex > 0) {
                 currentIndex--
-                itemList.currentIndex = letterIndex[currentIndex].firstIndex
-                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
             }
+            else {
+                currentIndex = count - 1
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Beginning)
+            }
+            itemList.currentIndex = letterIndex[currentIndex].firstIndex
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
         }
         Keys.onDownPressed: {
+            if (count === 0) return
             if (currentIndex < count - 1) {
                 currentIndex++
-                itemList.currentIndex = letterIndex[currentIndex].firstIndex
-                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
             }
+            else {
+                currentIndex = 0
+                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Beginning)
+            }
+            itemList.currentIndex = letterIndex[currentIndex].firstIndex
+            itemList.positionViewAtIndex(itemList.currentIndex, ListView.Beginning)
         }
         Keys.onReturnPressed: {
             letterNavActive = false

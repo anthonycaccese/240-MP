@@ -11,3 +11,8 @@ Thumbs.db
 ######################
 /build
 /.cache
+# AppImage build outputs (scripts/build-appimage.sh, scripts/build-mpv.sh)
+/AppDir
+/.appimage-tools
+/.mpv-build
+/*.AppImage

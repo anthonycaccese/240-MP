@@ -105,8 +105,16 @@ FocusScope {
         clip: true
         focus: true
 
-        Keys.onUpPressed: if (currentIndex > 0) currentIndex--
-        Keys.onDownPressed: if (currentIndex < count - 1) currentIndex++
+        Keys.onUpPressed: {
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else currentIndex = count - 1
+        }
+        Keys.onDownPressed: {
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else currentIndex = 0
+        }
         Keys.onReturnPressed: {
             var item = items[itemList.currentIndex]
             if (!item)

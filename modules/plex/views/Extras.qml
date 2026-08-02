@@ -107,12 +107,16 @@ FocusScope {
     focus: true
 
     Keys.onUpPressed: {
-        if (launchingExtra) return
+        if (launchingExtra || extras.length === 0) return
         if (itemList.currentIndex > 0) itemList.currentIndex--
+        else itemList.currentIndex = extras.length - 1
+        itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
     }
     Keys.onDownPressed: {
-        if (launchingExtra) return
+        if (launchingExtra || extras.length === 0) return
         if (itemList.currentIndex < extras.length - 1) itemList.currentIndex++
+        else itemList.currentIndex = 0
+        itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
     }
     Keys.onReturnPressed: {
         if (launchingExtra) return

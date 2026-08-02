@@ -9,6 +9,13 @@ Window {
     y:      Qt.platform.os === "osx" ? macScreenY      : Screen.virtualY
     width:  Qt.platform.os === "osx" ? macScreenWidth  : Screen.width
     height: Qt.platform.os === "osx" ? macScreenHeight : Screen.height
+    // macOS uses manual geometry + a native fullscreen call (see main.cpp) to
+    // keep the mpv-over-window layering intact. Everywhere else, request true
+    // fullscreen so a desktop compositor's panel/dock (KDE on the Steam Deck,
+    // labwc on the Pi) is covered rather than left stacked on top. Headless
+    // EGLFS is already fullscreen, so this is a no-op there.
+    visibility: Qt.platform.os === "osx" ? Window.AutomaticVisibility
+                                         : Window.FullScreen
     visible: true
     color: root.surfaceColor
 
@@ -149,6 +156,16 @@ Window {
     
     FontLoader {
         id: font; source: "assets/fonts/VCR_OSD_MONO_1.001.ttf"
+    }
+    // Unifont fills in glyphs VCR OSD Mono doesn't have (CJK, Hangul, etc.),
+    // it's a bitmap-style font so it actually matches the retro CRT look
+    // instead of a mismatched serif/sans fallback. This Qt build's font value
+    // type has no font.families (checked plugins.qmltypes: family only), so
+    // loading it here just registers it with Qt's fontconfig-backed font
+    // database; Qt's own missing-glyph fallback then picks it up for every
+    // existing font.family: root.globalFont binding with no further changes.
+    FontLoader {
+        id: unifontLoader; source: "assets/fonts/unifont.otf"
     }
     property string globalFont: font.name;
 

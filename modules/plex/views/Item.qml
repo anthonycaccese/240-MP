@@ -5,6 +5,7 @@ FocusScope {
     id: detailRoot
 
     property var navParams: ({})
+    property var navListState: navParams.navListState || ({})
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -42,8 +43,8 @@ FocusScope {
         var rows = activeRows()
         var i = rows.indexOf(focusRow)
         if (i === -1) { focusRow = 0; return }
-        var next = i + dir
-        if (next >= 0 && next < rows.length) focusRow = rows[next]
+        var next = (i + dir + rows.length) % rows.length
+        focusRow = rows[next]
     }
 
     // True from when PLAY is pressed until we navigate to the Player (or error
@@ -135,6 +136,7 @@ FocusScope {
 
         function onExtrasLoaded(items) {
             detailRoot.extras = items
+            if (navListState.focusRow === 1 && items.length > 0) focusRow = 1
         }
 
         function onErrorOccurred(msg) {
@@ -185,7 +187,7 @@ FocusScope {
                 ratingKey: item.ratingKey,
                 itemTitle: displayName,
                 libraryName: libraryName
-            }, {})
+            }, { focusRow: 1 })
             return
         }
         if (focusRow === 0 && detail) {

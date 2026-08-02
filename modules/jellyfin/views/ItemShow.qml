@@ -35,6 +35,7 @@ FocusScope {
             if (loadedItems.length > 0) {
                 var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
                 seasonList.currentIndex = Math.min(restore, loadedItems.length - 1)
+                if (navListState.focusRow === 1) focusRow = 1
                 seasonList.positionViewAtIndex(seasonList.currentIndex, ListView.Contain)
             }
         }
@@ -83,17 +84,28 @@ FocusScope {
     focus: true
 
     Keys.onUpPressed: {
-        if (focusRow === 1) {
-            if (seasonList.currentIndex > 0) seasonList.currentIndex--
-            else focusRow = 0
+        if (focusRow === 0) {
+            seasonList.currentIndex = seasons.length-1
+            focusRow = 1
+        } else {
+            if (seasons.length === 0) return
+            if (focusRow === 1) {
+                if (seasonList.currentIndex > 0) seasonList.currentIndex--
+                else focusRow = 0
+            } 
         }
+        seasonList.positionViewAtIndex(seasonList.currentIndex, ListView.Contain)
     }
     Keys.onDownPressed: {
         if (focusRow === 0) {
+            seasonList.currentIndex = 0
             if (seasons.length > 0) focusRow = 1
         } else {
+            if (seasons.length === 0) return
             if (seasonList.currentIndex < seasons.length - 1) seasonList.currentIndex++
+            else seasonList.currentIndex = focusRow = 0
         }
+        seasonList.positionViewAtIndex(seasonList.currentIndex, ListView.Contain)
     }
     Keys.onReturnPressed: {
         if (focusRow === 0) {
@@ -108,7 +120,7 @@ FocusScope {
                 seriesId: item.itemId,
                 showTitle: item.title,
                 libraryName: libraryName
-            }, { currentIndex: seasonList.currentIndex })
+            }, { currentIndex: seasonList.currentIndex, focusRow: 1 })
         }
     }
     Keys.onPressed: function(event) {
