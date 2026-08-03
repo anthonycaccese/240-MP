@@ -95,8 +95,15 @@ FocusScope {
 
             Text {
                 id: additionalText
-                visible: nfcReaderBackend.readerConnected && nfcReaderBackend.cardState !== "none"
-                text: nfcReaderBackend.cardState === "matched" ? nfcReaderBackend.videoTitle : nfcReaderBackend.cardUid
+                // Naming the reader matters because there is no reader picker —
+                // detection is automatic, so this line is how you tell which
+                // driver won, and what to plug in when nothing was found.
+                text: !nfcReaderBackend.readerConnected
+                        ? (nfcReaderBackend.pcscAvailable ? "Connect a PN532 USB or PC/SC reader"
+                                                          : "Connect a PN532 USB reader")
+                    : nfcReaderBackend.cardState === "matched" ? nfcReaderBackend.videoTitle
+                    : nfcReaderBackend.cardState === "unmatched" ? nfcReaderBackend.cardUid
+                    : nfcReaderBackend.readerName
                 color: root.secondaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase

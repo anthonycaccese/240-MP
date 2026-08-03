@@ -25,9 +25,11 @@ if(NOT APPLE)
     pkg_check_modules(Libdrm REQUIRED libdrm)
 endif()
 
-# PC/SC for the NFC reader module (optional — the module compiles without it
-# but reports itself unavailable at runtime). macOS ships PCSC.framework with
-# the OS; Linux needs libpcsclite-dev.
+# PC/SC for the NFC reader module. Optional: the module's other driver talks to
+# a PN532 over USB serial through plain termios, so readers still work without
+# it — which is what makes the NFC module usable on immutable distros where
+# pcscd cannot be installed. macOS ships PCSC.framework with the OS; Linux needs
+# libpcsclite-dev.
 if(APPLE)
     find_library(PCSC_LIBRARIES PCSC)
     if(PCSC_LIBRARIES)
@@ -37,7 +39,7 @@ else()
     pkg_check_modules(PCSC IMPORTED_TARGET libpcsclite)
 endif()
 if(NOT PCSC_FOUND)
-    message(STATUS "PC/SC not found — NFC reader module will compile but reader support is disabled")
+    message(STATUS "PC/SC not found — NFC reader module will build with PN532 USB serial support only")
 endif()
 
 if(APPLE)
@@ -54,6 +56,9 @@ add_executable(240mp
     src/modules/ambient_mode/AmbientModeBackend.cpp
     src/modules/youtube/YouTubeBackend.cpp
     src/modules/nfc_reader/NfcReaderBackend.cpp
+    src/modules/nfc_reader/PcscDriver.cpp
+    src/modules/nfc_reader/Pn532SerialDriver.cpp
+    src/modules/nfc_reader/SerialPort.cpp
     src/modules/weather/WeatherBackend.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
@@ -84,7 +89,7 @@ if(APPLE)
 endif()
 
 if(PCSC_FOUND)
-    target_compile_definitions(240mp PRIVATE MP240_NFC_READER_AVAILABLE=1)
+    target_compile_definitions(240mp PRIVATE MP240_NFC_PCSC_AVAILABLE=1)
     if(APPLE)
         target_link_libraries(240mp PRIVATE ${PCSC_LIBRARIES})
     else()

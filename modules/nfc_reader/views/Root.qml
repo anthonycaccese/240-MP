@@ -52,8 +52,8 @@ FocusScope {
         }
     }
 
-    // With PC/SC missing no child view ever loads, so the back keys for the
-    // unavailable screen must be handled here.
+    // With no reader driver at all no child view ever loads, so the back keys
+    // for the unavailable screen must be handled here.
     Keys.onPressed: function(event) {
         if (!nfcReaderBackend.available &&
             (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back)) {
@@ -62,7 +62,10 @@ FocusScope {
         }
     }
 
-    // Shown when PCSC library is not available at build time
+    // Shown only on a platform with no reader driver at all. The PN532 USB
+    // driver links nothing, so on Linux and macOS this never appears — a
+    // build without PC/SC still supports readers, and says so via
+    // pcscAvailable in Items.qml.
     Column {
         visible: !nfcReaderBackend.available
         anchors.centerIn: parent
@@ -78,7 +81,7 @@ FocusScope {
         }
 
         Text {
-            text: "PCSC library not found"
+            text: "Not supported on this platform"
             color: root.secondaryColor
             font.family: root.globalFont
             font.capitalization: Font.AllUppercase
@@ -87,7 +90,7 @@ FocusScope {
         }
 
         Text {
-            text: "On Raspberry Pi, install libpcsclite-dev\nand rebuild. See the wiki for details."
+            text: "NFC reader support requires Linux or macOS.\nSee the wiki for details."
             color: root.tertiaryColor
             font.family: root.globalFont
             font.pixelSize: root.sh * 0.025

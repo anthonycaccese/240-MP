@@ -43,7 +43,7 @@ SDL2 is a build-time dependency — `InputManager` links against it for USB game
 
 **Optional NFC Reader build support:**
 
-- No extra package install is needed on macOS. `PCSC.framework` is provided by the OS, so NFC reader support is always compiled in.
+- No extra package install is needed on macOS. The PN532 USB driver talks to the reader over plain termios and links nothing, and `PCSC.framework` is provided by the OS — so both reader drivers are always compiled in.
 
 ### Get the source
 
@@ -108,10 +108,16 @@ sudo apt-get install -y \
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
 
-For the NFC Reader module, also install `libpcsclite-dev` — NFC support is detected automatically at configure time:
+For the NFC Reader module, `libpcsclite-dev` is optional and only needed for PC/SC readers such as the ACR122U — it is detected automatically at configure time. A PN532 USB reader needs no build dependency at all.
 
 ```bash
 sudo apt-get install -y libpcsclite-dev
+```
+
+Either way, run the reader setup script once to grant device access (it installs a udev rule for PN532 readers, and `pcscd` plus a polkit rule when PC/SC is usable on the distro):
+
+```bash
+bash scripts/setup-nfc-reader.sh
 ```
 
 For the YouTube module, additionally install `yt-dlp` — mpv's ytdl hook uses it to resolve YouTube URLs at playback time and it needs to be up to date.  The version bundled with mpv by default on the Raspberry Pi is out of date so you'll need to use wget to get the latest directly from yt-dlp's github.
@@ -187,6 +193,8 @@ sudo apt-get install -y build-essential cmake \
   libdrm-dev libssl-dev libsdl2-dev libpcsclite-dev \
   libgl1-mesa-dev libxkbcommon-dev mpv
 ```
+
+`libpcsclite-dev` is optional and only adds PC/SC reader support to the NFC module. It is listed here because CI builds with it, so the released AppImage bundles `libpcsclite.so.1` and PC/SC works on any host running `pcscd`. Leaving it out still produces a working build — the PN532 USB driver links nothing.
 
 Qt 6 can come from your distro (`qt6-base-dev qt6-declarative-dev qt6-svg-dev qml6-module-qtquick*`) or from the [Qt online installer](https://www.qt.io/download-qt-installer) (set `CMAKE_PREFIX_PATH` to it, matching CI's Qt 6.7).
 

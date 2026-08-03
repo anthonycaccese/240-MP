@@ -1,4 +1,7 @@
 #include "NfcReaderBackend.h"
+#include "NfcDriver.h"
+#include "PcscDriver.h"
+#include "Pn532SerialDriver.h"
 
 #include <QDir>
 #include <QFile>
@@ -14,35 +17,34 @@
 
 #include <cstring>
 
-#if defined(MP240_NFC_READER_AVAILABLE) && (defined(Q_OS_LINUX) || defined(Q_OS_MAC))
-#include <PCSC/winscard.h>
-// Not pulled in by winscard.h on macOS; provides the DWORD/LONG typedefs that
-// keep the SCard* calls portable (pcsclite widens them to long on 64-bit Linux).
-#include <PCSC/wintypes.h>
-#define NFC_PCSC_AVAILABLE
-#endif
-
 // How long without a sample before the UI shows disconnected, and before we
 // conclude the poll thread is wedged in ctkpcscd and replace it.
 static constexpr qint64 kStallDisconnectMs = 3000;
 static constexpr qint64 kStallRespawnMs = 10000;
 static constexpr int kMaxRespawns = 5;
+// Detection cadence while no reader is connected. Slower than the poll tick
+// because it opens device nodes, and a device that is not a reader should not
+// be reopened twice a second.
+static constexpr qint64 kDetectIntervalMs = 2000;
 static const char *kTagsDirName = "nfc_tags";
 // Must track the "enabled" toggle's default in modules/nfc_reader/manifest.json,
 // which is what AppCore falls back to when config.json has no value yet.
 static constexpr bool kManifestEnabledDefault = false;
 
 // ---------------------------------------------------------------------------
-// NfcPollWorker — lives on its own QThread; owns all PC/SC state and calls.
+// NfcPollWorker — lives on its own QThread; owns the drivers and all device I/O.
 // ---------------------------------------------------------------------------
 
+NfcPollWorker::NfcPollWorker() {
+    // PC/SC first: listing readers is a cheap IPC round trip, whereas serial
+    // detection opens device nodes. A machine with a working PC/SC reader
+    // therefore never probes a serial port at all.
+    m_drivers.push_back(std::make_unique<PcscDriver>());
+    m_drivers.push_back(std::make_unique<Pn532SerialDriver>());
+}
+
 NfcPollWorker::~NfcPollWorker() {
-#ifdef NFC_PCSC_AVAILABLE
-    if (m_context) {
-        SCardReleaseContext(static_cast<SCARDCONTEXT>(m_context));
-        m_context = 0;
-    }
-#endif
+    for (auto &driver : m_drivers) driver->close();
 }
 
 void NfcPollWorker::start() {
@@ -55,126 +57,46 @@ void NfcPollWorker::start() {
 }
 
 void NfcPollWorker::poll() {
-#ifdef NFC_PCSC_AVAILABLE
-    QString reader = findReader();
-    if (reader.isEmpty()) {
-        emit sampled(false, {});
-        return;
-    }
-    if (!cardPresent(reader)) {
-        emit sampled(true, {});
-        return;
-    }
-    emit sampled(true, readCardUid(reader));
-#else
-    // PC/SC not available — reader never connects
-    emit sampled(false, {});
-#endif
-}
-
-#ifdef NFC_PCSC_AVAILABLE
-
-QString NfcPollWorker::findReader() {
-    if (!m_context) {
-        SCARDCONTEXT newCtx = 0;
-        if (SCardEstablishContext(SCARD_SCOPE_SYSTEM, nullptr, nullptr, &newCtx) != SCARD_S_SUCCESS) {
-            return {};
+    if (!m_active) {
+        // Rate-limited so a machine with no reader is not opening device nodes
+        // on every tick. Still emits a sample each time, because the backend's
+        // watchdog treats silence as a wedged thread.
+        if (m_sinceDetect.isValid() && m_sinceDetect.elapsed() < kDetectIntervalMs) {
+            emit sampled(false, {}, {});
+            return;
         }
-        m_context = static_cast<uintptr_t>(newCtx);
-    }
+        m_sinceDetect.restart();
 
-    // DWORD/LONG (not uint32_t/int32_t): pcsclite on 64-bit Linux types these
-    // as unsigned long/long, while macOS's PCSC framework uses 32-bit types.
-    SCARDCONTEXT ctx = static_cast<SCARDCONTEXT>(m_context);
-    DWORD cchReaders = 0;
-    LONG rv = SCardListReaders(ctx, nullptr, nullptr, &cchReaders);
-    if (rv != SCARD_S_SUCCESS || cchReaders == 0) {
-        // Covers both "no readers" and stale contexts (pcscd restart, last
-        // reader unplugged); release so the next poll re-establishes.
-        SCardReleaseContext(ctx);
-        m_context = 0;
-        return {};
-    }
-
-    char *mszReaders = new char[cchReaders];
-    rv = SCardListReaders(ctx, nullptr, mszReaders, &cchReaders);
-    if (rv != SCARD_S_SUCCESS) {
-        delete[] mszReaders;
-        SCardReleaseContext(ctx);
-        m_context = 0;
-        return {};
-    }
-
-    QString targetReader;
-    for (char *p = mszReaders; *p; p += strlen(p) + 1) {
-        QString readerName = QString::fromUtf8(p);
-        if (readerName.contains("ACR122", Qt::CaseInsensitive) ||
-            readerName.contains("ACS", Qt::CaseInsensitive)) {
-            targetReader = readerName;
+        for (auto &driver : m_drivers) {
+            if (!driver->ensureConnected()) continue;
+            m_active = driver.get();
+            qInfo("[NfcReader] Reader connected via %s: %s",
+                  qPrintable(m_active->id()), qPrintable(m_active->deviceName()));
             break;
         }
+        if (!m_active) {
+            emit sampled(false, {}, {});
+            return;
+        }
     }
 
-    delete[] mszReaders;
-    return targetReader;
+    bool ok = false;
+    const QString uid = m_active->pollUid(ok);
+    if (!ok) {
+        qInfo("[NfcReader] Lost %s reader (%s)",
+              qPrintable(m_active->id()), qPrintable(m_active->deviceName()));
+        m_active->close();
+        m_active = nullptr;
+        // Re-detect promptly: this is a reader that was working a moment ago,
+        // not a cold scan of unknown devices.
+        m_sinceDetect.invalidate();
+        emit sampled(false, {}, {});
+        return;
+    }
+
+    emit sampled(true, uid, m_active->deviceName());
 }
 
-bool NfcPollWorker::cardPresent(const QString &readerName) {
-    // Ask for the reader's state instead of blindly calling SCardConnect every
-    // poll: connecting while a card is mid-insertion/removal is what tends to
-    // wedge ctkpcscd on macOS. MUTE means a card is present but unresponsive
-    // (still settling); wait for a clean PRESENT before connecting.
-    QByteArray name = readerName.toUtf8();
-    SCARD_READERSTATE state;
-    memset(&state, 0, sizeof(state));
-    state.szReader = name.constData();
-    state.dwCurrentState = SCARD_STATE_UNAWARE;
-
-    LONG rv = SCardGetStatusChange(static_cast<SCARDCONTEXT>(m_context), 0, &state, 1);
-    if (rv != SCARD_S_SUCCESS) return false;
-
-    return (state.dwEventState & SCARD_STATE_PRESENT) &&
-           !(state.dwEventState & SCARD_STATE_MUTE);
-}
-
-QString NfcPollWorker::readCardUid(const QString &readerName) {
-    SCARDCONTEXT ctx = static_cast<SCARDCONTEXT>(m_context);
-
-    SCARDHANDLE cardHandle = 0;
-    DWORD dwActiveProtocol = 0;
-    LONG rv = SCardConnect(ctx,
-                              readerName.toUtf8().constData(),
-                              SCARD_SHARE_SHARED,
-                              SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1,
-                              &cardHandle,
-                              &dwActiveProtocol);
-    if (rv != SCARD_S_SUCCESS) return {};
-
-    unsigned char sendBuffer[] = {0xFF, 0xCA, 0x00, 0x00, 0x00};
-    unsigned char recvBuffer[256];
-    DWORD recvLength = sizeof(recvBuffer);
-
-    SCARD_IO_REQUEST ioRequest = {dwActiveProtocol, sizeof(SCARD_IO_REQUEST)};
-
-    rv = SCardTransmit(cardHandle,
-                       &ioRequest,
-                       sendBuffer, sizeof(sendBuffer),
-                       nullptr,
-                       recvBuffer, &recvLength);
-
-    SCardDisconnect(cardHandle, SCARD_LEAVE_CARD);
-
-    if (rv != SCARD_S_SUCCESS || recvLength < 2) return {};
-
-    unsigned char sw1 = recvBuffer[recvLength - 2];
-    unsigned char sw2 = recvBuffer[recvLength - 1];
-    if (sw1 != 0x90 || sw2 != 0x00) return {};
-
-    QByteArray uidBytes(reinterpret_cast<const char*>(recvBuffer), recvLength - 2);
-    return uidBytes.toHex(':').toUpper();
-}
-
-#endif // NFC_PCSC_AVAILABLE
 
 // ---------------------------------------------------------------------------
 // NfcReaderBackend — main-thread state machine + QML API.
@@ -223,8 +145,9 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
         if (stalledMs < kStallDisconnectMs) return;
 
         if (m_readerConnected) {
-            qWarning("[NfcReader] PC/SC polling stalled - marking reader disconnected");
+            qWarning("[NfcReader] Reader polling stalled - marking reader disconnected");
             m_readerConnected = false;
+            m_readerName.clear();
             emit readerConnectedChanged();
             m_lastUid.clear();
             setCardState("none");
@@ -239,7 +162,7 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
             if (!m_pollingEnabled) return;
             startWorker();
             if (m_respawnCount == kMaxRespawns) {
-                qWarning("[NfcReader] Repeated PC/SC wedges - pausing restarts until polling recovers or NFC is re-enabled");
+                qWarning("[NfcReader] Repeated reader wedges - pausing restarts until polling recovers or NFC is re-enabled");
             }
         }
     });
@@ -249,6 +172,10 @@ NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRo
     } else {
         qInfo("[NfcReader] Polling disabled by configuration");
     }
+}
+
+bool NfcReaderBackend::pcscAvailable() const {
+    return PcscDriver::compiledIn();
 }
 
 NfcReaderBackend::~NfcReaderBackend() {
@@ -272,7 +199,7 @@ void NfcReaderBackend::startPolling() {
 
     if (!available()) {
         m_watchdog->stop();
-        qInfo("[NfcReader] Polling enabled but PC/SC support is unavailable");
+        qInfo("[NfcReader] Polling enabled but no reader support is available on this platform");
         return;
     }
 
@@ -297,6 +224,7 @@ void NfcReaderBackend::stopPolling() {
 
     if (m_readerConnected) {
         m_readerConnected = false;
+        m_readerName.clear();
         emit readerConnectedChanged();
     }
     m_lastUid.clear();
@@ -619,19 +547,17 @@ QString NfcReaderBackend::resolveVideoPath(const QString &path) const {
     return path;
 }
 
-void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid) {
+void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid, const QString &deviceName) {
     if (!m_pollingEnabled || sender() != m_worker) return;
 
     m_lastSampleMs = QDateTime::currentMSecsSinceEpoch();
     m_respawnCount = 0;
 
-    if (readerConnected != m_readerConnected) {
+    if (readerConnected != m_readerConnected || deviceName != m_readerName) {
         m_readerConnected = readerConnected;
+        m_readerName = deviceName;
         emit readerConnectedChanged();
-        if (readerConnected) {
-            qDebug("[NfcReader] Reader connected");
-        } else {
-            qDebug("[NfcReader] Reader disconnected");
+        if (!readerConnected) {
             m_lastUid.clear();
             setCardState("none");
         }

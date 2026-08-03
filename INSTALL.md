@@ -204,6 +204,16 @@ At this point you can type `240mp` at any time to start up the app.  And if you 
 
 The Local Files module will be enabled by default and you can open settings to enable any other modules you would like to display.  Please see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki for details on any additional set up that may be needed for the modules you'd like to use.
 
+**If you want to use the NFC Reader module**, run the reader setup script once — the reader will not be detected until you do:
+
+```bash
+bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/setup-nfc-reader.sh)
+```
+
+- It grants your user access to the reader and, for PC/SC readers like the `ACS ACR122U`, installs and configures `pcscd`
+- If a group was added you'll need to log out and back in (or reboot) before the reader works
+- A `PN532 USB` reader needs no packages at all — just the udev rule the script writes
+
 **If analog / composite audio is unusually quiet:** 
 - Run `amixer sset PCM 100%`
 - If that solves it and you want to keep the level across reboots, run `sudo alsactl store`
@@ -363,6 +373,22 @@ The AppImage carries its own copy of the Wayland client libraries and uses them 
     You can update it with `~/.local/share/240-MP/bin/yt-dlp -U`. 
 
     That said, if you already have `yt-dlp` on your `PATH` (e.g. in `~/.local/bin`) then that will work too, the data-dir copy just provides a local to 240-MP option.
+
+    #### NFC Reader
+
+    Use a **`PN532 USB`** reader here. It is a PN532 chip behind a USB-serial bridge, so the driver is already in the kernel and nothing needs to be installed — which matters on SteamOS, where the read-only rootfs makes `pcscd` (needed by PC/SC readers like the `ACS ACR122U`) impractical to set up.
+
+    All that's required is permission to use the device. From Desktop Mode, run:
+
+    ```bash
+    bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/setup-nfc-reader.sh)
+    ```
+
+    It writes a udev rule to `/etc/udev/rules.d/` and adds you to the serial device group, then skips the PC/SC setup automatically once it detects the immutable filesystem. Log out and back in afterwards so the group membership applies.
+
+    SteamOS keeps `/etc` writable across updates so the rule normally survives, but a major SteamOS release may reset it — re-run the script if the reader stops being detected after an update.
+
+    The reader is detected automatically once connected; the NFC Reader screen names the reader it found.
 
 ### Update
 

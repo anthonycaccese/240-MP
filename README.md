@@ -66,7 +66,10 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 
 ### NFC Reader ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader))
 - Start video playback via NFC cards
-- Tested reader support: `ACS ACR122U`
+- Reader support:
+  - `PN532 USB` — recommended. Needs no drivers or daemon on any platform, so it also works on immutable distros like SteamOS
+  - `ACS ACR122U` and other PC/SC contactless readers — needs `pcscd` (see `scripts/setup-nfc-reader.sh`)
+- Readers are detected automatically; no configuration needed
 - Maps cards to videos via per-card text files in a `nfc_tags` data directory
 - Tapping an unknown card auto-creates a stub tag file for it
 

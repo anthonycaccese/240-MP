@@ -350,6 +350,7 @@ jobs:
             artifacts/appimage-linux-x86_64/*.AppImage
             artifacts/SHA256SUMS
             scripts/install.sh
+            scripts/setup-nfc-reader.sh
           body: |
             Install:
             - Raspberry Pi OS Trixie (arm64): Please follow [these instructions](INSTALL.md#on-a-raspberry-pi)
