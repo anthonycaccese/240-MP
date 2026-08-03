@@ -134,17 +134,39 @@ bool Pn532SerialDriver::transceive(quint8 cmd, const QByteArray &params,
 bool Pn532SerialDriver::probe(const QString &path) {
     if (!m_port.open(path)) return false;
 
-    // HSU wake-up: the chip drops into low-power mode and ignores the first
-    // frame until it sees this. Retried with a growing settle delay because it
-    // is by far the flakiest step on cheap boards.
     static const QByteArray kWakeup =
         QByteArray("\x55\x55", 2) + QByteArray(14, '\x00');
-    static const int kSettleMs[] = {30, 100, 250};
+    // Backoff between whole attempts. Deliberately NOT between the wake-up and
+    // the command that follows it — see below.
+    static const int kRetryDelayMs[] = {30, 100, 250};
 
     for (int attempt = 0; attempt < 3; ++attempt) {
-        if (!m_port.write(kWakeup)) break;
-        QThread::msleep(kSettleMs[attempt]);
+        if (attempt > 0) QThread::msleep(kRetryDelayMs[attempt - 1]);
+
         m_port.flushInput();
+        if (!m_port.write(kWakeup)) break;
+
+        // Two hard requirements, both taken from libnfc's wire trace rather
+        // than guessed. Getting either wrong produces total silence at every
+        // baud rate on every OS, which is indistinguishable from dead hardware:
+        //
+        //  1. SAMConfiguration must be the FIRST command after the wake-up
+        //     burst. The preamble only gets the chip far enough to receive;
+        //     until it is configured it stays in LowVbat and ignores anything
+        //     else, so probing with GetFirmwareVersion never gets a reply.
+        //
+        //  2. It must follow the burst IMMEDIATELY. Even a 100 ms pause lets
+        //     the chip settle back down and the handshake never completes.
+        //     libnfc issues the two writes back to back with nothing but an
+        //     input flush between them, which is exactly what happens here
+        //     since transceive() flushes before it writes. Do not add a
+        //     "settle" delay in this gap; it looks harmless and breaks
+        //     everything.
+        //
+        // Single parameter (normal mode), matching libnfc: the timeout and IRQ
+        // bytes are only meaningful for virtual-card mode.
+        QByteArray samResponse;
+        if (!transceive(kCmdSAMConfiguration, QByteArray("\x01", 1), samResponse, 1000)) continue;
 
         QByteArray version;
         if (!transceive(kCmdGetFirmwareVersion, {}, version, 400)) continue;
@@ -166,7 +188,7 @@ bool Pn532SerialDriver::probe(const QString &path) {
         // wire); stray bytes mean something is talking but not PN532 HSU, which
         // usually points at the wrong baud rate or a different device.
         const QByteArray stray = m_port.read(64, 200);
-        qDebug("[NfcReader] %s did not answer GetFirmwareVersion - not a PN532 (%s)",
+        qDebug("[NfcReader] %s did not complete the PN532 handshake - not a PN532 (%s)",
                qPrintable(path),
                stray.isEmpty() ? "no bytes received at all"
                                : qPrintable(QStringLiteral("%1 stray bytes: %2")
@@ -177,12 +199,10 @@ bool Pn532SerialDriver::probe(const QString &path) {
     return false;
 }
 
+// Runs after a successful probe(), which has already issued SAMConfiguration —
+// that one is part of the wake-up handshake, not optional setup.
 bool Pn532SerialDriver::configure() {
     QByteArray response;
-
-    // Normal mode, 1 s timeout, no IRQ pin.
-    if (!transceive(kCmdSAMConfiguration, QByteArray("\x01\x14\x01", 3), response))
-        return false;
 
     // CfgItem 0x05 = MaxRetries {MxRtyATR, MxRtyPSL, MxRtyPassiveActivation}.
     //
