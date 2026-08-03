@@ -86,6 +86,9 @@ MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
         sendCommand({"observe_property", 2, "duration"});
         sendCommand({"observe_property", 3, "playlist-pos"});
         sendCommand({"observe_property", 4, "pause"});
+        // Session mode's end-of-file signal. Harmless to observe in normal
+        // playback, where it is ignored (mpv exits at EOF there instead).
+        sendCommand({"observe_property", 5, "eof-reached"});
     });
     connect(m_ipc, &QLocalSocket::readyRead, this, &MpvController::onIpcReadyRead);
 
@@ -103,6 +106,10 @@ MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
     m_watchdogTimer->setInterval(10000);
     connect(m_watchdogTimer, &QTimer::timeout, this, [this] {
         if (m_ipc->state() != QLocalSocket::ConnectedState || m_paused) return;
+        // Session mode legitimately sits idle with no time-pos for long stretches
+        // — standby, or an empty channel between loads. m_suppressEof is exactly
+        // "nothing whose progress matters is playing", so don't cry freeze there.
+        if (m_sessionMode && m_suppressEof) return;
         qint64 silenceMs = QDateTime::currentMSecsSinceEpoch() - m_lastIpcEventMs;
         if (silenceMs > 30000) {
             qWarning("[MpvController] WATCHDOG: no IPC time-pos event for %lld s — possible freeze",
@@ -118,15 +125,7 @@ MpvController::~MpvController() {
     }
 }
 
-void MpvController::loadAndPlay(const QString &url, float startSeconds,
-                                 int audioTrack, int subTrack,
-                                 const QStringList &subFiles,
-                                 const QStringList &subLangs, bool loop,
-                                 int playlistStart, float transcodeOffsetSec,
-                                 const QString &plexToken, bool muteAudio,
-                                 const QString &oscMode, bool shuffle,
-                                 const QStringList &subTitles, float imageDurationSec,
-                                 bool imageContent, const QStringList &extraArgs, const QString &jellyfinToken) {
+QString MpvController::prepareLaunch() {
     if (m_process) {
         m_process->disconnect();
         if (m_process->state() != QProcess::NotRunning) {
@@ -145,13 +144,30 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     m_paused      = false;
     m_lastEndFileReason.clear();
     m_pendingStartClear = false;
+    m_sessionMode = false;
+    m_suppressEof = true;
 
     // Bundled sibling first, then PATH — see util/MpvLocator.h. Shared with the
     // audio-only spawners so a bundled-mpv or user-drop-in change lands in one
-    // place.
+    // place. The macOS Homebrew PATH fixup this used to do inline now runs once
+    // in main() via execpath::primeSystemPath().
     const QString bin = mpvbin::locate();
-    if (bin.isEmpty()) {
+    if (bin.isEmpty())
         qWarning("[MpvController] mpv not found (no bundled sibling, none on PATH)");
+    return bin;
+}
+
+void MpvController::loadAndPlay(const QString &url, float startSeconds,
+                                 int audioTrack, int subTrack,
+                                 const QStringList &subFiles,
+                                 const QStringList &subLangs, bool loop,
+                                 int playlistStart, float transcodeOffsetSec,
+                                 const QString &plexToken, bool muteAudio,
+                                 const QString &oscMode, bool shuffle,
+                                 const QStringList &subTitles, float imageDurationSec,
+                                 bool imageContent, const QStringList &extraArgs, const QString &jellyfinToken) {
+    const QString bin = prepareLaunch();
+    if (bin.isEmpty()) {
         QTimer::singleShot(0, this, [this]() {
             emit playbackEnded(0, 0, QStringLiteral("stopped"));
         });
@@ -335,6 +351,10 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
     if (autoCropEnabled() && !cropUnavailable())
         args << QStringLiteral("--panscan=1");
 
+    launchMpv(bin, args);
+}
+
+void MpvController::launchMpv(const QString &bin, QStringList &args) {
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
     connect(m_process,
@@ -461,6 +481,156 @@ void MpvController::stop() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// TV session mode — one long-lived mpv, fed over IPC. See the header for why.
+// ---------------------------------------------------------------------------
+
+void MpvController::startSession(int initialVolume, const QStringList &extraArgs) {
+    const QString bin = prepareLaunch();   // clears m_sessionMode; set it after
+    if (bin.isEmpty()) {
+        QTimer::singleShot(0, this, [this]() {
+            emit playbackEnded(0, 0, QStringLiteral("failed"));
+        });
+        return;
+    }
+    m_sessionMode = true;
+    m_suppressEof = true;                  // nothing loaded yet
+
+    {
+        QFile lf(m_logFilePath);
+        if (lf.open(QFile::Append | QFile::Text)) {
+            lf.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+            lf.write(QString("\n=== 240-MP TV session start %1 ===\n\n")
+                         .arg(QDateTime::currentDateTime().toString(Qt::ISODate))
+                         .toUtf8());
+        }
+    }
+
+    QStringList args;
+    // No file argument — the session comes up idle and is fed over IPC.
+    args << QStringLiteral("--idle=yes")
+         // Hold a window/output open with nothing playing, so the screen never
+         // drops to a console between episodes or on an empty channel.
+         << QStringLiteral("--force-window=yes")
+         // keep-open pauses on the last frame and sets eof-reached instead of
+         // unloading. That property is the robust end-of-file signal: replacing a
+         // file also fires end-file events for the OUTGOING file, and their reason
+         // is not reliable across mpv versions, so reacting to those would skip
+         // episodes. eof-reached only ever trips on a genuine end.
+         << QStringLiteral("--keep-open=yes")
+         // Decode the next playlist entry while the current one plays — this is
+         // what makes a channel change near-instant (see sessionTransition).
+         << QStringLiteral("--prefetch-playlist=yes")
+         << QString("--input-ipc-server=%1").arg(m_socketPath)
+         << QString("--log-file=%1").arg(m_logFilePath)
+         // No OSC, no media-keys, no screensaver script: a TV has no scrub bar,
+         // and the screensaver would fight a channel that is meant to play forever.
+         << QStringLiteral("--osc=no")
+         // NOT --osd-level=0: level 0 disables the OSD subsystem outright, which
+         // takes the osd-overlay command (our channel banner) with it. Level 1 —
+         // mpv's default — shows nothing on its own but keeps the ASS renderer
+         // available for overlays we push explicitly.
+         << QStringLiteral("--osd-level=1")
+         << QStringLiteral("--ytdl=no")
+         << QString("--volume=%1").arg(qBound(0, initialVolume, 100));
+    args << extraArgs;
+
+    launchMpv(bin, args);
+}
+
+void MpvController::endSession() {
+    if (!m_sessionMode) return;
+    m_suppressEof = true;
+    // Quit mpv; onProcessFinished performs the DRM/VT restore and emits
+    // playbackEnded once — the session's single "playback is over" event.
+    stop();
+}
+
+void MpvController::sendLoadfile(const QString &url, const QString &flags,
+                                 double startSeconds) {
+    QJsonObject options;
+    if (startSeconds > 0.05) {
+        // Per-file option, so it applies to THIS load only. The global --start
+        // used by loadAndPlay would otherwise re-apply on every later file.
+        options.insert(QStringLiteral("start"),
+                       QString("+%1").arg(startSeconds, 0, 'f', 3));
+    }
+    // index = -1: only meaningful for the insert-at flags, ignored otherwise.
+    sendCommand({"loadfile", url, flags, -1, options});
+}
+
+void MpvController::sessionLoad(const QString &url, double startSeconds) {
+    if (!m_sessionMode) return;
+    m_suppressEof = false;                 // real content: its end advances the channel
+    sendCommand({"set_property", "loop-file", "no"});
+    sendLoadfile(url, QStringLiteral("replace"), startSeconds);
+    sendCommand({"set_property", "pause", false});  // keep-open can leave us paused
+}
+
+void MpvController::sessionLoop(const QString &url) {
+    if (!m_sessionMode) return;
+    m_suppressEof = true;                  // a looping clip must never advance
+    sendCommand({"set_property", "loop-file", "inf"});
+    sendLoadfile(url, QStringLiteral("replace"), 0.0);
+    sendCommand({"set_property", "pause", false});
+}
+
+void MpvController::sessionPreload(const QString &url, double startSeconds) {
+    if (!m_sessionMode) return;
+    // The outgoing show stays on screen; ignore its end during the bridge.
+    m_suppressEof = true;
+    sendCommand({"playlist-clear"});       // drop any earlier pending append
+    sendLoadfile(url, QStringLiteral("append"), startSeconds);
+}
+
+void MpvController::sessionCommitSwitch() {
+    if (!m_sessionMode) return;
+    m_suppressEof = false;
+    sendCommand({"playlist-next", "force"});  // jump to the prefetched entry
+    sendCommand({"playlist-clear"});          // keep only the new current
+    sendCommand({"set_property", "pause", false});
+}
+
+void MpvController::sessionTransition(const QString &fillerUrl, const QString &targetUrl,
+                                      double startSeconds, double fillerSeconds) {
+    if (!m_sessionMode) return;
+    m_suppressEof = false;
+    sendCommand({"set_property", "loop-file", "no"});
+    // Two-entry playlist: filler cut short, then the episode. keep-open only holds
+    // the LAST entry, so eof-reached can only ever trip for the episode — never
+    // for the filler.
+    QJsonObject fillerOpts;
+    fillerOpts.insert(QStringLiteral("end"),
+                      QString("%1").arg(qMax(0.05, fillerSeconds), 0, 'f', 3));
+    sendCommand({"loadfile", fillerUrl, "replace", -1, fillerOpts});
+    sendLoadfile(targetUrl, QStringLiteral("append"), startSeconds);
+    sendCommand({"set_property", "pause", false});
+}
+
+void MpvController::sessionStop() {
+    if (!m_sessionMode) return;
+    m_suppressEof = true;
+    sendCommand({"stop"});
+}
+
+void MpvController::setVolume(int volume) {
+    sendCommand({"set_property", "volume", qBound(0, volume, 100)});
+}
+
+void MpvController::setMute(bool muted) {
+    sendCommand({"set_property", "mute", muted});
+}
+
+void MpvController::setOverlay(int overlayId, const QString &ass, int resX, int resY) {
+    // osd-overlay positional args: id, format, data, res_x, res_y.
+    // (Trailing z/hidden/compute_bounds keep their defaults.)
+    sendCommand({"osd-overlay", overlayId, "ass-events", ass, resX, resY});
+}
+
+void MpvController::clearOverlay(int overlayId) {
+    sendCommand({"osd-overlay", overlayId, "none", ""});
+}
+
 void MpvController::seekTo(int positionMs) {
     sendCommand({"seek", positionMs / 1000.0, "absolute+exact"});
 }
@@ -532,6 +702,18 @@ void MpvController::onIpcReadyRead() {
             m_paused = data.toBool();
             continue;
         }
+        if (name == "eof-reached") {
+            // Handled before the toDouble() below because this is a bool property.
+            // Only meaningful in session mode, where keep-open holds mpv alive on
+            // the last frame instead of exiting. m_suppressEof is set once here so
+            // a file can only advance the channel once, no matter how many times
+            // the property is republished while paused at the end.
+            if (m_sessionMode && !m_suppressEof && data.toBool()) {
+                m_suppressEof = true;
+                emit fileEnded();
+            }
+            continue;
+        }
         const double val = data.toDouble();
         if (name == "time-pos") {
             m_position = int(val * 1000.0);
@@ -547,6 +729,11 @@ void MpvController::onIpcReadyRead() {
 }
 
 void MpvController::onProcessFinished() {
+    // A session ends when its mpv exits, however that happened (endSession, a
+    // crash, or a kill). Clear the flag first so nothing below treats a dead
+    // process as a live session.
+    m_sessionMode = false;
+    m_suppressEof = true;
     int exitCode = m_process ? m_process->exitCode() : -1;
     if (m_process) {
         const QByteArray remaining = m_process->readAll();

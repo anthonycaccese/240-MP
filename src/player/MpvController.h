@@ -60,6 +60,54 @@ public:
     Q_INVOKABLE void showOsdSkipPrompt();
     Q_INVOKABLE void clearOsdPrompt();
 
+    // ---- TV session mode ---------------------------------------------------
+    //
+    // The default model above is one mpv process per playback: loadAndPlay starts
+    // mpv, mpv exiting *is* the end of playback, and the module returns to a menu.
+    // A channel-surfing TV needs the opposite — mpv must stay alive across every
+    // episode and channel change, because relaunching it would drop the screen to
+    // a console and repeat the DRM/VT hand-off on every channel press.
+    //
+    // Session mode launches mpv ONCE (idle, with a window forced up) and feeds it
+    // files over the existing IPC socket. Nothing here links libmpv; every call
+    // below is a JSON command on the same channel loadAndPlay already uses.
+    //
+    // Lifecycle: startSession() -> sessionLoad/sessionLoop/... -> endSession().
+    // While a session is active, file ends arrive as fileEnded() and mpv exiting
+    // still emits playbackEnded() exactly once (when the session itself ends).
+    Q_INVOKABLE void startSession(int initialVolume = 100,
+                                  const QStringList &extraArgs = {});
+    Q_INVOKABLE void endSession();
+    Q_INVOKABLE bool sessionActive() const { return m_sessionMode; }
+
+    // Replace what's playing with `url`, beginning `startSeconds` in.
+    Q_INVOKABLE void sessionLoad(const QString &url, double startSeconds = 0.0);
+    // Play `url` on an endless loop (colour bars / "no signal"). A looping clip
+    // never advances the channel — its end is deliberately ignored.
+    Q_INVOKABLE void sessionLoop(const QString &url);
+    // Begin decoding `url` in the background while the CURRENT file keeps playing.
+    // Call sessionCommitSwitch() to cut over. This is what lets a channel change
+    // happen without a frozen frame.
+    Q_INVOKABLE void sessionPreload(const QString &url, double startSeconds = 0.0);
+    Q_INVOKABLE void sessionCommitSwitch();
+    // Show `fillerUrl` (static/glitch) cut to `fillerSeconds`, then roll straight
+    // into `targetUrl`. Relies on --prefetch-playlist so the episode is ready the
+    // instant the filler ends.
+    Q_INVOKABLE void sessionTransition(const QString &fillerUrl, const QString &targetUrl,
+                                       double startSeconds = 0.0,
+                                       double fillerSeconds = 0.4);
+    // Stop playback but keep the mpv session alive (standby). Unlike stop(),
+    // which quits mpv entirely.
+    Q_INVOKABLE void sessionStop();
+
+    Q_INVOKABLE void setVolume(int volume);
+    Q_INVOKABLE void setMute(bool muted);
+    // Draw/replace an ASS overlay in slot `overlayId` on a virtual canvas of
+    // resX x resY, which mpv scales to the screen. Used for the channel banner
+    // and any other on-screen readout the TV draws itself.
+    Q_INVOKABLE void setOverlay(int overlayId, const QString &ass, int resX, int resY);
+    Q_INVOKABLE void clearOverlay(int overlayId);
+
     // True only on devices whose smooth-playback decode path can't crop/zoom (the
     // Pi 3 DRM-overlay path). Settings uses this to show the "Smooth Playback"
     // toggle only where the smoothness-vs-crop trade-off actually exists.
@@ -87,6 +135,13 @@ signals:
     // owns the change — typically stop, re-request the stream, relaunch.
     void subtitleCycleRequested();
 
+    // Session mode only: the current file reached its natural end while mpv stayed
+    // alive (keep-open holds it on the last frame). This is the cue to roll the
+    // next episode. Deliberately separate from playbackEnded, which still means
+    // "the mpv process exited" — in a session that happens once, at the very end.
+    // Never emitted for a looping filler clip or during a bridge preload.
+    void fileEnded();
+
 private slots:
     void onProcessFinished();
     void tryConnectIpc();
@@ -97,6 +152,20 @@ private:
     enum class VideoProfile { Pi3, Pi4, PiFullKms, Generic };
 
     void sendCommand(const QJsonArray &args);
+    // Tears down any running mpv, resets per-playback state, and resolves the mpv
+    // binary. Shared by loadAndPlay and startSession. Returns an empty string when
+    // mpv could not be found — callers decide how to report that.
+    QString prepareLaunch();
+    // Creates the QProcess and starts mpv with `args`, performing the headless
+    // DRM/VT hand-off (or the desktop fullscreen path). Shared by both launch
+    // modes so the framebuffer handling lives in exactly one place.
+    void launchMpv(const QString &bin, QStringList &args);
+    // Issues a `loadfile` IPC command with an optional per-file start offset.
+    // NOTE: mpv >= 0.38 takes `loadfile <url> <flags> <index> <options>`; the index
+    // slot was added in that release. RPi OS Trixie ships 0.40 and Homebrew tracks
+    // current, so the 4-argument form is used. This is the ONLY place that arity is
+    // stated — if this ever has to run against mpv < 0.38, drop the index here.
+    void sendLoadfile(const QString &url, const QString &flags, double startSeconds);
     void doHeadlessRestore(int pos, int dur, const QString &reason);
     bool detectHeadlessMode() const;
     VideoProfile detectVideoProfile() const;
@@ -140,6 +209,14 @@ private:
     // Set when this session passed --start; cleared once mpv has applied it. See
     // onIpcReadyRead's playback-restart handling for why the option can't just stay set.
     bool          m_pendingStartClear = false;
+    // True while a long-lived TV session owns mpv (see startSession).
+    bool          m_sessionMode  = false;
+    // Session mode: suppresses fileEnded while what's on screen is not real
+    // content whose end should advance the channel — a looping filler clip, a
+    // bridge preload, or a stopped/standby screen. Mirrors the same guard in
+    // NostalgiaBox's player, which exists because replacing a file also produces
+    // end-of-file signals for the outgoing one.
+    bool          m_suppressEof  = true;
     int           m_position     = 0;
     int           m_duration     = 0;
     int           m_playlistPos  = -1;
