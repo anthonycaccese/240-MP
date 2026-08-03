@@ -55,6 +55,12 @@ add_executable(240mp
     src/modules/youtube/YouTubeBackend.cpp
     src/modules/nfc_reader/NfcReaderBackend.cpp
     src/modules/weather/WeatherBackend.cpp
+    src/modules/tv_mode/TvBackend.cpp
+    src/modules/tv_mode/Channel.cpp
+    src/modules/tv_mode/TvOverlay.cpp
+    src/modules/tv_mode/FillerAssets.cpp
+    src/modules/tv_mode/DurationCache.cpp
+    src/modules/tv_mode/CecInput.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
     src/util/MpvLocator.cpp

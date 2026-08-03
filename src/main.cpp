@@ -19,8 +19,10 @@
 #include "modules/nfc_reader/NfcReaderBackend.h"
 #include "modules/youtube/YouTubeBackend.h"
 #include "modules/weather/WeatherBackend.h"
+#include "modules/tv_mode/TvBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
+#include "modules/tv_mode/CecInput.h"
 #include "input/IdleTracker.h"
 #include "update/UpdateManager.h"
 #include "util/ExecPath.h"
@@ -96,14 +98,19 @@ int main(int argc, char *argv[]) {
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     WeatherBackend      weatherBackend(appRoot, dataRoot);
+    TvBackend           tvModeBackend(appRoot, dataRoot);
     MpvController       mpvController(appRoot, dataRoot, &appCore);
     InputManager        inputManager(dataRoot, &appCore);
+    CecInput            cecInput(dataRoot);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
     UpdateManager       updateManager(appRoot, dataRoot);
 
     // When the Qt window is inactive (fullscreen mpv has OS focus on macOS),
     // gamepad actions bypass QML and drive mpv directly over IPC.
     QObject::connect(&inputManager, &InputManager::mpvKeyRequested,
+                     &mpvController, &MpvController::sendKey);
+    // Same path for TV-remote presses arriving over HDMI-CEC.
+    QObject::connect(&cecInput, &CecInput::mpvKeyRequested,
                      &mpvController, &MpvController::sendKey);
 
     // Each module backend is wired in one call: stored for action routing, exposed to QML
@@ -118,6 +125,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.nfc_reader",   "nfcReaderBackend",   &nfcReader,   ctx);
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
     appCore.registerModule("com.240mp.weather",      "weatherBackend",     &weatherBackend, ctx);
+    appCore.registerModule("com.240mp.tv_mode",      "tvModeBackend",      &tvModeBackend, ctx);
 
     ctx->setContextProperty("idleTracker",   &idleTracker);
     ctx->setContextProperty("appCore",       &appCore);
@@ -144,6 +152,8 @@ int main(int argc, char *argv[]) {
     // Gamepad key events are posted straight to the root window so they reach
     // the QML focus item even when another window (mpv) holds OS focus.
     inputManager.setTargetWindow(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
+    cecInput.setTargetWindow(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
+    cecInput.start();   // no-ops unless cec-client is installed
 
 #ifdef Q_OS_MAC
     if (QWindow *win = qobject_cast<QWindow *>(engine.rootObjects().first())) {

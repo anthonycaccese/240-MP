@@ -1,0 +1,53 @@
+{
+  "id": "com.240mp.tv_mode",
+  "name": "TV MODE",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "ENABLED",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "media_directory",
+      "label": "Media Directory",
+      "type": "directory_browser",
+      "default": "",
+      "description": "Each sub-folder becomes a channel.\nFor per-channel numbers and exclusions, create tv_channels.json in the data directory."
+    },
+    {
+      "key": "tune_in",
+      "label": "Tune In",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_tune_in_options",
+      "default": "random",
+      "description": "[RANDOM] starts a fresh episode each time you flip to a channel.\n[RESUME] picks up where you left that channel."
+    },
+    {
+      "key": "episode_order",
+      "label": "Episode Order",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_episode_order_options",
+      "default": "sequential",
+      "description": "[SEQUENTIAL] airs episodes in order, wrapping at the end.\n[RANDOM] shuffles, playing each once before repeating.\nAlso toggleable from the TV guide."
+    },
+    {
+      "key": "ads_on_manual_pick",
+      "label": "Ads On Picked Episode",
+      "type": "toggle",
+      "default": "ON",
+      "description": "Play a commercial break before an episode you chose yourself\nfrom a channel's episode list.\nBreaks between episodes are unaffected."
+    },
+    {
+      "key": "rescan",
+      "label": "Rescan Channels",
+      "type": "action",
+      "action_slot": "rescan",
+      "description": "Re-read the media directory and rebuild the channel lineup."
+    }
+  ]
+}
