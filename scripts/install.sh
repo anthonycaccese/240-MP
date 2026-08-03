@@ -64,13 +64,9 @@ sudo udevadm trigger /dev/tty0
 echo ""
 read -r -p "Install systemd autostart service? [y/N] " AUTOSTART_REPLY
 SERVICE_USER=""
-SPLASH_REPLY=""
 if [[ "${AUTOSTART_REPLY}" =~ ^[Yy]$ ]]; then
     read -r -p "Run service as user [default: pi]: " SERVICE_USER
     SERVICE_USER="${SERVICE_USER:-pi}"
-    # Only offered alongside autostart — a boot splash makes sense for the
-    # appliance experience, not for a manually launched desktop install.
-    read -r -p "Install boot splash screen? [y/N] " SPLASH_REPLY
 fi
 OWNER_USER="${SERVICE_USER:-$USER}"
 
@@ -268,51 +264,6 @@ TERMINAL_UNIT
     sudo systemctl enable 240mp.service
     echo "Service installed and enabled."
     echo "Start now with: sudo systemctl start 240mp"
-fi
-
-# ── Optional: boot splash ─────────────────────────────────────────────────────
-# Uses the Raspberry Pi kernel's fullscreen_logo support: configure-splash copies
-# the TGA to /lib/firmware, installs an initramfs hook, and adds
-# "fullscreen_logo=1 fullscreen_logo_name=... vt.global_cursor_default=0" to
-# cmdline.txt while dropping "console=tty1". The image replaces the Tux logo at
-# fbcon init and — with getty@tty1 masked by the autostart block above — stays on
-# screen right through to 240-MP's first frame. Never fatal: a failure here still
-# leaves a working install, so each step is guarded against `set -e`.
-if [[ "${SPLASH_REPLY}" =~ ^[Yy]$ ]]; then
-    echo ""
-    echo "Configuring boot splash..."
-    # boot-splash.tga is a 1920x1080 uncompressed 24-bit TGA (the format the
-    # kernel logo loader needs) with the logo centered small enough to survive
-    # being centred/clipped on a 720x480 composite framebuffer. Regenerate with:
-    #   magick -background none assets/images/logo.svg -resize 440x240 \
-    #     -background black -alpha remove -alpha off -threshold 50% \
-    #     -colorspace sRGB -type TrueColor -gravity center -extent 1920x1080 \
-    #     -compress none assets/images/boot-splash.tga
-    SPLASH_IMAGE="${INSTALL_DIR}/share/240mp/assets/images/boot-splash.tga"
-    if [ ! -f "${SPLASH_IMAGE}" ]; then
-        echo "Warning: ${SPLASH_IMAGE} not found — boot splash not configured."
-    elif ! sudo apt-get install -y rpi-splash-screen-support; then
-        echo "Warning: could not install rpi-splash-screen-support (needs Raspberry Pi OS"
-        echo "         Trixie or newer) — boot splash not configured."
-    elif ! sudo configure-splash "${SPLASH_IMAGE}"; then
-        echo "Warning: configure-splash failed — boot splash not configured."
-    else
-        # fullscreen_logo reads the image out of the initramfs, so the firmware
-        # has to be loading one. Stock Raspberry Pi OS sets auto_initramfs=1, but
-        # a hand-written config.txt often drops it and the splash then silently
-        # does nothing.
-        CONFIG_TXT="/boot/firmware/config.txt"
-        [ -f "${CONFIG_TXT}" ] || CONFIG_TXT="/boot/config.txt"
-        if [ -f "${CONFIG_TXT}" ] \
-           && ! grep -Eq '^[[:space:]]*(auto_initramfs=1|initramfs[[:space:]=])' "${CONFIG_TXT}"; then
-            echo ""
-            echo "Warning: no initramfs is configured in ${CONFIG_TXT}, so the splash will not"
-            echo "         appear. Add this line to that file and reboot:"
-            echo ""
-            echo "             auto_initramfs=1"
-        fi
-        echo "Boot splash installed — it appears from the next reboot."
-    fi
 fi
 
 echo ""

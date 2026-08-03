@@ -171,7 +171,7 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
 
 3) Place the SD card in your Raspberry Pi and let it run through its first boot sequence
 
-    - Raspberry Pi OS Lite does **not** boot to a desktop. On first boot you may see boot log text, a text login console, or sometimes just a blinking cursor for a bit while it finishes booting. (If you later choose the optional boot splash in step 5, a 240-MP logo replaces all of that from then on.)
+    - Raspberry Pi OS Lite does **not** boot to a desktop. On first boot you may see boot log text, a text login console, or sometimes just a blinking cursor for a bit while it finishes booting.
 
 4) Once complete, SSH in and run `sudo raspi-config`
 
@@ -195,10 +195,6 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     - If you type `Y` and press enter it will set up 240-MP to autostart when your Raspberry Pi boots which creates a nice appliance experience (bascially a dedicated 240-MP device).
     - If you choose that option please make sure to enter your primary user for the pi at the next prompt.  If you don't provide one it will set it up for the `Pi` user.
     - If you ever need to inspect the autostart logs later, use `sudo journalctl -u 240mp -f`
-    - Choosing autostart also gets you a third prompt: `Install boot splash screen? [y/N]`
-        - Answering `Y` replaces the kernel logo, boot log text and blinking cursor with a 240-MP logo that stays on screen until the app appears, so the Pi boots like an appliance rather than a computer
-        - It uses the official `rpi-splash-screen-support` package (Raspberry Pi OS Trixie or newer) and takes effect from the **next reboot**
-        - It relies on `auto_initramfs=1` being in your `config.txt`.  For new installs that's included in the above configs but if you are on a previous set up then you will need to add that to your config.txt file in order for it to work (the installer will warn you if it's missing so you'll know then and there)
 
 At this point you can type `240mp` at any time to start up the app.  And if you installed the autostart service then the next time you boot your Pi it will boot directly into 240-MP.
 
@@ -260,7 +256,6 @@ The Local Files module will be enabled by default and you can open settings to e
     - If you already have autostart set up please answer `Y` (that's needed to keep the app files owned by the service user, which in-app updates rely on)
     - If you don't have autostart installed and want to keep it that way just answer `N`
     - And if you want to turn on autostart please answer `Y`
-    - If you answered `Y` you'll also be asked about the boot splash. If you've done that in the past then answering `Y` a second time is harmless (it just rewrites the same settings).  If you've not installed the boot splash before then answering `Y` will set it up at this step.
 4) Once that completes just run `sudo reboot` and when your pi restarts you'll be on the latest version
 
 ### Uninstall
@@ -280,16 +275,6 @@ The Local Files module will be enabled by default and you can open settings to e
     sudo rm -f /etc/systemd/system/240mp.service /etc/systemd/system/240mp-terminal.service /usr/local/bin/240mp-stop
     sudo systemctl daemon-reload
     ```
-
-3) If you installed the boot splash and want to go back to a normal text boot then please run the following:
-
-    ```bash
-    sudo mv /boot/firmware/cmdline.txt.bak /boot/firmware/cmdline.txt
-    sudo rm -f /lib/firmware/logo.tga /etc/initramfs-tools/hooks/splash-screen-hook.sh
-    sudo update-initramfs -k all -u
-    ```
-
-    Note: `cmdline.txt.bak` is the backup that `configure-splash` made before its edit to add boot splash support.  If that backup file isn't there then just remove the `fullscreen_logo=1`, `fullscreen_logo_name=logo.tga` and `vt.global_cursor_default=0` options from `/boot/firmware/cmdline.txt` by hand and add `console=tty1` back.)
 
 ## On macOS (ARM)
 
