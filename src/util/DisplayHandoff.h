@@ -97,7 +97,15 @@ private:
     int  getActiveVt() const;
     int  findFreeVt() const;
     int  findQtDrmFd() const;
-    void switchToVt(int vt);
+#ifdef Q_OS_LINUX
+    // Our own console in preference to /dev/tty0 — see the comment on the
+    // definition; using /dev/tty0 makes the switch BACK fail with EPERM.
+    int  openVtControlFd() const;
+#endif
+    // False when the switch could not be performed (typically no permission on
+    // /dev/tty0). The caller must know, because a hand-off without the VT switch
+    // leaves Qt's renderer running while DRM master is dropped.
+    bool switchToVt(int vt);
 #ifdef Q_OS_LINUX
     void saveDrmCrtcState(int fd);
     void restoreDrmCrtcState(int fd);
@@ -106,6 +114,7 @@ private:
 
     QString m_owner;                    // empty when not handed off
     int     m_previousVt   = -1;
+    bool    m_switchedVt   = false;     // did the VT switch actually succeed?
     int     m_qtDrmFd      = -1;
     QTimer *m_releaseTimer = nullptr;
     std::function<void()> m_onRestored;

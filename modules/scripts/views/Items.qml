@@ -29,10 +29,11 @@ FocusScope {
         }
     }
 
-    // TODO(Phase 4): "takeover" scripts route to Takeover.qml, which brackets the
-    // launch with the DisplayHandoff. Until then every script runs in console mode.
+    // The run mode decides the view: Console.qml keeps 240-MP on screen and shows
+    // the output; Takeover.qml hands the display to the script and reports back.
     function launch(entry) {
-        navigateTo("Console.qml",
+        var view = entry.mode === "takeover" ? "Takeover.qml" : "Console.qml"
+        navigateTo(view,
                    { basename: entry.basename, name: entry.name },
                    { currentIndex: scriptList.currentIndex })
     }

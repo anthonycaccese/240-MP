@@ -80,10 +80,28 @@ int DisplayHandoff::acquire(const QString &owner) {
 
 #ifdef Q_OS_LINUX
     // VT switch first — suspends Qt's render thread via the kernel's VT switch
-    // signal before DRM master is dropped, eliminating the race that causes
-    // "Failed to commit atomic request" log noise.
+    // signal before DRM master is dropped, which is what keeps the
+    // "Failed to commit atomic request (code=-13)" (EACCES) noise down. Expect a
+    // handful of those lines anyway: Qt can still have commits in flight between
+    // the switch completing and the master drop. Pi-observed as 1-4 lines per
+    // hand-off, with the display recovering correctly. A continuous stream of them
+    // instead means the VT switch silently failed — see the warning below.
     const int freeVt = findFreeVt();
-    switchToVt(freeVt);
+    m_switchedVt = switchToVt(freeVt);
+    if (!m_switchedVt) {
+        // This is not cosmetic. Without the switch, Qt's renderer keeps drawing
+        // while DRM master is dropped below it: expect a stream of
+        // "Failed to commit atomic request (code=-13)" (EACCES), and a child that
+        // draws nothing will leave the 240-MP UI on screen rather than blanking,
+        // so a "takeover" doesn't visibly take over. It usually still recovers,
+        // which is exactly what makes it easy to miss — so say so plainly.
+        qWarning("[DisplayHandoff] Could not switch VT, so Qt's renderer will keep "
+                 "drawing while DRM master is dropped. This process needs "
+                 "CAP_SYS_TTY_CONFIG or membership of the 'tty' group, and "
+                 "/dev/tty0 must be group-writable. The installed systemd service "
+                 "grants both (see scripts/install.sh); a hand-launched dev build "
+                 "may not.");
+    }
 
     m_qtDrmFd = findQtDrmFd();
     if (m_qtDrmFd < 0) {
@@ -140,12 +158,14 @@ void DisplayHandoff::doRestore() {
         m_qtDrmFd = -1;
     }
 #endif
-    if (m_previousVt > 0) {
+    // Only switch back if we actually switched away — otherwise this just logs a
+    // second, confusing permission error on a VT we never left.
+    if (m_previousVt > 0 && m_switchedVt) {
         qDebug("[DisplayHandoff] Switching back to VT %d", m_previousVt);
-        int prevVt = m_previousVt;
-        m_previousVt = -1;
-        switchToVt(prevVt);
+        switchToVt(m_previousVt);
     }
+    m_previousVt = -1;
+    m_switchedVt = false;
     m_owner.clear();
 }
 
@@ -175,20 +195,54 @@ int DisplayHandoff::findFreeVt() const {
 #endif
 }
 
-void DisplayHandoff::switchToVt(int vt) {
 #ifdef Q_OS_LINUX
-    int fd = ::open("/dev/tty0", O_WRONLY);
-    if (fd < 0) {
-        qWarning("[DisplayHandoff] switchToVt %d: open /dev/tty0 failed: %s", vt, strerror(errno));
-        return;
+// Opens a tty suitable for issuing VT_ACTIVATE.
+//
+// Deliberately prefers OUR OWN console over /dev/tty0. /dev/tty0 resolves to
+// whichever VT is currently in the foreground, and the kernel permits VT_ACTIVATE
+// only when the opened tty is the caller's controlling terminal or the caller has
+// CAP_SYS_TTY_CONFIG. So with /dev/tty0 the switch AWAY succeeds (we are still the
+// foreground console) but the switch BACK fails with EPERM — the app is left
+// stranded on the VT it moved to, and the next hand-off starts from there,
+// walking up a VT each time. Opening /dev/tty<our own VT> keeps the check
+// satisfied in both directions, since that tty stays our controlling terminal.
+//
+// The installed systemd service has CAP_SYS_TTY_CONFIG and no controlling
+// terminal at all, so either path works there; this is what makes a hand-launched
+// dev build behave the same as the service.
+int DisplayHandoff::openVtControlFd() const {
+    if (m_previousVt > 0) {
+        const QByteArray own = QByteArray("/dev/tty") + QByteArray::number(m_previousVt);
+        const int fd = ::open(own.constData(), O_WRONLY);
+        if (fd >= 0)
+            return fd;
     }
-    if (::ioctl(fd, VT_ACTIVATE, vt) < 0)
+    return ::open("/dev/tty0", O_WRONLY);
+}
+#endif
+
+bool DisplayHandoff::switchToVt(int vt) {
+#ifdef Q_OS_LINUX
+    int fd = openVtControlFd();
+    if (fd < 0) {
+        qWarning("[DisplayHandoff] switchToVt %d: cannot open a control tty: %s",
+                 vt, strerror(errno));
+        return false;
+    }
+    bool ok = true;
+    if (::ioctl(fd, VT_ACTIVATE, vt) < 0) {
         qWarning("[DisplayHandoff] VT_ACTIVATE %d failed: %s", vt, strerror(errno));
-    if (::ioctl(fd, VT_WAITACTIVE, vt) < 0)
+        ok = false;
+    }
+    if (::ioctl(fd, VT_WAITACTIVE, vt) < 0) {
         qWarning("[DisplayHandoff] VT_WAITACTIVE %d failed: %s", vt, strerror(errno));
+        ok = false;
+    }
     ::close(fd);
+    return ok;
 #else
     Q_UNUSED(vt)
+    return false;
 #endif
 }
 

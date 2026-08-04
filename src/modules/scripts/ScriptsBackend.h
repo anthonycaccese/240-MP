@@ -28,6 +28,7 @@ struct ScriptEntry {
 };
 
 class ScriptLauncher;
+class DisplayHandoff;
 
 // Lists the user's own .sh scripts and runs them, so 240-MP can act as a
 // remote-friendly front end for anything else on the machine. Owns the
@@ -35,10 +36,15 @@ class ScriptLauncher;
 class ScriptsBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool    scriptRunning  READ scriptRunning  NOTIFY scriptRunningChanged)
+    // Still not done with the screen: running, or the script exited and we are
+    // waiting for the processes it left behind before handing the display back.
+    Q_PROPERTY(bool    scriptBusy     READ scriptBusy     NOTIFY scriptRunningChanged)
+    Q_PROPERTY(bool    scriptDraining READ scriptDraining NOTIFY scriptRunningChanged)
     Q_PROPERTY(QString consoleOutput  READ consoleOutput  NOTIFY consoleOutputChanged)
     Q_PROPERTY(QString runningName    READ runningName    NOTIFY scriptRunningChanged)
 public:
     explicit ScriptsBackend(const QString &appRoot, const QString &dataRoot,
+                            DisplayHandoff *handoff = nullptr,
                             QObject *parent = nullptr);
 
     // Resolved scripts directory (never empty — an unset setting means the
@@ -63,6 +69,8 @@ public:
 
     // --- running ---
     bool    scriptRunning() const;
+    bool    scriptBusy() const;
+    bool    scriptDraining() const;
     QString consoleOutput() const;
     QString runningName() const;
 
@@ -75,6 +83,10 @@ public:
     // Run mode for a script ("console" | "takeover"), so a view can route before
     // starting anything.
     Q_INVOKABLE QString modeFor(const QString &basename);
+    // True when a requested takeover was downgraded to console because the display
+    // could not have been restored afterwards. The view says so rather than
+    // silently behaving differently than the sidecar asked for.
+    Q_INVOKABLE bool wasDowngraded() const;
 
 public slots:
     void onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value);

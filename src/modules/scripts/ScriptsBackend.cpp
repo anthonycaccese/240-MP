@@ -15,10 +15,10 @@ static const char *kModuleId       = "com.240mp.scripts";
 static const char *kScriptsDirName = "user_scripts";
 
 ScriptsBackend::ScriptsBackend(const QString &appRoot, const QString &dataRoot,
-                               QObject *parent)
+                               DisplayHandoff *handoff, QObject *parent)
     : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot)
 {
-    m_launcher = new ScriptLauncher(m_appRoot, m_dataRoot, this);
+    m_launcher = new ScriptLauncher(m_appRoot, m_dataRoot, handoff, this);
     connect(m_launcher, &ScriptLauncher::runningChanged,
             this, &ScriptsBackend::scriptRunningChanged);
     connect(m_launcher, &ScriptLauncher::outputChanged,
@@ -302,6 +302,8 @@ bool ScriptsBackend::entryFor(const QString &basename, ScriptEntry &out) {
 }
 
 bool ScriptsBackend::scriptRunning() const { return m_launcher->isRunning(); }
+bool ScriptsBackend::scriptBusy() const { return m_launcher->isBusy(); }
+bool ScriptsBackend::scriptDraining() const { return m_launcher->drainingGroup(); }
 QString ScriptsBackend::consoleOutput() const { return m_launcher->outputText(); }
 QString ScriptsBackend::runningName() const { return m_launcher->runningName(); }
 int ScriptsBackend::lastExitCode() const { return m_launcher->lastExitCode(); }
@@ -311,6 +313,8 @@ QString ScriptsBackend::modeFor(const QString &basename) {
     if (!entryFor(basename, e)) return {};
     return e.meta.mode;
 }
+
+bool ScriptsBackend::wasDowngraded() const { return m_launcher->downgraded(); }
 
 bool ScriptsBackend::runScript(const QString &basename) {
     m_lastError.clear();

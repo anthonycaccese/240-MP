@@ -98,8 +98,8 @@ int main(int argc, char *argv[]) {
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     WeatherBackend      weatherBackend(appRoot, dataRoot);
-    ScriptsBackend      scriptsBackend(appRoot, dataRoot);
     DisplayHandoff      displayHandoff;
+    ScriptsBackend      scriptsBackend(appRoot, dataRoot, &displayHandoff);
     MpvController       mpvController(appRoot, dataRoot, &appCore, &displayHandoff);
     InputManager        inputManager(dataRoot, &appCore);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting

@@ -371,8 +371,24 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         //
         // mpv deliberately does not check savedStateValid() here — playback has
         // always proceeded even when the CRTC state couldn't be captured.
-        if (m_handoff)
-            m_handoff->acquire(QLatin1String(kHandoffOwner));
+        //
+        // A refusal (-1) means another subsystem already owns the screen — e.g. a
+        // takeover script is running and an NFC tap asked for playback. Launching
+        // anyway would put mpv on a display it does not own, and its later release
+        // would be rejected as an owner mismatch. Bail out the same way a missing
+        // mpv binary does, with a deferred synthetic end so the caller's Player
+        // view doesn't sit there waiting for a signal that never comes.
+        if (m_handoff && m_handoff->acquire(QLatin1String(kHandoffOwner)) < 0) {
+            qWarning("[MpvController] Cannot start playback: %s has the screen",
+                     qPrintable(m_handoff->currentOwner()));
+            m_headlessMode = false;
+            m_process->deleteLater();
+            m_process = nullptr;
+            QTimer::singleShot(0, this, [this]() {
+                emit playbackEnded(0, 0, QStringLiteral("failed"));
+            });
+            return;
+        }
 
         args << QString("--input-conf=%1").arg(m_inputConfPath)
              << "--video-sync=audio";

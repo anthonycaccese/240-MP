@@ -1,18 +1,25 @@
 #include "ScriptLauncher.h"
+#include "../../util/DisplayHandoff.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QProcessEnvironment>
 #include <QTimer>
+#include <QDateTime>
 #include <QDebug>
+#include <array>
+#include <cstdio>
+#include <cstring>
 
 #ifdef Q_OS_UNIX
 #include <unistd.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #endif
 
 ScriptLauncher::ScriptLauncher(const QString &appRoot, const QString &dataRoot,
-                               QObject *parent)
-    : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot)
+                               DisplayHandoff *handoff, QObject *parent)
+    : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot), m_handoff(handoff)
 {
     m_outputTimer = new QTimer(this);
     m_outputTimer->setSingleShot(true);
@@ -23,10 +30,50 @@ ScriptLauncher::ScriptLauncher(const QString &appRoot, const QString &dataRoot,
     m_killTimer->setSingleShot(true);
     m_killTimer->setInterval(kKillGraceMs);
     connect(m_killTimer, &QTimer::timeout, this, [this] {
-        if (isRunning()) {
+        // Checked against the process GROUP, not just the script: during a group
+        // drain the script itself is already gone but its children are what we are
+        // actually waiting on.
+        if (isBusy()) {
             qWarning("[Scripts] '%s' ignored SIGTERM — sending SIGKILL",
                      qPrintable(m_runningBasename));
             killGroup(SIGKILL);
+        }
+    });
+
+    m_groupTimer = new QTimer(this);
+    m_groupTimer->setInterval(kGroupPollMs);
+    connect(m_groupTimer, &QTimer::timeout, this, [this] {
+#ifdef Q_OS_UNIX
+        if (m_pgid > 0 && ::kill(static_cast<pid_t>(-m_pgid), 0) == 0) {
+            // Something the script started is still alive and may still own the
+            // display. Warn once, then keep waiting — restoring the CRTC out from
+            // under a live app is worse than waiting, and the escape hatch (not a
+            // timeout) is the way out of a genuinely wedged script.
+            if (!m_warnedDrain
+                && QDateTime::currentMSecsSinceEpoch() - m_drainStartMs > kGroupWarnMs) {
+                m_warnedDrain = true;
+                qWarning("[Scripts] '%s' exited but its process group is still alive — "
+                         "still waiting before taking the screen back",
+                         qPrintable(m_runningBasename));
+            }
+            return;
+        }
+#endif
+        m_groupTimer->stop();
+        releaseDisplayAndReport();
+    });
+
+    m_startTimer = new QTimer(this);
+    m_startTimer->setSingleShot(true);
+    m_startTimer->setInterval(kStartWatchdogMs);
+    connect(m_startTimer, &QTimer::timeout, this, [this] {
+        // Never started and never errored. Without this the display would stay
+        // handed over to a process that does not exist — a black screen with no
+        // way back on a headless Pi.
+        if (!m_finished && (!m_process || m_process->state() == QProcess::Starting)) {
+            qWarning("[Scripts] '%s' did not start within %d ms — giving up",
+                     qPrintable(m_runningBasename), kStartWatchdogMs);
+            finish(-1, QStringLiteral("failed_to_start"));
         }
     });
 }
@@ -41,10 +88,20 @@ ScriptLauncher::~ScriptLauncher() {
             m_process->waitForFinished(500);
         }
     }
+    // Quitting while a takeover script has the screen would otherwise leave a Pi
+    // on a blank VT with DRM master dropped. Synchronous: we're exiting.
+    if (m_takeoverRun && m_handoff) {
+        m_handoff->releaseNow(QLatin1String(kHandoffOwner));
+        m_takeoverRun = false;
+    }
 }
 
 bool ScriptLauncher::isRunning() const {
     return m_process && m_process->state() != QProcess::NotRunning;
+}
+
+bool ScriptLauncher::drainingGroup() const {
+    return m_groupTimer && m_groupTimer->isActive();
 }
 
 void ScriptLauncher::resetForNewRun() {
@@ -56,6 +113,12 @@ void ScriptLauncher::resetForNewRun() {
     m_stopRequested = false;
     m_finished      = false;
     m_lastExitCode  = 0;
+    m_pendingReason.clear();
+    m_takeoverRun  = false;
+    m_waitForGroup  = true;
+    m_downgraded    = false;
+    m_drainStartMs  = 0;
+    m_warnedDrain   = false;
 }
 
 bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
@@ -87,23 +150,99 @@ bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
     resetForNewRun();
     m_runningName     = entry.meta.name;
     m_runningBasename = entry.basename;
+    m_waitForGroup    = (entry.meta.wait != QLatin1String("child"));
+
+    // --- Hand the display over, if this script wants it. Everything that could
+    // fail has already been checked above: nothing may be handed over before a
+    // spawn we still might refuse.
+    bool takeover = entry.meta.isTakeover();
+    int  vt = 0;
+    if (takeover && m_handoff) {
+        vt = m_handoff->acquire(QLatin1String(kHandoffOwner));
+        if (vt < 0)
+            return fail(QStringLiteral("The screen is in use"));
+
+        // vt > 0 means a real hand-off happened (headless Linux). If the CRTC
+        // state could not be captured we cannot put the display back afterwards,
+        // so refuse the hand-off and run in console mode instead — a degraded run
+        // beats a black screen with no way home. Not meaningful when vt == 0,
+        // where there was nothing to save.
+        if (vt > 0 && !m_handoff->savedStateValid()) {
+            qWarning("[Scripts] Refusing takeover for '%s': display state could not "
+                     "be saved, so it could not be restored. Running in console mode.",
+                     qPrintable(entry.basename));
+            m_handoff->releaseNow(QLatin1String(kHandoffOwner));
+            takeover     = false;
+            vt           = 0;
+            m_downgraded = true;
+        } else {
+            m_takeoverRun = true;
+        }
+    }
 
     delete m_process;
     m_process = new QProcess(this);
-    m_process->setProcessChannelMode(QProcess::MergedChannels);
     m_process->setWorkingDirectory(fi.absolutePath());   // scripts assume their own dir
+
+    // Only a child that will be handed a controlling terminal gets
+    // ForwardedChannels: in forwarded mode Qt performs no dup2 on 0/1/2 at all,
+    // so the child modifier is unambiguously the last writer regardless of Qt
+    // version. Everywhere else capture the output — it is the only diagnostic a
+    // user gets when a takeover script dies instantly on a headless Pi.
+    const bool wantCttyRequested = takeover && entry.meta.tty && vt > 0;
+    m_process->setProcessChannelMode(wantCttyRequested ? QProcess::ForwardedChannels
+                                                       : QProcess::MergedChannels);
 
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("APP_ROOT"),  m_appRoot);
     env.insert(QStringLiteral("DATA_ROOT"), m_dataRoot);
-    env.insert(QStringLiteral("MP240_MODE"), QStringLiteral("console"));
+    env.insert(QStringLiteral("MP240_MODE"),
+               takeover ? QStringLiteral("takeover") : QStringLiteral("console"));
+    if (vt > 0)
+        env.insert(QStringLiteral("MP240_VT"), QString::number(vt));
+    // NOTE: deliberately NOT removing WAYLAND_DISPLAY the way MpvController does.
+    // That is an mpv-VO workaround for labwc frame-done stalls, not a general
+    // truth: stripping it would break a Wayland-native child with no Xwayland.
     m_process->setProcessEnvironment(env);
 
 #ifdef Q_OS_UNIX
-    // New session => the child is its own process-group leader, so pgid ==
-    // its pid and killpg() reaches everything it spawns. Only async-signal-safe
-    // calls are allowed here (this runs between fork and exec).
-    m_process->setChildProcessModifier([]() { ::setsid(); });
+    // Probe the VT from the parent, where we can actually report why it failed.
+    // /dev/tty2..63 are 0620 root:tty — group WRITE only — so opening one O_RDWR
+    // needs CAP_DAC_OVERRIDE or a udev rule widening the mode. If we can't, run
+    // without a controlling terminal (which is how mpv already runs) rather than
+    // failing the script.
+    std::array<char, 16> devPath{};
+    bool wantCtty = wantCttyRequested;
+    if (wantCtty) {
+        std::snprintf(devPath.data(), devPath.size(), "/dev/tty%d", vt);
+        const int probe = ::open(devPath.data(), O_RDWR | O_NOCTTY);
+        if (probe < 0) {
+            qWarning("[Scripts] tty=yes requested but %s is not openable (%s) — "
+                     "running without a controlling terminal. See INSTALL.md for the "
+                     "udev rule.", devPath.data(), strerror(errno));
+            wantCtty = false;
+        } else {
+            ::close(probe);
+        }
+    }
+
+    // Runs between fork and exec: async-signal-safe calls only, no allocation.
+    // setsid() makes the child its own session AND process-group leader, so
+    // pgid == pid, killpg() reaches everything it spawns, and (in takeover mode)
+    // an empty group is how we know the screen is free again.
+    m_process->setChildProcessModifier([devPath, wantCtty]() {
+        ::setsid();
+        if (wantCtty) {
+            const int fd = ::open(devPath.data(), O_RDWR | O_NOCTTY);
+            if (fd >= 0) {
+                ::ioctl(fd, TIOCSCTTY, 0);
+                ::dup2(fd, 0);
+                ::dup2(fd, 1);
+                ::dup2(fd, 2);
+                if (fd > 2) ::close(fd);
+            }
+        }
+    });
 #endif
 
     connect(m_process, &QProcess::readyRead, this, &ScriptLauncher::onReadyRead);
@@ -128,23 +267,31 @@ bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
                          QStringList{fi.absoluteFilePath()} + extra);
     }
 
-    qInfo("[Scripts] Running '%s' (%s%s)", qPrintable(entry.basename),
+    m_startTimer->start();
+
+    qInfo("[Scripts] Running '%s' (%s, %s%s%s)", qPrintable(entry.basename),
           direct ? "direct" : "/bin/sh",
+          takeover ? "takeover" : "console",
+          vt > 0 ? qPrintable(QStringLiteral(", vt %1").arg(vt)) : "",
           extra.isEmpty() ? "" : ", with args");
     emit runningChanged();
     return true;
 }
 
+// Works during a group drain too: the script is gone but its children are still
+// holding the screen, and "back" has to mean "get me out" rather than leaving the
+// user waiting on someone else's `sleep`.
 void ScriptLauncher::requestStop() {
-    if (!isRunning()) return;
+    if (!isBusy()) return;
     m_stopRequested = true;
-    qInfo("[Scripts] Stopping '%s'", qPrintable(m_runningBasename));
+    qInfo("[Scripts] Stopping '%s'%s", qPrintable(m_runningBasename),
+          isRunning() ? "" : " (process group)");
     killGroup(SIGTERM);
     m_killTimer->start();
 }
 
 void ScriptLauncher::forceStop() {
-    if (!isRunning()) return;
+    if (!isBusy()) return;
     m_stopRequested = true;
     qWarning("[Scripts] Force-stopping '%s'", qPrintable(m_runningBasename));
     killGroup(SIGKILL);
@@ -253,6 +400,7 @@ void ScriptLauncher::finish(int exitCode, const QString &reason) {
     if (m_finished) return;      // both signals can arrive for one run
     m_finished = true;
     m_killTimer->stop();
+    m_startTimer->stop();
 
     // Drain whatever is still buffered: readyRead and finished are independent
     // event-loop signals, so the script's last lines may not have been read yet.
@@ -264,14 +412,61 @@ void ScriptLauncher::finish(int exitCode, const QString &reason) {
     if (m_pendingCr) m_pendingCr = false;
     if (!m_partial.isEmpty()) pushLine();     // flush a final unterminated line
 
-    m_lastExitCode = exitCode;
-    m_pgid         = -1;
+    m_lastExitCode  = exitCode;
+    m_pendingReason = reason;
 
     qInfo("[Scripts] '%s' finished: %s (exit %d)", qPrintable(m_runningBasename),
           qPrintable(reason), exitCode);
 
     m_outputTimer->stop();
     emit outputChanged();
-    emit runningChanged();
-    emit finished(exitCode, reason);
+    emit runningChanged();      // the process really is gone; say so now
+
+    if (m_takeoverRun) {
+        // Do NOT report yet: the caller pops its view on finished(), and doing
+        // that while the display still belongs to the script would draw into a
+        // framebuffer we don't own.
+        if (m_waitForGroup) startGroupDrain();
+        else                releaseDisplayAndReport();
+        return;
+    }
+
+    m_pgid = -1;
+    report();
+}
+
+// A launcher script that backgrounds its real work exits immediately while its
+// children still hold the screen. Restoring the CRTC underneath them gives a
+// black or torn display, so wait for the whole process group to empty first.
+void ScriptLauncher::startGroupDrain() {
+#ifdef Q_OS_UNIX
+    if (m_pgid > 0 && ::kill(static_cast<pid_t>(-m_pgid), 0) == 0) {
+        m_drainStartMs = QDateTime::currentMSecsSinceEpoch();
+        m_warnedDrain  = false;
+        m_groupTimer->start();
+        qInfo("[Scripts] '%s' exited but left processes running — waiting before "
+              "taking the screen back", qPrintable(m_runningBasename));
+        emit runningChanged();   // isBusy() is now true again (draining)
+        return;
+    }
+#endif
+    releaseDisplayAndReport();
+}
+
+void ScriptLauncher::releaseDisplayAndReport() {
+    m_pgid = -1;
+    if (!m_handoff) {           // defensive: nothing to give back
+        m_takeoverRun = false;
+        report();
+        return;
+    }
+    m_handoff->releaseDeferred(QLatin1String(kHandoffOwner), [this]() {
+        m_takeoverRun = false;
+        emit runningChanged();   // isBusy() finally false
+        report();
+    });
+}
+
+void ScriptLauncher::report() {
+    emit finished(m_lastExitCode, m_pendingReason);
 }
