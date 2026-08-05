@@ -312,6 +312,31 @@ This config is read at each playback event, so a change applies on the next play
 
 The trade-off with this approach: the copy path didn't look like it could reliabilty play back 1080p on the Pi 3 in my testing. I found it can easily peg the CPU and cause stuttering. So enabling crop on a Pi 3 means keeping your source content to **720p and below**. Ultimately its your call: smooth 1080p without crop (keep the default), or enable crop with a 720p ceiling using --hwdec=v4l2m2m-copy.
 
+## Choosing the display (macOS, mac_display_index)
+
+On a multi-monitor Mac, the UI launches fullscreen on the primary display by default. To launch it on a different display (e.g. a dedicated TV or CRT) without making that display the macOS primary, use the app-level `mac_display_index` setting. There are three steps:
+
+**1. Find the index of the display you want.** At startup the app logs every attached display with its index, name, and resolution, e.g.:
+
+```
+[main] index 0: "DELL U2723QE" 3840x2160 at (0,0)
+[main] index 1: "SwitchResX4 - MACROSILICON" 1280x720 at (3840,0)
+```
+
+To see this output, launch the app from a terminal, or read it from Console.app / the log file — see [Debugging & logs](#debugging--logs) just below for where the output goes depending on how you launched. Pick the index whose name/resolution matches your target display.
+
+**2. Add the setting** as an integer under `"app"` in `config.json` (located at `~/Library/Application Support/240-MP/config.json`):
+
+```json
+{
+  "app": {
+    "mac_display_index": 1
+  }
+}
+```
+
+**3. Relaunch.** The UI opens fullscreen on that display. Index `0` (the default, or an unset/out-of-range value) is the primary/menu-bar screen — the prior behaviour.
+
 ## Debugging & logs
 
 240-MP logs to **stdout/stderr** via Qt's `qDebug` / `qWarning` (used throughout `AppCore`, `MpvController`, and the module backends). The trick is knowing where that output goes depending on how you launched the app.
