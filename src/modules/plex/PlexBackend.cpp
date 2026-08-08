@@ -626,6 +626,7 @@ QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
     return QVariantMap{
         {"ratingKey",              m["ratingKey"].toString()},
         {"title",                  m["title"].toString().toUpper()},
+        {"titleSort",              m["titleSort"].toString().toUpper()},
         {"editionTitle",           m["editionTitle"].toString()},
         {"year",                   m["year"].toVariant()},
         {"duration",               m["duration"].toInt()},
