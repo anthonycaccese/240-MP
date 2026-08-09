@@ -24,6 +24,9 @@ FocusScope {
         if (entry.confirm) {
             pendingScript = entry
             confirmVisible = true
+            // Explicit: the list also declares focus: true, so relying on the
+            // overlay's binding alone leaves which sibling wins ambiguous.
+            confirmOverlay.forceActiveFocus()
         } else {
             launch(entry)
         }
@@ -33,9 +36,13 @@ FocusScope {
     // the output; Takeover.qml hands the display to the script and reports back.
     function launch(entry) {
         var view = entry.mode === "takeover" ? "Takeover.qml" : "Console.qml"
+        // ranScript marks the return trip, so coming back from the runner can be
+        // told apart from arriving fresh — same idea as Ambient Mode's
+        // returnedFromPlayer. Without it, a favorite routed here to be confirmed
+        // would re-open its prompt every time the script finished.
         navigateTo(view,
                    { basename: entry.basename, name: entry.name },
-                   { currentIndex: scriptList.currentIndex })
+                   { currentIndex: scriptList.currentIndex, ranScript: true })
     }
 
     Keys.onPressed: function(event) {
@@ -219,6 +226,35 @@ FocusScope {
             scriptList.positionViewAtIndex(scriptList.currentIndex, ListView.Contain)
         }
         scriptList.forceActiveFocus()
+
+        // Routed here by Root.qml because a main-menu favorite needs confirming:
+        // select that script and open the prompt straight away. Cancelling leaves
+        // the user on this list, which is a reasonable place to end up.
+        // This view exists only to host the prompt when a main-menu favorite needs
+        // confirming, so once its script has run there is nothing here for the user
+        // — go back to where the favorite was picked rather than re-prompting.
+        if (navParams.confirmScript && navListState.ranScript) {
+            Qt.callLater(function() { itemsRoot.goBack() })
+            return
+        }
+
+        // Deferred, because Root.qml's Loader calls forceActiveFocus() on this view
+        // after onCompleted returns — opening the overlay before that would hand
+        // focus straight back to the list.
+        if (navParams.confirmScript) {
+            Qt.callLater(function() {
+                for (var i = 0; i < loaded.length; ++i) {
+                    if (loaded[i].basename === navParams.confirmScript) {
+                        scriptList.currentIndex = i
+                        scriptList.positionViewAtIndex(i, ListView.Contain)
+                        itemsRoot.activate(loaded[i])
+                        return
+                    }
+                }
+                console.log("[Scripts] favorite to confirm no longer exists: "
+                            + navParams.confirmScript)
+            })
+        }
     }
 
     // --- RUN CONFIRMATION OVERLAY --- (sidecar "confirm = yes")
@@ -244,7 +280,10 @@ FocusScope {
         function dismiss() {
             itemsRoot.confirmVisible = false
             itemsRoot.pendingScript = null
-            scriptList.forceActiveFocus()
+            // Arrived here only to confirm a main-menu favorite: cancelling should
+            // return to the menu, not strand the user in a list they never asked for.
+            if (navParams.confirmScript) itemsRoot.goBack()
+            else                         scriptList.forceActiveFocus()
         }
 
         Keys.onUpPressed:   choiceIndex = Math.max(0, choiceIndex - 1)
@@ -252,8 +291,16 @@ FocusScope {
         Keys.onReturnPressed: {
             var entry = itemsRoot.pendingScript
             var doRun = choices[choiceIndex].run
-            confirmOverlay.dismiss()
-            if (doRun && entry) itemsRoot.launch(entry)
+            if (doRun && entry) {
+                // Close the overlay WITHOUT going through dismiss(): for a favorite
+                // that path navigates back, which destroys this view before
+                // launch() can be called on it.
+                itemsRoot.confirmVisible = false
+                itemsRoot.pendingScript = null
+                itemsRoot.launch(entry)
+            } else {
+                confirmOverlay.dismiss()
+            }
         }
         Keys.onPressed: function(event) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {

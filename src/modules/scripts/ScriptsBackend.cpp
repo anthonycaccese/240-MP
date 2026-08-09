@@ -287,6 +287,27 @@ void ScriptsBackend::rescanScripts() {
     emit scriptsChanged();
 }
 
+QVariantList ScriptsBackend::get_menu_entries() {
+    scanScriptsDir();   // picks up sidecar edits without needing a restart
+
+    QVariantList rows;
+    for (const ScriptEntry &e : m_scripts) {
+        if (!e.meta.favorite) continue;
+        QVariantMap params;
+        // The basename, never a path: the router resolves it against the live
+        // scripts_directory, so moving that directory can't leave a stale row.
+        params["script"] = e.basename;
+        // Carried separately from the row's own name so the runner view can title
+        // itself without having to look the script up again.
+        params["name"]   = e.meta.name;
+        QVariantMap row;
+        row["name"]   = e.meta.name;
+        row["params"] = params;
+        rows.append(row);
+    }
+    return rows;
+}
+
 // --- running ---
 
 bool ScriptsBackend::entryFor(const QString &basename, ScriptEntry &out) {
@@ -312,6 +333,12 @@ QString ScriptsBackend::modeFor(const QString &basename) {
     ScriptEntry e;
     if (!entryFor(basename, e)) return {};
     return e.meta.mode;
+}
+
+bool ScriptsBackend::confirmFor(const QString &basename) {
+    ScriptEntry e;
+    if (!entryFor(basename, e)) return false;
+    return e.meta.confirm;
 }
 
 bool ScriptsBackend::wasDowngraded() const { return m_launcher->downgraded(); }

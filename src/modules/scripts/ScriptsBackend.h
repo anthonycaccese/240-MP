@@ -67,6 +67,12 @@ public:
     // manifest: rescan (action)
     Q_INVOKABLE void rescanScripts();
 
+    // Probed by AppCore (not connected) to add main-menu rows: one per script
+    // marked "favorite = yes" in its sidecar, so a script can sit beside
+    // LOCAL FILES / JELLYFIN instead of behind a submenu. Returns {name, params};
+    // AppCore fills in entry_point.
+    Q_INVOKABLE QVariantList get_menu_entries();
+
     // --- running ---
     bool    scriptRunning() const;
     bool    scriptBusy() const;
@@ -83,6 +89,9 @@ public:
     // Run mode for a script ("console" | "takeover"), so a view can route before
     // starting anything.
     Q_INVOKABLE QString modeFor(const QString &basename);
+    // Whether this script asked for a confirmation prompt, so every entry point
+    // (the list and a main-menu favorite) can honour it.
+    Q_INVOKABLE bool confirmFor(const QString &basename);
     // True when a requested takeover was downgraded to console because the display
     // could not have been restored afterwards. The view says so rather than
     // silently behaving differently than the sidecar asked for.
