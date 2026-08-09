@@ -335,6 +335,12 @@ QString ScriptsBackend::modeFor(const QString &basename) {
     return e.meta.mode;
 }
 
+QString ScriptsBackend::nameFor(const QString &basename) {
+    ScriptEntry e;
+    if (!entryFor(basename, e)) return {};
+    return e.meta.name;
+}
+
 bool ScriptsBackend::confirmFor(const QString &basename) {
     ScriptEntry e;
     if (!entryFor(basename, e)) return false;
@@ -342,6 +348,58 @@ bool ScriptsBackend::confirmFor(const QString &basename) {
 }
 
 bool ScriptsBackend::wasDowngraded() const { return m_launcher->downgraded(); }
+
+// Line-wise rewrite rather than regenerating the file: the user's own comments,
+// spacing and any keys this version doesn't know about all survive.
+bool ScriptsBackend::setFavorite(const QString &basename, bool favorite) {
+    ScriptEntry entry;
+    if (!entryFor(basename, entry)) return false;
+
+    const QString sidecar = sidecarPathFor(entry.path);
+    QStringList lines;
+    bool replaced = false;
+
+    QFile in(sidecar);
+    if (in.open(QIODevice::ReadOnly)) {
+        QString text = QString::fromUtf8(in.readAll());
+        if (text.startsWith(QChar(0xFEFF)))
+            text.remove(0, 1);
+        in.close();
+        // Preserve the file's own trailing-newline behaviour by splitting only.
+        for (QString line : text.split(u'\n')) {
+            const QString trimmed = line.trimmed();
+            if (!replaced && !trimmed.startsWith(QLatin1Char('#'))) {
+                const int eq = trimmed.indexOf(QLatin1Char('='));
+                if (eq > 0 && trimmed.left(eq).trimmed().toLower() == QLatin1String("favorite")) {
+                    line = QStringLiteral("favorite = ") + (favorite ? "yes" : "no");
+                    replaced = true;
+                }
+            }
+            lines.append(line);
+        }
+        // Drop a trailing empty element from a file that ended in a newline, so
+        // appending below doesn't leave a blank line in the middle.
+        while (!lines.isEmpty() && lines.last().trimmed().isEmpty())
+            lines.removeLast();
+    }
+
+    if (!replaced)
+        lines.append(QStringLiteral("favorite = ") + (favorite ? "yes" : "no"));
+
+    QFile out(sidecar);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("[Scripts] Could not update %s: %s",
+                 qPrintable(QFileInfo(sidecar).fileName()), qPrintable(out.errorString()));
+        return false;
+    }
+    out.write((lines.join(QLatin1Char('\n')) + "\n").toUtf8());
+    out.close();
+
+    qDebug("[Scripts] %s favorite = %s", qPrintable(basename), favorite ? "yes" : "no");
+    scanScriptsDir();
+    emit scriptsChanged();
+    return true;
+}
 
 bool ScriptsBackend::runScript(const QString &basename) {
     m_lastError.clear();
@@ -357,3 +415,4 @@ bool ScriptsBackend::runScript(const QString &basename) {
 void ScriptsBackend::stopScript() {
     m_launcher->requestStop();
 }
+

@@ -218,6 +218,20 @@ Window {
         }
     }
 
+    // A running user script suppresses the screen saver too — a takeover script
+    // owns the display, and even a console one is legitimately silent for as long
+    // as it takes. Its own flag rather than reusing mpvActive, so ending one
+    // session can't unblock the saver while the other is still going.
+    Connections {
+        target: scriptsBackend
+        function onScriptRunningChanged() {
+            idleTracker.scriptActive = scriptsBackend.scriptBusy
+            idleTracker.resetActivity()
+            if (!scriptsBackend.scriptBusy)
+                root.dismissScreenSaver()
+        }
+    }
+
     // --- MODULE LOADER ---
     Loader {
         id: moduleLoader;

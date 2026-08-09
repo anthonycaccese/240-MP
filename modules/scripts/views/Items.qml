@@ -45,9 +45,26 @@ FocusScope {
                    { currentIndex: scriptList.currentIndex, ranScript: true })
     }
 
+    // Rewrites the sidecar and rescans, so the row and the main menu both update.
+    function toggleFavorite() {
+        var entry = currentScript
+        if (!entry) return
+        var keep = scriptList.currentIndex
+        if (scriptsBackend.setFavorite(entry.basename, !entry.favorite)) {
+            var loaded = scriptsBackend.getScripts()
+            scriptList.model = loaded
+            scriptList.currentIndex = Math.min(keep, loaded.length - 1)
+        }
+    }
+
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
             goBack()
+            event.accepted = true
+        } else if (event.key === Qt.Key_Right) {
+            // Right, not Space: a USB remote reliably has a d-pad but often no
+            // space key. Matches the YouTube module's watch-later save/remove.
+            toggleFavorite()
             event.accepted = true
         }
     }
@@ -112,7 +129,8 @@ FocusScope {
             // short of it — a long name must never run underneath the tag.
             Text {
                 id: modeTag
-                text: modelData.mode === "takeover" ? "TAKEOVER" : "CONSOLE"
+                text: (modelData.favorite ? "* " : "")
+                      + (modelData.mode === "takeover" ? "TAKEOVER" : "CONSOLE")
                 color: scriptList.currentIndex === index ? root.accentColor : root.tertiaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
@@ -374,7 +392,11 @@ FocusScope {
     // Footer
     Text {
         id: footer
-        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":RUN"
+        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE "
+              + root.hints.browse
+              + ((itemsRoot.currentScript && itemsRoot.currentScript.favorite)
+                 ? ":UNFAVORITE " : ":FAVORITE ")
+              + root.hints.select + ":RUN"
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

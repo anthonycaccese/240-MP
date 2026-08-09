@@ -31,14 +31,28 @@ FocusScope {
     // on the processes it left behind before the display is ours again, and the
     // user must not be able to leave this view during that window.
     readonly property bool busy: scriptsBackend.scriptBusy
+    readonly property bool done: finishReason !== "" || startError !== ""
 
     focus: true
 
-    Component.onCompleted: {
-        if (!scriptsBackend.runScript(basename))
-            startError = scriptsBackend.lastError()
-        else
-            downgraded = scriptsBackend.wasDowngraded()
+    // On a headless Pi the VT switch inside runScript() suspends Qt's renderer,
+    // so whatever is on screen at that moment will stay there for the whole run.
+    // So: paint the hand-off screen, let it reach the display, and only then
+    // launch. A timer rather than Qt.callLater because what matters is a frame
+    // actually PRESENTED, not just the scene graph being updated; ~120 ms is
+    // seven frames at 60 Hz and it feels invisible next to a process launch.
+    Component.onCompleted: launchTimer.start()
+
+    Timer {
+        id: launchTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            if (!scriptsBackend.runScript(takeoverRoot.basename))
+                takeoverRoot.startError = scriptsBackend.lastError()
+            else
+                takeoverRoot.downgraded = scriptsBackend.wasDowngraded()
+        }
     }
 
     Connections {
@@ -55,6 +69,11 @@ FocusScope {
     }
 
     Keys.onPressed: function(event) {
+        // Ignore auto-repeat: holding Back should behave exactly like one press.
+        // Without this, a held key repeats this handler ~10x/second — which used to
+        // keep re-arming the stop grace so a stubborn script never got killed, and
+        // once it had stopped would walk the user back out through several views.
+        if (event.isAutoRepeat) { event.accepted = true; return }
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
             // Also stops during the drain: leaving then would pop this view while a
             // headless Pi's framebuffer still belongs to the script's children.
@@ -173,5 +192,50 @@ FocusScope {
         anchors.bottomMargin: root.sh * 0.1041667 //50
         anchors.leftMargin: root.sw * 0.125 //80
         font.pixelSize: root.sh * 0.0333333 //16
+    }
+
+    // The hand-off screen. Opaque black over everything above, because on a
+    // headless Pi this is the frame that FREEZES on the display for as long as
+    // the script runs (see Component.onCompleted). It hides again the moment 
+    // the run ends
+    Rectangle {
+        anchors.fill: parent
+        z: 200
+        visible: !takeoverRoot.done
+        color: "black"
+
+        Column {
+            anchors.centerIn: parent
+            width: parent.width * 0.75
+            spacing: root.sh * 0.0333333 //16
+
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: "Running..."
+                color: "#919191"
+                font.family: root.globalFont
+                font.capitalization: Font.AllUppercase
+                font.pixelSize: root.sh * 0.0333333 //16
+            }
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: takeoverRoot.scriptName
+                color: root.primaryColor
+                font.family: root.globalFont
+                font.capitalization: Font.AllUppercase
+                font.pixelSize: root.sh * 0.0416667 //20
+                elide: Text.ElideRight
+            }
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: root.hints.back + ":STOP"
+                color: "#919191"
+                font.family: root.globalFont
+                font.pixelSize: root.sh * 0.0291667 //14
+            }
+        }
     }
 }

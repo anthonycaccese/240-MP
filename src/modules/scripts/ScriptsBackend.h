@@ -92,10 +92,17 @@ public:
     // Whether this script asked for a confirmation prompt, so every entry point
     // (the list and a main-menu favorite) can honour it.
     Q_INVOKABLE bool confirmFor(const QString &basename);
+    // Display name from the sidecar, for a view that only has the basename
+    // (the startup auto-launch path).
+    Q_INVOKABLE QString nameFor(const QString &basename);
     // True when a requested takeover was downgraded to console because the display
     // could not have been restored afterwards. The view says so rather than
     // silently behaving differently than the sidecar asked for.
     Q_INVOKABLE bool wasDowngraded() const;
+    // Rewrites the sidecar's "favorite" line in place, preserving comments,
+    // formatting and unknown keys, so a script can be promoted to the main menu
+    // from the remote instead of by editing a text file over SSH.
+    Q_INVOKABLE bool setFavorite(const QString &basename, bool favorite);
 
 public slots:
     void onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value);

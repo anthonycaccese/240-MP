@@ -95,7 +95,9 @@ public:
 
 private:
     int  getActiveVt() const;
-    int  findFreeVt() const;
+    // Never returns activeVt — switching to the VT we are already on is a silent
+    // no-op that leaves Qt drawing with DRM master dropped. See the definition.
+    int  findFreeVt(int activeVt) const;
     int  findQtDrmFd() const;
 #ifdef Q_OS_LINUX
     // Our own console in preference to /dev/tty0 — see the comment on the

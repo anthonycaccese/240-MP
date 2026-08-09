@@ -8,7 +8,9 @@
 #include <QDebug>
 #include <QWindow>
 #include <QQuickWindow>
+#include <QTimer>
 #include <locale.h>
+#include <csignal>
 
 #include "AppCore.h"
 #include "modules/local_files/LocalFilesBackend.h"
@@ -57,6 +59,17 @@ static QString resolveDataRoot() {
     return path;
 }
 
+// Terminating signals must unwind normally rather than killing the process where
+// it stands. Without this, `systemctl stop`, `pkill`, or a shutdown can leave mpv
+// or another process running and with the scripts module (takeover specifically), it
+// could also leave a headless Pi on a blank VT with DRM master dropped, because
+// ~DisplayHandoff never got the chance to put the display back.
+//
+// Async-signal-safe: only sets a flag. A 100 ms timer in main() polls it and calls
+// quit() from the event loop, where destructors run properly.
+static volatile std::sig_atomic_t g_termRequested = 0;
+extern "C" void mp240HandleTerm(int) { g_termRequested = 1; }
+
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("240-MP");
@@ -77,6 +90,19 @@ int main(int argc, char *argv[]) {
 #endif
 
     setlocale(LC_NUMERIC, "C");
+
+    std::signal(SIGTERM, mp240HandleTerm);
+    std::signal(SIGINT,  mp240HandleTerm);
+    std::signal(SIGHUP,  mp240HandleTerm);
+    QTimer termPoll;
+    termPoll.setInterval(100);
+    QObject::connect(&termPoll, &QTimer::timeout, &app, [&app]() {
+        if (g_termRequested) {
+            qInfo("[main] Termination signal received — shutting down cleanly");
+            app.quit();
+        }
+    });
+    termPoll.start();
 
     // Once, before anything looks for or spawns mpv / yt-dlp: the locators are
     // pure queries and deliberately do not touch the environment themselves.

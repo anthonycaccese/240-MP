@@ -86,7 +86,7 @@ int DisplayHandoff::acquire(const QString &owner) {
     // the switch completing and the master drop. Pi-observed as 1-4 lines per
     // hand-off, with the display recovering correctly. A continuous stream of them
     // instead means the VT switch silently failed — see the warning below.
-    const int freeVt = findFreeVt();
+    const int freeVt = findFreeVt(m_previousVt);
     m_switchedVt = switchToVt(freeVt);
     if (!m_switchedVt) {
         // This is not cosmetic. Without the switch, Qt's renderer keeps drawing
@@ -182,15 +182,34 @@ int DisplayHandoff::getActiveVt() const {
 #endif
 }
 
-int DisplayHandoff::findFreeVt() const {
+int DisplayHandoff::findFreeVt(int activeVt) const {
 #ifdef Q_OS_LINUX
-    int fd = ::open("/dev/tty0", O_WRONLY);
-    if (fd < 0) return 7;
     int n = -1;
-    ::ioctl(fd, VT_OPENQRY, &n);
-    ::close(fd);
-    return (n > 0) ? n : 7;
+    const int fd = ::open("/dev/tty0", O_WRONLY);
+    if (fd >= 0) {
+        ::ioctl(fd, VT_OPENQRY, &n);
+        ::close(fd);
+    }
+    if (n <= 0 || n > 63) n = 7;
+
+    // VT_OPENQRY reports the lowest VT that no process currently has OPEN, which
+    // is NOT the same as "a VT other than the one we are displaying on". Under
+    // the installed service getty@tty1 and autovt@ are masked and 240mp.service
+    // opens no tty of its own, so nothing holds /dev/tty1 open and this can hand
+    // back the very VT Qt is on.
+    //
+    // Switching to the VT we are already on is a silent no-op: the kernel sends
+    // no VT-switch signal, so Qt's renderer never suspends, and we then drop DRM
+    // master out from under a still-drawing Qt. The symptoms are a continuous
+    // stream of "Failed to commit atomic request (code=-13)" and a takeover that
+    // doesn't visibly take over — with m_switchedVt true, so nothing warns.
+    //
+    // Any other VT will do. A VT does not have to be free to be activated; being
+    // unused is merely preferable, because then no getty repaints over the child.
+    if (n == activeVt) n = (activeVt < 63) ? activeVt + 1 : activeVt - 1;
+    return n;
 #else
+    Q_UNUSED(activeVt)
     return -1;
 #endif
 }

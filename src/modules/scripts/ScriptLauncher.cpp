@@ -47,8 +47,9 @@ ScriptLauncher::ScriptLauncher(const QString &appRoot, const QString &dataRoot,
         if (m_pgid > 0 && ::kill(static_cast<pid_t>(-m_pgid), 0) == 0) {
             // Something the script started is still alive and may still own the
             // display. Warn once, then keep waiting — restoring the CRTC out from
-            // under a live app is worse than waiting, and the escape hatch (not a
-            // timeout) is the way out of a genuinely wedged script.
+            // under a live app is worse than waiting. Back from the runner view
+            // (SIGTERM, then SIGKILL after a grace) is the way out of a genuinely
+            // wedged script.
             if (!m_warnedDrain
                 && QDateTime::currentMSecsSinceEpoch() - m_drainStartMs > kGroupWarnMs) {
                 m_warnedDrain = true;
@@ -283,18 +284,16 @@ bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
 // user waiting on someone else's `sleep`.
 void ScriptLauncher::requestStop() {
     if (!isBusy()) return;
+    // Already stopping: do NOT re-arm the kill timer. QTimer::start() on an active
+    // timer restarts it, so a repeated call (a held Back key auto-repeating, say)
+    // would reset the SIGKILL grace every time and a script that ignores SIGTERM
+    // would never be killed at all while the key was held.
+    if (m_stopRequested) return;
     m_stopRequested = true;
     qInfo("[Scripts] Stopping '%s'%s", qPrintable(m_runningBasename),
           isRunning() ? "" : " (process group)");
     killGroup(SIGTERM);
     m_killTimer->start();
-}
-
-void ScriptLauncher::forceStop() {
-    if (!isBusy()) return;
-    m_stopRequested = true;
-    qWarning("[Scripts] Force-stopping '%s'", qPrintable(m_runningBasename));
-    killGroup(SIGKILL);
 }
 
 void ScriptLauncher::killGroup(int sig) {
