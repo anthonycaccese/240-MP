@@ -24,6 +24,7 @@
 #include "input/IdleTracker.h"
 #include "update/UpdateManager.h"
 #include "util/ExecPath.h"
+#include "util/DisplayHandoff.h"
 #ifdef Q_OS_MAC
 #include "util/MacosUtils.h"
 #endif
@@ -96,7 +97,8 @@ int main(int argc, char *argv[]) {
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     WeatherBackend      weatherBackend(appRoot, dataRoot);
-    MpvController       mpvController(appRoot, dataRoot, &appCore);
+    DisplayHandoff      displayHandoff;
+    MpvController       mpvController(appRoot, dataRoot, &appCore, &displayHandoff);
     InputManager        inputManager(dataRoot, &appCore);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
     UpdateManager       updateManager(appRoot, dataRoot);
