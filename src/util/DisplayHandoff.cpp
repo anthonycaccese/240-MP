@@ -71,6 +71,15 @@ int DisplayHandoff::acquire(const QString &owner) {
                  qPrintable(owner), qPrintable(m_owner));
         return -1;
     }
+    // A same-owner re-acquire while held is refused too: proceeding would
+    // overwrite m_previousVt with the free VT we are currently on, losing the
+    // real VT to return to. Callers that relaunch a child use isHeldBy() and
+    // skip acquire() entirely (see MpvController).
+    if (isHeldBy(owner)) {
+        qWarning("[DisplayHandoff] %s tried to acquire the screen it already holds",
+                 qPrintable(owner));
+        return -1;
+    }
     if (!isHeadless())
         return 0;
 

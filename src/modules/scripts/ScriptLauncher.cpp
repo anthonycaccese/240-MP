@@ -120,6 +120,7 @@ void ScriptLauncher::resetForNewRun() {
     m_downgraded    = false;
     m_drainStartMs  = 0;
     m_warnedDrain   = false;
+    m_decoder.resetState();   // don't carry a half-decoded character into a new run
 }
 
 bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
@@ -130,7 +131,10 @@ bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
         return false;
     };
 
-    if (isRunning())
+    // isBusy(), not isRunning(): during a group drain the script itself is gone
+    // but the display is still held, and acquiring again with the same owner
+    // token would overwrite the saved VT with the free one we are sitting on.
+    if (isBusy())
         return fail(QStringLiteral("Another script is still running"));
 
     // --- Pre-flight. Nothing is spawned (and from Phase 4, no display is handed
@@ -314,7 +318,9 @@ void ScriptLauncher::killGroup(int sig) {
 
 void ScriptLauncher::onReadyRead() {
     if (!m_process) return;
-    appendOutput(QString::fromUtf8(m_process->readAll()));
+    // Through the stateful decoder, not QString::fromUtf8: a multibyte character
+    // can straddle two reads, and per-chunk conversion would mangle it.
+    appendOutput(m_decoder(m_process->readAll()));
 }
 
 // Applies terminal carriage-return semantics: a bare \r rewrites the current
@@ -331,8 +337,15 @@ void ScriptLauncher::appendOutput(const QString &chunk) {
             if (c != u'\n')
                 m_partial.clear();   // bare \r then text: overwrite the line
         }
-        if (c == u'\n') pushLine();
-        else            m_partial += c;
+        if (c == u'\n') {
+            pushLine();
+        } else {
+            m_partial += c;
+            // Force-break an endless line: trimming drops only completed lines,
+            // so an uncapped m_partial would grow without limit.
+            if (m_partial.size() >= kMaxLineChars)
+                pushLine();
+        }
     }
     trimOutput();
     scheduleOutputChanged();
@@ -406,7 +419,7 @@ void ScriptLauncher::finish(int exitCode, const QString &reason) {
     if (m_process) {
         const QByteArray rest = m_process->readAll();
         if (!rest.isEmpty())
-            appendOutput(QString::fromUtf8(rest));
+            appendOutput(m_decoder(rest));
     }
     if (m_pendingCr) m_pendingCr = false;
     if (!m_partial.isEmpty()) pushLine();     // flush a final unterminated line

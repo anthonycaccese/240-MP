@@ -3,6 +3,7 @@
 #include <QProcess>
 #include <QString>
 #include <QStringList>
+#include <QStringDecoder>
 #include "ScriptsBackend.h"     // ScriptEntry / ScriptMeta
 
 class QTimer;
@@ -90,6 +91,10 @@ private:
 
     static constexpr int kMaxLines      = 500;
     static constexpr int kMaxBytes      = 64 * 1024;
+    // A line with no newline is force-broken at this length: trimming only ever
+    // drops COMPLETED lines, so without a cap a script spewing one endless line
+    // would grow m_partial without limit.
+    static constexpr int kMaxLineChars  = 8 * 1024;
     static constexpr int kKillGraceMs   = 3000;
     static constexpr int kGroupPollMs   = 250;
     static constexpr int kGroupWarnMs   = 5000;
@@ -126,4 +131,7 @@ private:
     QString     m_partial;
     bool        m_pendingCr = false;      // saw \r, waiting to see if \n follows
     int         m_bytes     = 0;
+    // Stateful UTF-8 decoding: a multibyte character split across two reads must
+    // not come out as replacement characters. Reset per run.
+    QStringDecoder m_decoder{QStringDecoder::Utf8};
 };

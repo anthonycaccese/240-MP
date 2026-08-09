@@ -184,7 +184,8 @@ void ScriptsBackend::writeStubSidecar(const QString &sidecarPath,
     out += "# yes = ask for confirmation before running.\n";
     out += "confirm = " + QString(defaults.confirm ? "yes" : "no") + "\n";
     out += "\n";
-    out += "# Extra arguments passed to the script.\n";
+    out += "# Extra arguments passed to the script. Split on spaces, quotes respected.\n";
+    out += "# Not a shell: $VARIABLES, globs and pipes are not expanded.\n";
     out += "args = " + defaults.args + "\n";
     out += "\n";
     out += "# takeover only. pgroup = wait for everything the script started before\n";
