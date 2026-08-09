@@ -60,6 +60,7 @@ add_executable(240mp
     src/modules/nfc_reader/Pn532SerialDriver.cpp
     src/modules/nfc_reader/SerialPort.cpp
     src/modules/weather/WeatherBackend.cpp
+    src/modules/scripts/ScriptsBackend.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
     src/util/MpvLocator.cpp
