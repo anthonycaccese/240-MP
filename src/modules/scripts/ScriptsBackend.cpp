@@ -1,4 +1,5 @@
 #include "ScriptsBackend.h"
+#include "ScriptLauncher.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -13,9 +14,18 @@ static const char *kModuleId       = "com.240mp.scripts";
 // make every support thread ambiguous.
 static const char *kScriptsDirName = "user_scripts";
 
-ScriptsBackend::ScriptsBackend(const QString &dataRoot, QObject *parent)
-    : QObject(parent), m_dataRoot(dataRoot)
+ScriptsBackend::ScriptsBackend(const QString &appRoot, const QString &dataRoot,
+                               QObject *parent)
+    : QObject(parent), m_appRoot(appRoot), m_dataRoot(dataRoot)
 {
+    m_launcher = new ScriptLauncher(m_appRoot, m_dataRoot, this);
+    connect(m_launcher, &ScriptLauncher::runningChanged,
+            this, &ScriptsBackend::scriptRunningChanged);
+    connect(m_launcher, &ScriptLauncher::outputChanged,
+            this, &ScriptsBackend::consoleOutputChanged);
+    connect(m_launcher, &ScriptLauncher::finished,
+            this, &ScriptsBackend::scriptFinished);
+
     // Read the configured directory straight from config.json — AppCore isn't
     // available to backends at construction time. Same approach as
     // AmbientModeBackend / NfcReaderBackend.
@@ -275,4 +285,44 @@ void ScriptsBackend::getStartupScriptOptions() {
 void ScriptsBackend::rescanScripts() {
     scanScriptsDir();
     emit scriptsChanged();
+}
+
+// --- running ---
+
+bool ScriptsBackend::entryFor(const QString &basename, ScriptEntry &out) {
+    if (basename.isEmpty()) return false;
+    for (const ScriptEntry &e : m_scripts) {
+        if (e.basename == basename) { out = e; return true; }
+    }
+    scanScriptsDir();   // may have been added since the last scan
+    for (const ScriptEntry &e : m_scripts) {
+        if (e.basename == basename) { out = e; return true; }
+    }
+    return false;
+}
+
+bool ScriptsBackend::scriptRunning() const { return m_launcher->isRunning(); }
+QString ScriptsBackend::consoleOutput() const { return m_launcher->outputText(); }
+QString ScriptsBackend::runningName() const { return m_launcher->runningName(); }
+int ScriptsBackend::lastExitCode() const { return m_launcher->lastExitCode(); }
+
+QString ScriptsBackend::modeFor(const QString &basename) {
+    ScriptEntry e;
+    if (!entryFor(basename, e)) return {};
+    return e.meta.mode;
+}
+
+bool ScriptsBackend::runScript(const QString &basename) {
+    m_lastError.clear();
+    ScriptEntry entry;
+    if (!entryFor(basename, entry)) {
+        m_lastError = QStringLiteral("No script named %1").arg(basename);
+        qWarning("[Scripts] %s", qPrintable(m_lastError));
+        return false;
+    }
+    return m_launcher->start(entry, &m_lastError);
+}
+
+void ScriptsBackend::stopScript() {
+    m_launcher->requestStop();
 }

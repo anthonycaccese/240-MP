@@ -98,7 +98,7 @@ int main(int argc, char *argv[]) {
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     WeatherBackend      weatherBackend(appRoot, dataRoot);
-    ScriptsBackend      scriptsBackend(dataRoot);
+    ScriptsBackend      scriptsBackend(appRoot, dataRoot);
     DisplayHandoff      displayHandoff;
     MpvController       mpvController(appRoot, dataRoot, &appCore, &displayHandoff);
     InputManager        inputManager(dataRoot, &appCore);

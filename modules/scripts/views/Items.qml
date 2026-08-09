@@ -12,15 +12,29 @@ FocusScope {
 
     readonly property var currentScript: scriptList.model[scriptList.currentIndex] || null
 
+    property bool confirmVisible: false
+    property var  pendingScript: null
+
     focus: true
 
-    // TODO(Phase 3): route to Console.qml / Takeover.qml (honouring meta.confirm).
-    // Until then the list browses and shows each script's parsed sidecar settings,
-    // which is what makes the sidecar format verifiable on its own.
-    function runScript(entry) {
+    // Scripts marked "confirm = yes" get a yes/no prompt first; everything else
+    // launches straight away.
+    function activate(entry) {
         if (!entry) return
-        console.log("[Scripts] run not yet implemented: " + entry.basename
-                    + " (mode=" + entry.mode + ")")
+        if (entry.confirm) {
+            pendingScript = entry
+            confirmVisible = true
+        } else {
+            launch(entry)
+        }
+    }
+
+    // TODO(Phase 4): "takeover" scripts route to Takeover.qml, which brackets the
+    // launch with the DisplayHandoff. Until then every script runs in console mode.
+    function launch(entry) {
+        navigateTo("Console.qml",
+                   { basename: entry.basename, name: entry.name },
+                   { currentIndex: scriptList.currentIndex })
     }
 
     Keys.onPressed: function(event) {
@@ -80,7 +94,7 @@ FocusScope {
         clip: true
         focus: true
 
-        Keys.onReturnPressed: itemsRoot.runScript(scriptList.model[scriptList.currentIndex])
+        Keys.onReturnPressed: itemsRoot.activate(scriptList.model[scriptList.currentIndex])
 
         delegate: Item {
             width: scriptList.width
@@ -204,6 +218,109 @@ FocusScope {
             scriptList.positionViewAtIndex(scriptList.currentIndex, ListView.Contain)
         }
         scriptList.forceActiveFocus()
+    }
+
+    // --- RUN CONFIRMATION OVERLAY --- (sidecar "confirm = yes")
+    Rectangle {
+        id: confirmOverlay
+        anchors.fill: parent
+        color: root.surfaceColor
+        visible: itemsRoot.confirmVisible
+        focus: itemsRoot.confirmVisible
+        // Above the list AND the footer, which is a later sibling and would
+        // otherwise draw through the overlay.
+        z: 100
+
+        property int choiceIndex: 0
+        // Cancel first so a stray ENTER can't run something destructive.
+        readonly property var choices: [
+            { label: "Cancel", run: false },
+            { label: "Run",    run: true  }
+        ]
+
+        onVisibleChanged: if (visible) choiceIndex = 0
+
+        function dismiss() {
+            itemsRoot.confirmVisible = false
+            itemsRoot.pendingScript = null
+            scriptList.forceActiveFocus()
+        }
+
+        Keys.onUpPressed:   choiceIndex = Math.max(0, choiceIndex - 1)
+        Keys.onDownPressed: choiceIndex = Math.min(choices.length - 1, choiceIndex + 1)
+        Keys.onReturnPressed: {
+            var entry = itemsRoot.pendingScript
+            var doRun = choices[choiceIndex].run
+            confirmOverlay.dismiss()
+            if (doRun && entry) itemsRoot.launch(entry)
+        }
+        Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+                confirmOverlay.dismiss()
+                event.accepted = true
+            }
+        }
+
+        Rectangle {
+            color: root.surfaceColor
+            anchors.centerIn: parent
+            width: root.sw * 0.76875   //492
+            height: root.sh * 0.2833333 //136
+
+            Column {
+                id: confirmColumn
+                anchors.fill: parent
+                spacing: root.sh * 0.05 //24
+
+                Text {
+                    text: "RUN " + (itemsRoot.pendingScript ? itemsRoot.pendingScript.name : "") + "?"
+                    color: root.secondaryColor
+                    font.family: root.globalFont
+                    font.capitalization: Font.AllUppercase
+                    font.pixelSize: root.sh * 0.0333333 //16
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+
+                Column {
+                    Repeater {
+                        model: confirmOverlay.choices
+                        delegate: Item {
+                            width: confirmColumn.width
+                            height: root.sh * 0.0583333 //28
+
+                            Rectangle {
+                                anchors.fill: choiceText
+                                color: root.accentColor
+                                visible: index === confirmOverlay.choiceIndex
+                            }
+
+                            Text {
+                                id: choiceText
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData.label
+                                color: index === confirmOverlay.choiceIndex ? root.surfaceColor : root.primaryColor
+                                font.family: root.globalFont
+                                font.capitalization: Font.AllUppercase
+                                topPadding: root.sh * 0.0041667 //2
+                                leftPadding: root.sw * 0.009375 //6
+                                rightPadding: root.sw * 0.009375 //6
+                                bottomPadding: root.sh * 0.00625 //3
+                                font.pixelSize: root.sh * 0.05 //24
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SELECT"
+                    color: root.tertiaryColor
+                    font.family: root.globalFont
+                    font.pixelSize: root.sh * 0.0333333 //16
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
     }
 
     // Footer

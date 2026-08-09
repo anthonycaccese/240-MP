@@ -61,6 +61,7 @@ add_executable(240mp
     src/modules/nfc_reader/SerialPort.cpp
     src/modules/weather/WeatherBackend.cpp
     src/modules/scripts/ScriptsBackend.cpp
+    src/modules/scripts/ScriptLauncher.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
     src/util/MpvLocator.cpp
