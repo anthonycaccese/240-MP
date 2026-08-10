@@ -216,6 +216,30 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125 //80
     }
 
+    // IP address
+    property string ipAddress: ""
+    Timer {
+        interval: 5000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: settingsRoot.ipAddress = appCore.localIpAddress()
+    }
+    Text {
+        text: settingsRoot.ipAddress
+        visible: settingsRoot.ipAddress !== ""
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: root.sh * 0.125 //60
+        anchors.rightMargin: root.sw * 0.125 //80
+        font.pixelSize: root.sh * 0.0291667 //14
+        color: root.tertiaryColor
+        font.family: root.globalFont
+        font.capitalization: Font.AllUppercase
+        topPadding: root.sh * 0.0125 //6
+        rightPadding: root.sw * 0.00625 //4
+    }
+
     ListView {
         id: settingsList
         model: settingsItems

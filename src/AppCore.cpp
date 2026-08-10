@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QDebug>
 #include <QRegularExpression>
+#include <QNetworkInterface>
 #include <QQmlContext>
 
 AppCore::AppCore(const QString &appRoot, const QString &dataRoot, QObject *parent)
@@ -388,6 +389,47 @@ QString AppCore::parentDirectory(const QString &path) {
 
 QString AppCore::homePath() {
     return QDir::homePath();
+}
+
+// A device typically has several addresses (RPi: eth0 + wlan0; SteamOS: wlan0 plus
+// Docker/Flatpak bridges; macOS: en0 plus awdl/bridge/utun VPN interfaces), so pick
+// rather than take the first: skip loopback, virtual/tunnel and down interfaces, keep
+// only routable IPv4, and prefer wired over wireless over anything else.
+QString AppCore::localIpAddress() const {
+    // Interface names that are virtual/tunnel/link-local by convention on the three
+    // targets. Qt's type() misses some of these (Docker bridges report as Ethernet).
+    static const QRegularExpression kVirtualIface(
+        "^(docker|br-|bridge|veth|virbr|vmnet|vboxnet|utun|tun|tap|ipsec|zt|awdl|llw|anpi|ap\\d)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    QString best;
+    int bestScore = -1;
+
+    const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface &iface : interfaces) {
+        const QNetworkInterface::InterfaceFlags flags = iface.flags();
+        if (!flags.testFlag(QNetworkInterface::IsUp)) continue;
+        if (!flags.testFlag(QNetworkInterface::IsRunning)) continue;
+        if (flags.testFlag(QNetworkInterface::IsLoopBack)) continue;
+        if (iface.type() == QNetworkInterface::Virtual) continue;
+        if (kVirtualIface.match(iface.name()).hasMatch()) continue;
+
+        int score = 0;
+        if (iface.type() == QNetworkInterface::Ethernet) score = 2;
+        else if (iface.type() == QNetworkInterface::Wifi) score = 1;
+        if (score <= bestScore) continue;
+
+        const QList<QNetworkAddressEntry> entries = iface.addressEntries();
+        for (const QNetworkAddressEntry &entry : entries) {
+            const QHostAddress addr = entry.ip();
+            if (addr.protocol() != QAbstractSocket::IPv4Protocol) continue;
+            if (addr.isLoopback() || addr.isLinkLocal()) continue;
+            best = addr.toString();
+            bestScore = score;
+            break;
+        }
+    }
+    return best;
 }
 
 QString AppCore::startupModuleEntryPoint() const {
