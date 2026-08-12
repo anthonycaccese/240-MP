@@ -70,15 +70,26 @@ FocusScope {
 
     Keys.onPressed: function(event) {
         // Ignore auto-repeat: holding Back should behave exactly like one press.
-        // Without this, a held key repeats this handler ~10x/second — which used to
-        // keep re-arming the stop grace so a stubborn script never got killed, and
-        // once it had stopped would walk the user back out through several views.
         if (event.isAutoRepeat) { event.accepted = true; return }
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
-            // Also stops during the drain: leaving then would pop this view while a
-            // headless Pi's framebuffer still belongs to the script's children.
-            if (busy) scriptsBackend.stopScript()
-            else      goBack()
+            // There is deliberately NO stop key while a takeover script has the
+            // screen. The child owns input for the whole run — on EGLFS every
+            // keystroke is double-delivered to Qt and the child (both read evdev),
+            // so a tap-to-stop key misfires inside apps that use ESC/Back
+            // themselves (e.g. RetroArch), and during the group drain it would SIGTERM
+            // a launcher script's still-live children mid-use. Swallowing the key
+            // (rather than passing it on) is also what keeps this view from being
+            // popped while a headless Pi's framebuffer still belongs to the
+            // script's children.
+            //
+            // One exception: a downgraded run that never handed the display over (the
+            // script is running console-style inside this view), 240-MP still has
+            // the screen, so stopping must remain possible.
+            if (busy) {
+                if (downgraded) scriptsBackend.stopScript()
+            } else {
+                goBack()
+            }
             event.accepted = true
         } else if (event.key === Qt.Key_Up) {
             outputFlick.scrollBy(-1)
@@ -183,8 +194,19 @@ FocusScope {
     }
 
     Text {
-        text: (takeoverRoot.busy ? root.hints.back + ":STOP" : root.hints.back + ":BACK")
-              + (scriptsBackend.consoleOutput !== "" ? " " + root.hints.navigate + ":SCROLL" : "")
+        // No back/stop hint while a real takeover run is busy: there is nothing
+        // the key would do. Downgraded runs kept the screen, so STOP still applies.
+        text: {
+            var parts = []
+            if (takeoverRoot.busy) {
+                if (takeoverRoot.downgraded) parts.push(root.hints.back + ":STOP")
+            } else {
+                parts.push(root.hints.back + ":BACK")
+            }
+            if (scriptsBackend.consoleOutput !== "")
+                parts.push(root.hints.navigate + ":SCROLL")
+            return parts.join(" ")
+        }
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom
@@ -228,14 +250,9 @@ FocusScope {
                 font.pixelSize: root.sh * 0.0416667 //20
                 elide: Text.ElideRight
             }
-            Text {
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                text: root.hints.back + ":STOP"
-                color: "#919191"
-                font.family: root.globalFont
-                font.pixelSize: root.sh * 0.0291667 //14
-            }
+            // Deliberately no stop-key hint here: this is the frame that freezes
+            // on a headless Pi's display for the whole run, and there is no stop
+            // key during a takeover — the child app owns input and its own exit.
         }
     }
 }

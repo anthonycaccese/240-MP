@@ -46,10 +46,12 @@ ScriptLauncher::ScriptLauncher(const QString &appRoot, const QString &dataRoot,
 #ifdef Q_OS_UNIX
         if (m_pgid > 0 && ::kill(static_cast<pid_t>(-m_pgid), 0) == 0) {
             // Something the script started is still alive and may still own the
-            // display. Warn once, then keep waiting — restoring the CRTC out from
-            // under a live app is worse than waiting. Back from the runner view
-            // (SIGTERM, then SIGKILL after a grace) is the way out of a genuinely
-            // wedged script.
+            // display. Warn once, then keep waiting — for a launcher-style script
+            // (spawn the real app, exit) this drain IS the whole run, so killing
+            // or timing out the group would take down the app the user is using,
+            // and restoring the CRTC out from under it is no better. The drain
+            // waits indefinitely by design; a genuinely wedged group is cleared
+            // when the app quits (~ScriptLauncher SIGTERM→SIGKILL + releaseNow).
             if (!m_warnedDrain
                 && QDateTime::currentMSecsSinceEpoch() - m_drainStartMs > kGroupWarnMs) {
                 m_warnedDrain = true;
@@ -283,9 +285,10 @@ bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
     return true;
 }
 
-// Works during a group drain too: the script is gone but its children are still
-// holding the screen, and "back" has to mean "get me out" rather than leaving the
-// user waiting on someone else's `sleep`.
+// Reached only from console mode and downgraded-takeover runs, where 240-MP kept
+// the screen and a stop key is still offered. A real takeover run has no stop key
+// (the child owns input; see Takeover.qml) — for those the group either exits on
+// its own or is cleared at app quit.
 void ScriptLauncher::requestStop() {
     if (!isBusy()) return;
     // Already stopping: do NOT re-arm the kill timer. QTimer::start() on an active
