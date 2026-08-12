@@ -44,12 +44,11 @@ FocusScope {
     }
 
     Keys.onPressed: function(event) {
-        // Ignore auto-repeat: holding Back should behave exactly like one press.
-        // Without this, a held key repeats this handler ~10x/second — which used to
-        // keep re-arming the stop grace so a stubborn script never got killed, and
-        // once it had stopped would walk the user back out through several views.
-        if (event.isAutoRepeat) { event.accepted = true; return }
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+            // Ignore auto-repeat on Back only: holding it should behave exactly like
+            // one press so that holding back to stop a script doesn't spam back through 
+            // each views when your intent was to just stop the script.
+            if (event.isAutoRepeat) { event.accepted = true; return }
             // While running, ESC stops the script; the view stays so the tail and
             // exit status remain readable. A second ESC leaves.
             if (running) scriptsBackend.stopScript()

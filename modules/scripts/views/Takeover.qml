@@ -69,9 +69,11 @@ FocusScope {
     }
 
     Keys.onPressed: function(event) {
-        // Ignore auto-repeat: holding Back should behave exactly like one press.
-        if (event.isAutoRepeat) { event.accepted = true; return }
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+            // Ignore auto-repeat on Back only: holding it should behave exactly like
+            // one press so that holding back to stop a script doesn't spam back through 
+            // each views when your intent was to just stop the script.
+            if (event.isAutoRepeat) { event.accepted = true; return }
             // There is deliberately NO stop key while a takeover script has the
             // screen. The child owns input for the whole run — on EGLFS every
             // keystroke is double-delivered to Qt and the child (both read evdev),
