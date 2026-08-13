@@ -139,6 +139,8 @@ yt-dlp --verbose --simulate --force-ipv6 \
   'https://www.youtube.com/watch?v=VIDEO_ID'
 ```
 
+If IPv4 returns the bot-check error while IPv6 succeeds, the failure is tied to the IPv4 route rather than the yt-dlp installation. A working IPv6 route may allow playback to proceed, but enabling it is a device and network configuration choice outside 240-MP.
+
 IPv6 is not a 240-MP requirement, and 240-MP should not enable or force it automatically; these commands are only a diagnostic.
 
 ### Get the source
