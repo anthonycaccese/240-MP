@@ -122,24 +122,24 @@ Either way, run the reader setup script once to grant device access (it installs
 bash scripts/setup-nfc-reader.sh
 ```
 
-For the YouTube module, additionally install `yt-dlp` — mpv's ytdl hook uses it to resolve YouTube URLs at playback time and it needs to be kept up to date. The version bundled with mpv on Raspberry Pi OS may be out of date, so install the latest executable directly from yt-dlp's GitHub releases.
+For the YouTube module, additionally install `yt-dlp` — mpv's ytdl hook uses it to resolve YouTube URLs at playback time and it needs to be up to date.  The version bundled with mpv by default on the Raspberry Pi is out of date so you'll need to use wget to get the latest directly from yt-dlp's github.
 
 ```bash
 sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp
 ```
 
-For full YouTube support, yt-dlp also uses an external JavaScript runtime. Deno is the recommended runtime; follow yt-dlp's [EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) for installation and current version requirements. Make sure `deno` is on the `PATH` of the user or systemd service that runs 240-MP.
+For full YouTube support, yt-dlp also uses an external JavaScript runtime; install the recommended Deno runtime by following yt-dlp's [EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS), and make sure `deno` is on the `PATH` of the user or systemd service that runs 240-MP.
 
-You can verify the setup with:
+If yt-dlp is current and Deno is detected but YouTube still returns `Sign in to confirm you're not a bot`, the response can be route-specific. On a system that already has working IPv6, compare:
 
 ```bash
-yt-dlp --version
-deno --version
-yt-dlp --verbose --simulate \
+yt-dlp --verbose --simulate --force-ipv4 \
+  'https://www.youtube.com/watch?v=VIDEO_ID'
+yt-dlp --verbose --simulate --force-ipv6 \
   'https://www.youtube.com/watch?v=VIDEO_ID'
 ```
 
-The verbose output should list Deno under `JS runtimes`. If extraction still fails, use the extractor error in this output for diagnosis; not every pre-playback failure means that yt-dlp is missing or outdated.
+IPv6 is not a 240-MP requirement, and 240-MP should not enable or force it automatically; these commands are only a diagnostic.
 
 ### Get the source
 
