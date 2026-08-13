@@ -25,13 +25,15 @@ brew install mpv
 
 Note: 240-MP uses mpv as an external subprocess for video playback. It does not link against libmpv at build time, so mpv only needs to be on your `PATH` when running the app.
 
-**Install yt-dlp (optional, required only for the YouTube module):**
+**Install yt-dlp and Deno (optional, required only for the YouTube module):**
 
 ```bash
-brew install yt-dlp
+brew install yt-dlp deno
 ```
 
 mpv's ytdl hook uses `yt-dlp` to resolve YouTube URLs at playback time. The YouTube module also expects at least one of two files in the data directory (`#` comments allowed in both; each file only gates its own menu entries): `youtube_subscriptions.txt` (one channel ID per line — enables Subscriptions/Channels; see [INSTALL.md](INSTALL.md)) and/or `youtube_playlists.txt` (one playlist URL or ID per line, optional `My Name | <url>` display-name prefix — enables Playlists; contents are fetched by running `yt-dlp` directly).
+
+For full YouTube support, current yt-dlp versions also use an external JavaScript runtime. Deno is the recommended runtime. See yt-dlp's [EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) for the currently supported runtimes and versions.
 
 **Install SDL2 (required, gamepad input):**
 
@@ -120,11 +122,24 @@ Either way, run the reader setup script once to grant device access (it installs
 bash scripts/setup-nfc-reader.sh
 ```
 
-For the YouTube module, additionally install `yt-dlp` — mpv's ytdl hook uses it to resolve YouTube URLs at playback time and it needs to be up to date.  The version bundled with mpv by default on the Raspberry Pi is out of date so you'll need to use wget to get the latest directly from yt-dlp's github.
+For the YouTube module, additionally install `yt-dlp` — mpv's ytdl hook uses it to resolve YouTube URLs at playback time and it needs to be kept up to date. The version bundled with mpv on Raspberry Pi OS may be out of date, so install the latest executable directly from yt-dlp's GitHub releases.
 
 ```bash
 sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp
 ```
+
+For full YouTube support, yt-dlp also uses an external JavaScript runtime. Deno is the recommended runtime; follow yt-dlp's [EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) for installation and current version requirements. Make sure `deno` is on the `PATH` of the user or systemd service that runs 240-MP.
+
+You can verify the setup with:
+
+```bash
+yt-dlp --version
+deno --version
+yt-dlp --verbose --simulate \
+  'https://www.youtube.com/watch?v=VIDEO_ID'
+```
+
+The verbose output should list Deno under `JS runtimes`. If extraction still fails, use the extractor error in this output for diagnosis; not every pre-playback failure means that yt-dlp is missing or outdated.
 
 ### Get the source
 
