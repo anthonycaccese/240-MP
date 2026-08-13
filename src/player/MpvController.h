@@ -66,6 +66,13 @@ public:
     // toggle only where the smoothness-vs-crop trade-off actually exists.
     Q_INVOKABLE bool hasSmoothPlaybackTradeoff() const;
 
+    // Which display fullscreen playback should open on, matching the UI's
+    // app-level "display_index" (index into QGuiApplication::screens(), plus
+    // that screen's QScreen::name()). main.cpp calls this once at startup;
+    // index 0 (the default) adds no mpv args at all. Desktop launches only —
+    // the headless VT-handoff path is unaffected.
+    void setTargetDisplay(int index, const QString &screenName);
+
 signals:
     void positionChanged(int ms);
     void durationChanged(int ms);
@@ -152,6 +159,8 @@ private:
     int           m_duration     = 0;
     int           m_playlistPos  = -1;
     bool          m_headlessMode = false;
+    int           m_displayIndex = 0;   // see setTargetDisplay()
+    QString       m_displayScreenName;
     int           m_previousVt   = -1;
     bool          m_hasMpvOscScript     = false;
     bool          m_hasAmbientOscScript = false;
