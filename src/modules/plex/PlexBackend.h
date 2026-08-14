@@ -213,6 +213,7 @@ private:
     QString m_clientId;          // cached after first load
     bool    m_refreshInFlight  = false;
     bool    m_deviceVerified   = false; // set after first successful plex.tv check per session
+    bool    m_serverAuthRetried = false; // guards the one-shot token re-fetch on a PMS 401
 
     // Live TV session state. m_liveDvrId is cached from the last load_live_channels.
     // The rest are set by tune_channel and drive the timeline keep-alive that stops

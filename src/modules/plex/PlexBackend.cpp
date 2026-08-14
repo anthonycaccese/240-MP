@@ -1192,15 +1192,40 @@ void PlexBackend::load_libraries_impl() {
                     handle498([this]{ load_libraries_impl(); });
                 } else if (secStatus == 401) {
                     // 401 from PMS means this server rejected our token — the plex.tv account
-                    // auth is NOT invalidated. Do not delete plex_auth.json. The server may be
-                    // running an older version that doesn't accept JWTs yet; the user should
-                    // try selecting a different server or update their Plex Media Server.
-                    emit errorOccurred("SERVER AUTHENTICATION FAILED. TRY SELECTING A DIFFERENT SERVER OR UPDATE YOUR PLEX MEDIA SERVER.");
+                    // auth is NOT invalidated. Do not delete plex_auth.json.
+                    //
+                    // The usual cause is a stale per-server token: the map is first written at
+                    // link time straight from /api/v2/resources, where servers the user owns
+                    // come back with a plex.tv JWT that PMS does not accept. activateUser swaps
+                    // those for a PMS-usable token during user selection, but that swap is
+                    // skipped silently if either of its two requests fails (a brief network
+                    // blip during first-run setup is enough), leaving the JWT in place forever.
+                    //
+                    // So before surfacing an error, re-run activateUser for the active user to
+                    // refetch and rewrite the token map, then retry once. m_serverAuthRetried
+                    // keeps that to a single attempt.
+                    // activateUser emits its own "USER NOT FOUND" if the id isn't in the
+                    // cached users array, which would be a confusing thing to show here —
+                    // so only take the retry path when we know it will resolve.
+                    QJsonObject a = loadAuth();
+                    QString uid = a["active_user_id"].toString();
+                    bool known = false;
+                    for (const auto &v : a["users"].toArray())
+                        if (v.toObject()["id"].toString() == uid) { known = true; break; }
+                    if (!m_serverAuthRetried && !uid.isEmpty() && known) {
+                        m_serverAuthRetried = true;
+                        qWarning("[PlexBackend] PMS rejected our token — refreshing server tokens and retrying");
+                        activateUser(uid, [this](const QVariantList &) { load_libraries_impl(); });
+                    } else {
+                        m_serverAuthRetried = false;
+                        emit errorOccurred("SERVER REJECTED THIS DEVICE. PLEASE TRY AGAIN.");
+                    }
                 } else {
                     emit errorOccurred("LOAD LIBRARIES FAILED: " + secReply->errorString());
                 }
                 return;
             }
+            m_serverAuthRetried = false; // this server accepted our token; re-arm the retry
             QJsonArray sections = QJsonDocument::fromJson(secReply->readAll())
                                   .object()["MediaContainer"].toObject()["Directory"].toArray();
 

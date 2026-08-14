@@ -18,11 +18,13 @@ FocusScope {
     // means the quick-switch action (◄/►) is offered.
     property var switchableServers: []
     property bool canSwitchServer: switchableServers.length > 1
+    property string errorMsg: ""
 
     Connections {
         target: plexBackend
 
         function onLibrariesLoaded(items) {
+            browseRoot.errorMsg = ""
             browseRoot.libraries = items
             if (items.length > 0) {
                 var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
@@ -33,6 +35,7 @@ FocusScope {
 
         function onErrorOccurred(msg) {
             console.log("[Library] Error: " + msg)
+            browseRoot.errorMsg = msg
         }
     }
 
@@ -69,12 +72,26 @@ FocusScope {
 
     // Loading Indicator
     Text {
-        visible: libraries.length === 0
+        visible: libraries.length === 0 && browseRoot.errorMsg === ""
         text: "LOADING..."
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.centerIn: parent
         font.pixelSize: root.sh * 0.05 //24
+    }
+
+    // Error message
+    Text {
+        visible: browseRoot.errorMsg !== ""
+        text: browseRoot.errorMsg
+        color: root.secondaryColor
+        font.family: root.globalFont
+        font.capitalization: Font.AllUppercase
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        width: root.sw * 0.6 //384
+        anchors.centerIn: parent
+        font.pixelSize: root.sh * 0.0375 //18
     }
 
     // Body
