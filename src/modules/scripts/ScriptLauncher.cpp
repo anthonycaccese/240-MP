@@ -1,7 +1,9 @@
 #include "ScriptLauncher.h"
 #include "../../util/DisplayHandoff.h"
 #include <QFileInfo>
+#include <QFile>
 #include <QDir>
+#include <QRegularExpression>
 #include <QProcessEnvironment>
 #include <QTimer>
 #include <QDateTime>
@@ -15,6 +17,41 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#endif
+
+#ifdef Q_OS_LINUX
+namespace {
+
+// Steam's Gaming Mode session exports LD_PRELOAD holding BOTH copies of the
+// overlay hook (ubuntu12_32/ and ubuntu12_64/gameoverlayrenderer.so) so it can
+// hook games of either word size. Every child inherits it, and ld.so prints
+// "wrong ELF class ... ignored" to stderr for whichever copy doesn't match.
+// Harmless — but we merge stderr into the console pane, so it reads as if the
+// user's script printed it. Drop only the entries we can positively identify as
+// the wrong class; anything unreadable, or holding a dynamic token ($LIB,
+// $ORIGIN, $PLATFORM) that only ld.so can expand, is passed through untouched.
+QString sanitizedLdPreload(const QString &value)
+{
+    const char wantClass = (sizeof(void *) == 8) ? 2 : 1;   // ELFCLASS64 : ELFCLASS32
+
+    QStringList kept;
+    const QStringList entries = value.split(QRegularExpression(QStringLiteral("[:\\s]+")),
+                                            Qt::SkipEmptyParts);
+    for (const QString &entry : entries) {
+        if (!entry.contains(QLatin1Char('$'))) {
+            QFile f(entry);
+            char hdr[5];
+            if (f.open(QIODevice::ReadOnly) && f.read(hdr, 5) == 5
+                && std::memcmp(hdr, "\x7f" "ELF", 4) == 0 && hdr[4] != wantClass) {
+                continue;
+            }
+        }
+        kept << entry;
+    }
+    return kept.join(QLatin1Char(':'));
+}
+
+} // namespace
 #endif
 
 ScriptLauncher::ScriptLauncher(const QString &appRoot, const QString &dataRoot,
@@ -207,6 +244,23 @@ bool ScriptLauncher::start(const ScriptEntry &entry, QString *errorOut) {
                takeover ? QStringLiteral("takeover") : QStringLiteral("console"));
     if (vt > 0)
         env.insert(QStringLiteral("MP240_VT"), QString::number(vt));
+#ifdef Q_OS_LINUX
+    // Strip the wrong-word-size Steam overlay hook the Gaming Mode session hands
+    // down, so ld.so's "wrong ELF class ... ignored" warning stops appearing in
+    // the console pane as if the script had emitted it. The matching-class entry
+    // survives, so a launched app still gets the Steam overlay.
+    const QString preload = env.value(QStringLiteral("LD_PRELOAD"));
+    if (!preload.isEmpty()) {
+        const QString cleaned = sanitizedLdPreload(preload);
+        if (cleaned != preload) {
+            if (cleaned.isEmpty())
+                env.remove(QStringLiteral("LD_PRELOAD"));
+            else
+                env.insert(QStringLiteral("LD_PRELOAD"), cleaned);
+        }
+    }
+#endif
+
     // NOTE: deliberately NOT removing WAYLAND_DISPLAY the way MpvController does.
     // That is an mpv-VO workaround for labwc frame-done stalls, not a general
     // truth: stripping it would break a Wayland-native child with no Xwayland.
