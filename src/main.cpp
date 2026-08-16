@@ -91,9 +91,9 @@ int main(int argc, char *argv[]) {
     const QList<QScreen *> screens = QGuiApplication::screens();
     for (int i = 0; i < screens.size(); ++i) {
         const QRect g = screens.at(i)->geometry();
-        qDebug("[main] display index %d: \"%s\" %dx%d at (%d,%d)",
-               i, qPrintable(screens.at(i)->name()),
-               g.width(), g.height(), g.x(), g.y());
+        qInfo("[main] display index %d: \"%s\" %dx%d at (%d,%d)",
+              i, qPrintable(screens.at(i)->name()),
+              g.width(), g.height(), g.x(), g.y());
     }
 
     QQmlApplicationEngine engine;
@@ -118,8 +118,8 @@ int main(int argc, char *argv[]) {
     }
     QScreen *targetScreen = screens.value(displayIndex, QGuiApplication::primaryScreen());
     const QRect screenGeo = targetScreen ? targetScreen->geometry() : QRect(0, 0, 1920, 1080);
-    qDebug("[main] UI target display index %d -> %dx%d at (%d,%d)",
-           displayIndex, screenGeo.width(), screenGeo.height(), screenGeo.x(), screenGeo.y());
+    qInfo("[main] UI target display index %d -> %dx%d at (%d,%d)",
+          displayIndex, screenGeo.width(), screenGeo.height(), screenGeo.x(), screenGeo.y());
 
     LocalFilesBackend   localFiles(appRoot, dataRoot);
     PlexBackend         plexBackend(appRoot, dataRoot);
