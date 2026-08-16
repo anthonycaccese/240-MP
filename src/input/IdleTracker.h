@@ -23,6 +23,10 @@ class IdleTracker : public QObject {
     // Blocks activation while a media session is active (mpv playing).
     // Prevents the screen saver from showing on top of playback.
     Q_PROPERTY(bool mpvActive READ isMpvActive WRITE setMpvActive NOTIFY mpvActiveChanged)
+    // Blocks activation while a user script is running (see the scripts module).
+    // A separate flag rather than sharing mpvActive: two independent producers
+    // sharing one flag means whichever session ends first unblocks the other.
+    Q_PROPERTY(bool scriptActive READ isScriptActive WRITE setScriptActive NOTIFY scriptActiveChanged)
 
 public:
     explicit IdleTracker(int thresholdSec = 60, QObject *parent = nullptr);
@@ -31,11 +35,13 @@ public:
     int  idleSeconds()   const { return m_idleSeconds;  }
     int  threshold()     const { return m_threshold;    }
     bool isEnabled()     const { return m_enabled;      }
-    bool isMpvActive()   const { return m_mpvActive;    }
+    bool isMpvActive()    const { return m_mpvActive;    }
+    bool isScriptActive() const { return m_scriptActive; }
 
     void setThreshold(int seconds);
     void setEnabled(bool on);
     void setMpvActive(bool active);
+    void setScriptActive(bool active);
 
     // Called from C++ or QML to mark input activity — resets the idle counter
     // and deactivates the idle state if it was active.
@@ -47,6 +53,7 @@ signals:
     void thresholdChanged();
     void enabledChanged();
     void mpvActiveChanged();
+    void scriptActiveChanged();
     // Emitted on every call to resetActivity (including from the event filter).
     void activityDetected();
 
@@ -57,10 +64,14 @@ private slots:
     void tick();
 
 private:
+    // Any external session that owns the screen suppresses the saver.
+    bool blocked() const { return m_mpvActive || m_scriptActive; }
+
     QTimer m_timer;
     int    m_threshold;
     int    m_idleSeconds = 0;
     bool   m_active      = false;
     bool   m_enabled     = false;   // off until Main.qml applies the saved setting
-    bool   m_mpvActive   = false;
+    bool   m_mpvActive    = false;
+    bool   m_scriptActive = false;
 };

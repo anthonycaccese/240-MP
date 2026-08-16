@@ -2,6 +2,8 @@
 #include "../AppCore.h"
 #include "../util/YtDlpLocator.h"
 #include "../util/MpvLocator.h"
+#include "../util/DisplayHandoff.h"
+#include "../util/FontconfigOverride.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -14,43 +16,12 @@
 #include <QRegularExpression>
 #include <QDebug>
 
-#ifdef Q_OS_LINUX
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/sysmacros.h>
-#include <linux/vt.h>
-#include <string>
-// DRM master ioctls (also provided by xf86drm.h, but define as fallback).
-#ifndef DRM_IOCTL_SET_MASTER
-#define DRM_IOCTL_SET_MASTER   _IO('d', 0x1e)
-#define DRM_IOCTL_DROP_MASTER  _IO('d', 0x1f)
-#endif
-
-// Write a fontconfig override so the mpv subprocess's libass can find custom
-// fonts without needing them installed system-wide.
-static QString writeFontconfigOverride(const QString &fontsDir) {
-    const QString path = QDir::tempPath() + "/240mp-fonts.conf";
-    QFile f(path);
-    if (!f.open(QFile::WriteOnly | QFile::Text))
-        return {};
-    f.write(QString(
-        "<?xml version=\"1.0\"?>\n"
-        "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
-        "<fontconfig>\n"
-        "  <dir>%1</dir>\n"
-        "  <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n"
-        "</fontconfig>\n"
-    ).arg(fontsDir).toUtf8());
-    return path;
-}
-#endif
-
 MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
-                             AppCore *appCore, QObject *parent)
+                             AppCore *appCore, DisplayHandoff *handoff,
+                             QObject *parent)
     : QObject(parent)
     , m_appCore(appCore)
+    , m_handoff(handoff)
     , m_appRoot(appRoot)
     , m_dataRoot(dataRoot)
     , m_socketPath(QDir::tempPath() + "/240mp-mpv.sock")
@@ -116,6 +87,13 @@ MpvController::~MpvController() {
         m_process->terminate();
         m_process->waitForFinished(2000);
     }
+    // Quitting mid-playback on a headless Pi used to leave the VT switched away
+    // and DRM master dropped — a black screen or a stray text console. Restore
+    // synchronously here: terminate() above has already released mpv's hold on
+    // the device, and we're exiting, so there's no point deferring 200 ms.
+    // A no-op if mpv wasn't holding the screen (any platform, any mode).
+    if (m_handoff)
+        m_handoff->releaseNow(QLatin1String(kHandoffOwner));
 }
 
 void MpvController::loadAndPlay(const QString &url, float startSeconds,
@@ -360,24 +338,25 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             qWarning("[mpv] %s", out.trimmed().constData());
     });
 
-    m_headlessMode = detectHeadlessMode();
+    m_headlessMode = DisplayHandoff::isHeadless();
     if (m_headlessMode) {
         {
             QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
             env.insert("APP_ROOT", m_appRoot);
 #ifdef Q_OS_LINUX
-            const QString fcConf = writeFontconfigOverride(m_appRoot + "/assets/fonts");
+            const QString fcConf = fcoverride::write(m_appRoot + "/assets/fonts");
             if (!fcConf.isEmpty())
                 env.insert("FONTCONFIG_FILE", fcConf);
 #endif
             m_process->setProcessEnvironment(env);
         }
 
-        if (m_previousVt > 0) {
+        if (m_handoff && m_handoff->isHeldBy(QLatin1String(kHandoffOwner))) {
             // loadAndPlay called while already in headless mode (e.g. rapid
-            // double call from Plex Player). m_previousVt already holds Qt's
-            // real VT — do NOT overwrite it with the current free VT. The old
-            // mpv was terminated above; just launch the replacement directly.
+            // double call from Plex Player). The hand-off already holds Qt's
+            // real VT — do NOT acquire again, which would overwrite it with the
+            // free VT we are currently on. The old mpv was terminated above;
+            // just launch the replacement directly.
             args << QString("--input-conf=%1").arg(m_inputConfPath)
                  << "--video-sync=audio";
             appendVideoArgs(args);
@@ -387,35 +366,29 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
             return;
         }
 
-        // First entry into headless mode.
+        // First entry into headless mode: hand the display to mpv. The VT/DRM
+        // ordering that makes this work lives in DisplayHandoff::acquire().
         //
-        // On kernels 5.8+, drmSetMaster() returns EACCES for non-root if any
-        // other process holds DRM master — even after a VT switch, because Qt
-        // EGLFS runs in VT_AUTO mode and never calls drmDropMaster() itself.
+        // mpv deliberately does not check savedStateValid() here — playback has
+        // always proceeded even when the CRTC state couldn't be captured.
         //
-        // Fix: switch to a free VT first (suspends Qt's render thread), then
-        // drop Qt's DRM master so mpv can acquire it cleanly.
-
-        m_previousVt = getActiveVt();
-        m_qtDrmFd    = -1;
-
-#ifdef Q_OS_LINUX
-        // Switch VT first — suspends Qt's render thread via the kernel's VT
-        // switch signal before DRM master is dropped, eliminating the race
-        // that causes "Failed to commit atomic request" log noise.
-        switchToVt(findFreeVt());
-
-        m_qtDrmFd = findQtDrmFd();
-        if (m_qtDrmFd < 0) {
-            qWarning("[MpvController] Could not find Qt DRM fd");
-        } else {
-            qDebug("[MpvController] DRM master dropped (fd %d)", m_qtDrmFd);
-            // Save the current CRTC state so we can restore it exactly after
-            // mpv exits. mpv's atomic cleanup disables the CRTC (CRTC_ACTIVE=0);
-            // without this restore, Qt EGLFS gets EINVAL on its next page flip.
-            saveDrmCrtcState(m_qtDrmFd);
+        // A refusal (-1) means another subsystem already owns the screen — e.g. a
+        // takeover script is running and an NFC tap asked for playback. Launching
+        // anyway would put mpv on a display it does not own, and its later release
+        // would be rejected as an owner mismatch. Bail out the same way a missing
+        // mpv binary does, with a deferred synthetic end so the caller's Player
+        // view doesn't sit there waiting for a signal that never comes.
+        if (m_handoff && m_handoff->acquire(QLatin1String(kHandoffOwner)) < 0) {
+            qWarning("[MpvController] Cannot start playback: %s has the screen",
+                     qPrintable(m_handoff->currentOwner()));
+            m_headlessMode = false;
+            m_process->deleteLater();
+            m_process = nullptr;
+            QTimer::singleShot(0, this, [this]() {
+                emit playbackEnded(0, 0, QStringLiteral("failed"));
+            });
+            return;
         }
-#endif
 
         args << QString("--input-conf=%1").arg(m_inputConfPath)
              << "--video-sync=audio";
@@ -439,7 +412,7 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         if (!qEnvironmentVariable("DISPLAY").trimmed().isEmpty())
             env.remove("WAYLAND_DISPLAY");
 #ifdef Q_OS_LINUX
-        const QString fcConf = writeFontconfigOverride(m_appRoot + "/assets/fonts");
+        const QString fcConf = fcoverride::write(m_appRoot + "/assets/fonts");
         if (!fcConf.isEmpty())
             env.insert("FONTCONFIG_FILE", fcConf);
 #endif
@@ -597,46 +570,18 @@ void MpvController::onProcessFinished() {
     else if (m_lastEndFileReason == "eof") reason = QStringLiteral("eof");
     else                                   reason = QStringLiteral("stopped");
 
-    if (m_headlessMode) {
-        // Defer DRM restore and VT switch by 200 ms. mpv's last KMS atomic
-        // commit may still be pending in the vc4 driver at the moment the
-        // process exits. If EGLFS tries to commit before that pending flip
-        // is signaled, it gets EBUSY repeatedly, drops its DRM pipeline, and
-        // the kernel falls back to showing the text console on Qt's VT.
-        // 200 ms is more than three VSync periods at 60 Hz — enough to clear
-        // any in-flight commit without a perceptible delay for the user.
-        QTimer::singleShot(200, this, [this, pos, dur, reason]() {
-            doHeadlessRestore(pos, dur, reason);
+    if (m_headlessMode && m_handoff) {
+        // DisplayHandoff defers the DRM restore and VT switch (200 ms by
+        // default) because mpv's last KMS atomic commit may still be pending in
+        // the vc4 driver at the moment the process exits.
+        m_handoff->releaseDeferred(QLatin1String(kHandoffOwner),
+                                   [this, pos, dur, reason]() {
+            m_headlessMode = false;
+            emit playbackEnded(pos, dur, reason);
         });
     } else {
         emit playbackEnded(pos, dur, reason);
     }
-}
-
-void MpvController::doHeadlessRestore(int pos, int dur, const QString &reason) {
-#ifdef Q_OS_LINUX
-    if (m_qtDrmFd >= 0) {
-        if (::ioctl(m_qtDrmFd, DRM_IOCTL_SET_MASTER, 0) < 0) {
-            qWarning("[MpvController] drmSetMaster failed: %s", strerror(errno));
-        } else {
-            qDebug("[MpvController] DRM master restored (fd %d)", m_qtDrmFd);
-            // Restore CRTC to its pre-mpv state using legacy drmModeSetCrtc.
-            // This re-enables the CRTC with the original mode and Qt's last
-            // framebuffer, so EGLFS's first atomic page flip succeeds instead
-            // of getting EINVAL from a disabled CRTC.
-            restoreDrmCrtcState(m_qtDrmFd);
-        }
-        m_qtDrmFd = -1;
-    }
-#endif
-    if (m_previousVt > 0) {
-        qDebug("[MpvController] Switching back to VT %d", m_previousVt);
-        int prevVt = m_previousVt;
-        m_previousVt = -1;
-        switchToVt(prevVt);
-    }
-    m_headlessMode = false;
-    emit playbackEnded(pos, dur, reason);
 }
 
 void MpvController::sendCommand(const QJsonArray &args) {
@@ -648,14 +593,6 @@ void MpvController::sendCommand(const QJsonArray &args) {
     QJsonObject cmd;
     cmd["command"] = args;
     m_ipc->write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + "\n");
-}
-
-bool MpvController::detectHeadlessMode() const {
-#ifdef Q_OS_LINUX
-    return qgetenv("DISPLAY").isEmpty() && qgetenv("WAYLAND_DISPLAY").isEmpty();
-#else
-    return false;
-#endif
 }
 
 MpvController::VideoProfile MpvController::detectVideoProfile() const {
@@ -798,144 +735,3 @@ bool MpvController::hasSmoothPlaybackTradeoff() const {
     return m_videoProfile == VideoProfile::Pi3;
 }
 
-int MpvController::getActiveVt() const {
-#ifdef Q_OS_LINUX
-    QFile f("/sys/class/tty/tty0/active");
-    if (!f.open(QIODevice::ReadOnly)) return -1;
-    const QString name = QString::fromLatin1(f.readAll()).trimmed();
-    bool ok;
-    int n = name.mid(3).toInt(&ok);
-    return ok ? n : -1;
-#else
-    return -1;
-#endif
-}
-
-int MpvController::findFreeVt() const {
-#ifdef Q_OS_LINUX
-    int fd = ::open("/dev/tty0", O_WRONLY);
-    if (fd < 0) return 7;
-    int n = -1;
-    ::ioctl(fd, VT_OPENQRY, &n);
-    ::close(fd);
-    return (n > 0) ? n : 7;
-#else
-    return -1;
-#endif
-}
-
-void MpvController::switchToVt(int vt) {
-#ifdef Q_OS_LINUX
-    int fd = ::open("/dev/tty0", O_WRONLY);
-    if (fd < 0) {
-        qWarning("[MpvController] switchToVt %d: open /dev/tty0 failed: %s", vt, strerror(errno));
-        return;
-    }
-    if (::ioctl(fd, VT_ACTIVATE, vt) < 0)
-        qWarning("[MpvController] VT_ACTIVATE %d failed: %s", vt, strerror(errno));
-    if (::ioctl(fd, VT_WAITACTIVE, vt) < 0)
-        qWarning("[MpvController] VT_WAITACTIVE %d failed: %s", vt, strerror(errno));
-    ::close(fd);
-#else
-    Q_UNUSED(vt)
-#endif
-}
-
-int MpvController::findQtDrmFd() const {
-#ifdef Q_OS_LINUX
-    // Scan the process's open file descriptors for Qt's DRM primary card
-    // device. DRM primary nodes have major=226, minor 0-63 (card0, card1…).
-    // We try DRM_IOCTL_DROP_MASTER on each candidate — it succeeds only on
-    // the fd that currently holds DRM master, which tells us it's Qt's fd.
-    QDir fdDir("/proc/self/fd");
-    const QStringList entries = fdDir.entryList(QDir::Files | QDir::System);
-    for (const QString &entry : entries) {
-        bool ok;
-        int fd = entry.toInt(&ok);
-        if (!ok) continue;
-        struct stat st;
-        if (::fstat(fd, &st) < 0) continue;
-        if (!S_ISCHR(st.st_mode)) continue;
-        if (major(st.st_rdev) != 226) continue;   // not a DRM device
-        if (minor(st.st_rdev) >= 64) continue;    // render node, not primary card
-        // Found a DRM primary fd — try to drop master; if it works, this is it.
-        if (::ioctl(fd, DRM_IOCTL_DROP_MASTER, 0) == 0)
-            return fd;
-    }
-    return -1;
-#else
-    return -1;
-#endif
-}
-
-#ifdef Q_OS_LINUX
-void MpvController::saveDrmCrtcState(int fd) {
-    m_savedDrm = {};
-
-    drmModeResPtr res = drmModeGetResources(fd);
-    if (!res) {
-        qWarning("[MpvController] saveDrmCrtcState: drmModeGetResources failed");
-        return;
-    }
-
-    for (int i = 0; i < res->count_crtcs && !m_savedDrm.valid; ++i) {
-        drmModeCrtcPtr crtc = drmModeGetCrtc(fd, res->crtcs[i]);
-        if (!crtc) continue;
-
-        if (crtc->mode_valid) {
-            m_savedDrm.crtcId = crtc->crtc_id;
-            m_savedDrm.fbId   = crtc->buffer_id;
-            m_savedDrm.x      = crtc->x;
-            m_savedDrm.y      = crtc->y;
-            m_savedDrm.mode   = crtc->mode;
-
-            // Find the connector whose encoder is driving this CRTC
-            for (int j = 0; j < res->count_connectors; ++j) {
-                drmModeConnectorPtr conn = drmModeGetConnector(fd, res->connectors[j]);
-                if (!conn) continue;
-                if (conn->encoder_id) {
-                    drmModeEncoderPtr enc = drmModeGetEncoder(fd, conn->encoder_id);
-                    if (enc) {
-                        if (enc->crtc_id == m_savedDrm.crtcId) {
-                            m_savedDrm.connectorId = conn->connector_id;
-                            m_savedDrm.valid = true;
-                        }
-                        drmModeFreeEncoder(enc);
-                    }
-                }
-                drmModeFreeConnector(conn);
-                if (m_savedDrm.valid) break;
-            }
-        }
-        drmModeFreeCrtc(crtc);
-    }
-    drmModeFreeResources(res);
-
-    if (m_savedDrm.valid)
-        qDebug("[MpvController] Saved CRTC %u connector %u mode %dx%d@%d",
-               m_savedDrm.crtcId, m_savedDrm.connectorId,
-               m_savedDrm.mode.hdisplay, m_savedDrm.mode.vdisplay,
-               m_savedDrm.mode.vrefresh);
-    else
-        qWarning("[MpvController] Could not save CRTC state");
-}
-
-void MpvController::restoreDrmCrtcState(int fd) {
-    if (!m_savedDrm.valid) return;
-
-    int ret = drmModeSetCrtc(fd,
-                              m_savedDrm.crtcId,
-                              m_savedDrm.fbId,
-                              m_savedDrm.x, m_savedDrm.y,
-                              &m_savedDrm.connectorId, 1,
-                              &m_savedDrm.mode);
-    if (ret < 0)
-        qWarning("[MpvController] drmModeSetCrtc restore failed: %s", strerror(errno));
-    else
-        qDebug("[MpvController] CRTC restored (mode %dx%d@%d)",
-               m_savedDrm.mode.hdisplay, m_savedDrm.mode.vdisplay,
-               m_savedDrm.mode.vrefresh);
-
-    m_savedDrm.valid = false;
-}
-#endif

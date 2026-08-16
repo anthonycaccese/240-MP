@@ -87,6 +87,16 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Show/Season browsing
 - Video quality selection: Direct Playback (Default) or Transcode options
 
+### Scripts ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Scripts))
+- Run your own `.sh` scripts from a folder, so 240-MP can launch anything else on the machine (FieldStation42, RetroArch, `yt-dlp -U`, updates)
+- Two run modes per script, set in its `.txt` file:
+    - `console` — 240-MP stays on screen and shows the script's output
+    - `takeover` — the script gets the whole display, and 240-MP returns when it exits
+- A `.txt` file beside each script sets its display name and options; one is created for you automatically the first time a script is seen
+- Mark a script as a favorite to put it on the main menu alongside the other modules (press play/pause on it in the list)
+- Optionally auto-run one script when 240-MP starts
+- Off by default; enable it in Settings and point it at your scripts folder
+
 ### Weather ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Weather))
 - Inspired by [WeatherStar 3000+](https://github.com/netbymatt/ws3kp) by netbymatt
 - Integrates with Open-Meteo to provide weather forecasts for worldwide locations

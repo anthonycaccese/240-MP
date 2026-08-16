@@ -167,6 +167,19 @@ appCore.registerModule("com.240mp.<name>", "yourBackend", &yourBackend, ctx);
 
 The module ID lives in exactly one place per module — this call. Declare these members with the exact signatures above and `registerModule` wires them with no other changes to `main.cpp`.
 
+#### Probed, not connected
+
+Two further capabilities are **probed on demand** rather than connected at registration — `AppCore` checks `metaObject()->indexOfMethod(...)` and calls the method with `QMetaObject::invokeMethod` only if the backend declares it. Same idea, but they return a value, so there's nothing to connect:
+
+| Backend member (if declared) | Used by |
+|---|---|
+| `Q_INVOKABLE QString get_auth_state()` | `appCore.get_module_auth_state(moduleId)` — drives the `requires_auth` setting gate |
+| `Q_INVOKABLE QVariantList get_menu_entries()` | `scan_for_modules()` — lets a backend add its own rows to the **main menu** |
+
+`get_menu_entries()` returns a list of `{name, params}`. `AppCore` fills in `entry_point` from the module's manifest and appends the rows to the `modulesLoaded` payload, so `views/ModuleList.qml` renders them like any other row and forwards `params` as `navParams` then the module's `Root.qml` router interprets them.
+
+Rows are appended **after** all module rows on purpose: module row indices then stay stable, so a saved menu position still restores onto the same row when a contributed row appears or disappears. The scripts module uses this to list `favorite = yes` scripts after native 240-MP modules.
+
 ## Playback Hand-off (MpvController)
 
 The current MPV implementation is a good reference implementation of the "browse & hand-off" philosophy. When a module decides to play a video, it hands off to **mpv** rather than rendering video itself. All of that lives in `MpvController` (`src/player/MpvController.h/.cpp`), exposed to QML as the context property **`mpvController`**.
@@ -240,11 +253,38 @@ The on-screen controls mpv shows during playback are custom Lua scripts in `scri
 
 ### Raspberry Pi headless hand-off (EGLFS)
 
-On RPi Lite there because there is no display server; Qt draws via EGLFS straight to the KMS/DRM framebuffer, so the app and mpv can't both own the screen at once. `MpvController` performs a DRM/VT hand-off: it saves Qt's DRM CRTC state, switches to a free virtual terminal so mpv can take the framebuffer, and **restores** Qt's CRTC state when mpv exits (`saveDrmCrtcState` / `restoreDrmCrtcState`, `doHeadlessRestore`, plus the VT-switch helpers). This is Linux-only (`#ifdef Q_OS_LINUX`); on macOS the hand-off is a plain fullscreen window swap.
+On RPi Lite there is no display server; Qt draws via EGLFS straight to the KMS/DRM framebuffer, so the app and a fullscreen child can't both own the screen at once. **`DisplayHandoff`** (`src/util/DisplayHandoff.h/.cpp`) owns this hand-off for the whole app. `MpvController` delegates to it and does not implement any of the ioctls itself.
+
+The order is load-bearing and was established against real Pi hardware — read the header comment before touching it:
+
+- **`acquire(owner)`**: VT switch → `drmDropMaster` → save CRTC state. The VT switch goes *first* because it suspends Qt's render thread via the kernel's VT-switch signal before master is dropped; on kernels 5.8+ `drmSetMaster()` returns `EACCES` for non-root while another process holds master, and Qt EGLFS runs `VT_AUTO` and never drops master itself.
+- **`releaseDeferred(owner, cb)`**: after 200 ms (>3 VSync at 60 Hz, so the child's last pending KMS commit can clear), `drmSetMaster` → restore CRTC → switch back, then run `cb`. The restore uses **legacy** `drmModeSetCrtc`, not an atomic commit: the child's atomic cleanup leaves `CRTC_ACTIVE=0` and EGLFS would get `EINVAL` on its first page flip.
+- **`releaseNow(owner)`**: synchronous, for shutdown; `MpvController`'s destructor calls it so quitting mid-playback no longer leaves the Pi on a blank VT.
+
+The `owner` token means two subsystems can never both believe they hold the screen — `acquire()` refuses if someone else holds it, and `isHeldBy()` is the re-entrancy guard for relaunching a child without releasing first. All of it is Linux-only in effect (`isHeadless()` is false on macOS and whenever a compositor is present), where the hand-off is just a fullscreen window swap.
+
+Two consequences that are easy to get wrong, both of them Pi-only and both invisible on any other target:
+
+- **Whatever Qt last put on the glass stays there for the whole hand-off.** The VT switch suspends Qt's renderer, but nothing clears the framebuffer, and we no longer hold DRM master so we cannot. A child that draws immediately (mpv) hides this completely; a child that draws late or never leaves the previous frame frozen on screen, which reads as a hang rather than a hand-off. So **paint the screen you want frozen, wait for it to be presented, and only then call `acquire()`**. As an example `modules/scripts/views/Takeover.qml` does this with a short timer, deliberately not `Qt.callLater`, because what matters is a frame actually presented instead of the scene graph being updated.
+- **The VT we switch to must not be the one we are on.** `findFreeVt()` starts from `VT_OPENQRY`, which reports the lowest VT the kernel considers unused. Activating the VT we are already on would be a silent no-op so Qt never suspends, and master is then dropped out from under a still-drawing Qt, with nothing logged because the ioctl succeeds. `findFreeVt()` takes the active VT and steps past it so that cannot happen.
+
+  In practice `VT_OPENQRY` does not return Qt's own VT, because Qt EGLFS opens `/dev/tty0` for its `KD_GRAPHICS`/`VT_AUTO` handling and `/dev/tty0` *is* the foreground console, which pins that VT's tty count. Measured on an installed card: idle `tty1`, during playback `tty2`, back to `tty1` on exit.
+
+  Note that `VT_OPENQRY`'s notion of "in use" is the *virtual console's* tty count, not "some process has `/dev/ttyN` open". `fuser -v /dev/tty1` comes back empty under the service and yet VT 1 is in use, because the process pinning it opened `/dev/tty0`. `fuser` on the numbered node is the wrong instrument here; read `/sys/class/tty/tty0/active` instead.
+
+On a dev box neither of these bites the same way, because `autovt@` is unmasked there: a getty spawns on the VT we switch to, repaints the console for us, and holds that VT open so `VT_OPENQRY` keeps moving up. The login prompt you see mid-hand-off on a dev Pi is that getty, not anything 240-MP drew.
 
 ### Adding a different hand-off target
 
-The longer-term vision is to hand off to *other* purpose-built tools (e.g. RetroArch), not just mpv. `MpvController` is the template for that: launch the external tool as a `QProcess`, drive it over whatever control channel it offers, surface progress/exit back to QML via signals, and (on RPi Lite) bracket the launch with the same DRM/VT save-and-restore so the framebuffer is handed over cleanly and returned on exit.
+The longer-term vision is to hand off to *other* purpose-built tools (e.g. RetroArch), not just mpv. `MpvController` is the template: launch the external tool as a `QProcess`, drive it over whatever control channel it offers, and surface progress/exit back to QML via signals. **Use `DisplayHandoff` for the screen — do not re-implement the VT/DRM ioctls in a new caller.**
+
+The **scripts module** (`modules/scripts/`, `src/modules/scripts/`) is the second worked example, and generalises the idea to arbitrary user programs. Its `ScriptLauncher` has things that `MpvController` doesn't need:
+
+- **Two run modes per target.** `console` keeps 240-MP on screen and streams the child's merged output into a QML view; `takeover` gives the child the display. The split is per-target. On macOS / desktop Linux / SteamOS a takeover needs nothing at all (the child's window covers ours), and only headless Linux needs the `DisplayHandoff` bracket.
+- **Nothing is handed over before a spawn that might still be refused.** All validation happens first, `QProcess::errorOccurred(FailedToStart)` is handled explicitly (`finished` is *never* emitted in that case), and a started-watchdog covers "started but silent". 
+- **`setsid()` in a child-process modifier**, so the child leads its own process group: `killpg` reaches everything it spawned, and an empty group is how you know the screen is free again. A launcher script that backgrounds its real work and exits immediately would otherwise have the display taken back out from under its children.
+- **Report only after the display is restored.** The caller pops its view on the "finished" signal; doing that while the framebuffer still belongs to the child draws into memory you don't own.
+- **No stop key during a takeover.** A takeover child should own input for it's whole run, and on EGLFS every keystroke is double-delivered (Qt's libinput and the child both read the same evdev devices) so any tap-to-stop key would also fire inside inside a launched takeover application (For example ESC/Back is used by RetroArch's to navigate its menus just like its used inside 240-MP so pressing that key while RA is open would SIGTERM the session mid-run). With this in mind, the runner view is set up to swallow Back events while a takeover is busy and offers no direct stop key. What covers failures instead: the started-watchdog and `FailedToStart` handling, the downgrade-to-console refusal when display state can't be saved, and `~ScriptLauncher`'s SIGTERM → SIGKILL + `releaseNow()` at app quit. Console mode and downgraded runs (where 240-MP kept the screen) still have the Back-to-stop key with `requestStop()`'s SIGTERM → SIGKILL escalation.
 
 ## Input (InputManager)
 
@@ -267,6 +307,10 @@ All input arrives in QML as **ordinary key events** — views bind `Keys.onPress
 3. **Delivery** — while the Qt window is **active**, synthesized `QKeyEvent`s are posted to the root QQuickWindow and reach the QML `activeFocusItem` like real key presses; on RPi/EGLFS the window is always active, so during playback they flow through the Player views' existing key forwarding (`mpvController.sendKey(...)`). When the window is **inactive** (like on MacOS where fullscreen mpv holds OS focus) and QQuickWindow has no `activeFocusItem`; `InputManager` instead emits `mpvKeyRequested(key)`, which `main.cpp` connects to `MpvController::sendKey`.  That will drive mpv directly over IPC with the same key names. The net result is that gamepads drive mpv identically to the keyboard on both platforms. Held directions auto-repeat (400 ms delay, 100 ms interval) so lists and ff/rw feel like keyboard repeat.
 4. **User overrides** — `$DATA_ROOT/input.cfg` (`<input> <action>` per line, `#` comments, merged over defaults, live-reloaded via `QFileSystemWatcher`). An optional `$DATA_ROOT/gamecontrollerdb.txt` can add SDL mappings for exotic pads. Check out grammar and examples in [BUILDING.md → Gamepad input](BUILDING.md#gamepad-input-inputcfg).
 5. **Adaptive footers** — `inputManager` exposes `lastInputDevice` (`"keyboard"` | `"gamepad"`, tracked via an app-wide event filter that ignores the synthesized events by their magic `nativeScanCode`) and a `hints` map (`back`, `select`, `navigate`, `change`, `browse`, `play_pause`). Main.qml mirrors it as **`root.hints`**, and footer hint labels bind to that — e.g. `root.hints.back + ":BACK"` renders `[ESC]:BACK` while the keyboard is active and `[B]:BACK` after a controller press, reflecting the live mapping. Views should bind to `root.hints.*` (similar to how we handle `root.sh`), **not** `inputManager.hints.*` because id-resolved `root.*` will stay valid when swappig views.  If you don't when the module Loader swaps views, the dying view's context properties will resolve to null and bindings on them will throw TypeErrors during teardown. Face-button labels are translated to what's printed on the **last-touched** controller via `SDL_GameControllerGetType` (Nintendo swaps A/B & X/Y; PlayStation shows X/O/SQ/TR), and `label <button> <text>` lines in input.cfg override them for pads that misreport their type. New views with footers should now use `root.hints.*`, and not hardcoded `[ESC]`/`[ENTER]` strings like I had in my previous implementation.
+
+### Input survives a display hand-off
+
+On RPi/EGLFS, input keeps flowing while Qt is VT-switched away: Qt's libinput/evdev handlers and SDL both read `/dev/input/event*` directly, with no VT gating. **Only rendering is suspended.** That's why a Player view can forward keys to fullscreen mpv over IPC on the Pi.
 
 ## C++ Backend Patterns
 

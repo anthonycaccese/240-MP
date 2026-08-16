@@ -42,7 +42,11 @@ A module is a folder under `modules/` with a `manifest.json` and QML views, plus
 2. **Add QML views** under `modules/[name]/views/`, with `Root.qml` as the entry point (the module router) plus list/detail views. Follow the [QML view patterns](ARCHITECTURE.md#qml-view-patterns).
 3. **(Optional) Add a C++ backend** under `src/modules/[name]/`, add the `.cpp` to `CMakeLists.txt`, and register it with one `registerModule(...)` call in `src/main.cpp`. See [AppCore → registerModule](ARCHITECTURE.md#registermodule--wiring-a-backend-in).
 
+4. **(Optional) Contribute main-menu rows** by declaring `Q_INVOKABLE QVariantList get_menu_entries()` on the backend — `AppCore` probes for it and appends `{name, params}` rows to the main menu, with no changes to the app shell. See [Probed, not connected](ARCHITECTURE.md#probed-not-connected).
+
 A pure-QML module needs **no C++ changes** — the shell discovers it from its manifest. `PlexBackend` is the most complete backend and the best one to study.
+
+**If your module hands off the whole screen** to an external program, use `DisplayHandoff` (`src/util/DisplayHandoff.h`) — never re-implement the VT/DRM ioctls. `MpvController` and the scripts module's `ScriptLauncher` are both worked examples; see [Adding a different hand-off target](ARCHITECTURE.md#adding-a-different-hand-off-target) for the traps, all of which end in a black screen with no way back if you get them wrong.
 
 ### Changing an existing module
 

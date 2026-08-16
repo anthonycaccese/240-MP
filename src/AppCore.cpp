@@ -110,7 +110,54 @@ void AppCore::scan_for_modules() {
         displayData.append(entry);
         qDebug("[AppCore] Module: %s -> %s", qPrintable(m.name), qPrintable(entryPoint));
     }
+
+    // Extra top-level rows contributed by module backends. Probed, not connected —
+    // the same idiom as get_auth_state (see get_module_auth_state): a backend that
+    // declares Q_INVOKABLE QVariantList get_menu_entries() can add main-menu rows
+    // without ModuleList.qml knowing anything about what they are. A backend
+    // supplies only {name, params}; entry_point is filled in from its manifest
+    // here, so a backend can't get that wrong.
+    //
+    // Appended AFTER all module rows on purpose: module row indices then stay
+    // stable, so the saved menu position still restores onto the same row when a
+    // contributed row is added or removed.
+    for (const auto &m : m_modules) {
+        if (!isModuleEnabled(m, modulesConfig)) continue;
+        const QVariantList extras = menuEntriesForModule(m.id);
+        for (const QVariant &v : extras) {
+            QVariantMap entry = v.toMap();
+            if (entry.value("name").toString().isEmpty()) {
+                qWarning("[AppCore] %s contributed a menu entry with no name — skipped",
+                         qPrintable(m.id));
+                continue;
+            }
+            if (!entry.contains("entry_point"))
+                entry["entry_point"] = QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
+            displayData.append(entry);
+            qDebug("[AppCore] Menu entry from %s: %s -> %s", qPrintable(m.id),
+                   qPrintable(entry.value("name").toString()),
+                   qPrintable(entry.value("entry_point").toString()));
+        }
+    }
+
     emit modulesLoaded(displayData);
+}
+
+QVariantList AppCore::menuEntriesForModule(const QString &moduleId) const {
+    auto it = m_backends.find(moduleId);
+    if (it == m_backends.end()) return {};
+    if (it.value()->metaObject()->indexOfMethod(
+            QMetaObject::normalizedSignature("get_menu_entries()")) < 0) {
+        return {};
+    }
+    QVariantList result;
+    bool ok = QMetaObject::invokeMethod(
+        it.value(), "get_menu_entries",
+        Qt::DirectConnection,
+        Q_RETURN_ARG(QVariantList, result)
+    );
+    if (!ok) return {};
+    return result;
 }
 
 QVariant AppCore::get_settings() {

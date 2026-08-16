@@ -46,9 +46,9 @@ void IdleTracker::setMpvActive(bool active)
     m_mpvActive = active;
     emit mpvActiveChanged();
 
-    // If activation was blocked by mpv and mpv just ended, deactivate immediately
-    // so the screen saver doesn't flash on the menu after playback.
-    if (!m_mpvActive && m_active) {
+    // If activation was blocked and nothing holds the screen any more, deactivate
+    // immediately so the screen saver doesn't flash on the menu afterwards.
+    if (!blocked() && m_active) {
         m_active = false;
         emit activeChanged();
     }
@@ -82,7 +82,7 @@ bool IdleTracker::eventFilter(QObject *obj, QEvent *event)
 
 void IdleTracker::tick()
 {
-    if (m_active || !m_enabled || m_mpvActive)
+    if (m_active || !m_enabled || blocked())
         return;
 
     ++m_idleSeconds;
@@ -90,6 +90,21 @@ void IdleTracker::tick()
 
     if (m_idleSeconds >= m_threshold) {
         m_active = true;
+        emit activeChanged();
+    }
+}
+
+void IdleTracker::setScriptActive(bool active)
+{
+    if (m_scriptActive == active)
+        return;
+    m_scriptActive = active;
+    emit scriptActiveChanged();
+
+    // As in setMpvActive: only clear once nothing owns the screen, so ending one
+    // session can't unblock the saver while the other is still running.
+    if (!blocked() && m_active) {
+        m_active = false;
         emit activeChanged();
     }
 }
