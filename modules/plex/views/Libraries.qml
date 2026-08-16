@@ -9,6 +9,9 @@ FocusScope {
     property var navListState: navParams.navListState || ({})
 
     signal navigateTo(string path, var params, var listState)
+    // Used for the PIN handoff below: replacing rather than pushing keeps this
+    // view from ending up on the stack twice when ProfilePin returns here.
+    signal replaceWith(string path, var params)
     signal goBack()
 
     property var libraries: []
@@ -36,6 +39,17 @@ FocusScope {
         function onErrorOccurred(msg) {
             console.log("[Library] Error: " + msg)
             browseRoot.errorMsg = msg
+        }
+
+        // The 401-recovery retry re-runs the user switch, which can turn out to
+        // need the profile's PIN.
+        function onUserPinRequired(userId, wrongPin) {
+            browseRoot.replaceWith("ProfilePin.qml", {
+                userId: userId,
+                title: browseRoot.userName,
+                reauth: true,
+                wrongPin: wrongPin
+            })
         }
     }
 

@@ -10,12 +10,29 @@ FocusScope {
     signal goBack()
 
     property var users: navParams.users || []
+    property string errorMsg: ""
+
+    function titleFor(userId) {
+        for (var i = 0; i < users.length; i++)
+            if (users[i].id === userId) return users[i].title || ""
+        return ""
+    }
 
     Connections {
         target: plexBackend
 
         function onUsersLoaded(loadedUsers) {
             userSelectRoot.users = loadedUsers
+        }
+
+        // plex.tv wants the profile's PIN before it will switch.
+        function onUserPinRequired(userId, wrongPin) {
+            userSelectRoot.navigateTo("ProfilePin.qml", {
+                userId: userId,
+                title: userSelectRoot.titleFor(userId),
+                reauth: userSelectRoot.navParams.reauth === true,
+                wrongPin: wrongPin
+            })
         }
 
         function onServersLoaded(servers) {
@@ -32,6 +49,7 @@ FocusScope {
 
         function onErrorOccurred(msg) {
             console.log("[UserSelect] Error: " + msg)
+            userSelectRoot.errorMsg = msg
         }
     }
 
@@ -142,6 +160,23 @@ FocusScope {
                 }
             }
         }
+    }
+
+    // Error message — without this a failed switch is invisible in the very view
+    // the selection was made from.
+    Text {
+        visible: userSelectRoot.errorMsg !== ""
+        text: userSelectRoot.errorMsg
+        color: root.secondaryColor
+        font.family: root.globalFont
+        font.capitalization: Font.AllUppercase
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        width: root.sw * 0.6
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: footer.top
+        anchors.bottomMargin: root.sh * 0.05
+        font.pixelSize: root.sh * 0.0333333 //16
     }
 
     // Footer

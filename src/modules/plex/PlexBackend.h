@@ -26,8 +26,14 @@ public:
     // Auth flow
     Q_INVOKABLE void start_pin_auth();
     Q_INVOKABLE void load_users_from_cache();
-    Q_INVOKABLE void select_user(const QString &userId);
-    Q_INVOKABLE void reauth_select_user(const QString &userId);
+    // pin is only supplied on a retry, after plex.tv has told us the profile
+    // needs one (see userPinRequired). It is never stored.
+    Q_INVOKABLE void select_user(const QString &userId, const QString &pin = QString());
+    Q_INVOKABLE void reauth_select_user(const QString &userId, const QString &pin = QString());
+    // Set when a switch was refused for want of a PIN on a path that has no UI to
+    // prompt from (the current_user_id setting); Root.qml drains it on module entry.
+    Q_INVOKABLE QString pending_pin_user() const { return m_pendingPinUserId; }
+    Q_INVOKABLE void    cancel_pending_pin();
     Q_INVOKABLE void select_server(const QString &machineId);
     Q_INVOKABLE void logout();
 
@@ -97,6 +103,9 @@ signals:
     void logoutComplete();
     void authStateChanged();
     void authRevoked();
+    // plex.tv refused the user switch until we supply the profile's PIN.
+    // wrongPin distinguishes "we haven't asked yet" from "that PIN was wrong".
+    void userPinRequired(const QString &userId, bool wrongPin);
 
     void librariesLoaded(const QVariant &libraries);
     void continueWatchingLoaded(const QVariant &items);
@@ -174,8 +183,16 @@ private:
 
     // User activation — single path for all three switch callers
     bool isAccountOwner(const QString &userId) const;
-    void activateUser(const QString &userId,
+    static QJsonObject homeUserEntry(const QJsonObject &rawUser);
+    QJsonObject cachedUser(const QString &userId) const;
+    // Checks the profile's PIN gate (live, not cached) and then switches.
+    void activateUser(const QString &userId, const QString &pin,
                       std::function<void(const QVariantList &accessibleServers)> callback);
+    void performUserSwitch(const QString &userId, const QString &pin,
+                           std::function<void(const QVariantList &accessibleServers)> callback);
+
+    // User the current_user_id setting selected but whose switch needs a PIN.
+    QString m_pendingPinUserId;
 
     // PIN auth
     void pollPinTick();

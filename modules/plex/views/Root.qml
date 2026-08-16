@@ -89,7 +89,14 @@ FocusScope {
     Component.onCompleted: {
         plexBackend.reset_device_check()
         var state = plexBackend.get_auth_state()
-        if (state === "authed") {
+        // A user picked in the app Settings screen whose switch was refused for
+        // want of a PIN. Settings has no Plex view to prompt from, so the prompt
+        // is deferred to here — ahead of auto_sign_in, which would otherwise walk
+        // straight past it into Libraries with the previous user still active.
+        var pendingPin = plexBackend.pending_pin_user()
+        if (state === "authed" && pendingPin !== "") {
+            navigateTo("ProfilePin.qml", { userId: pendingPin, reauth: true })
+        } else if (state === "authed") {
             var autoSignIn = appCore.get_setting(moduleId, "auto_sign_in")
             if (autoSignIn !== true && autoSignIn !== "ON") {
                 plexBackend.load_users_from_cache()
