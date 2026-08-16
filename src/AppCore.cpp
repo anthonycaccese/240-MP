@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QDebug>
 #include <QRegularExpression>
+#include <QNetworkInterface>
 #include <QQmlContext>
 
 AppCore::AppCore(const QString &appRoot, const QString &dataRoot, QObject *parent)
@@ -109,7 +110,54 @@ void AppCore::scan_for_modules() {
         displayData.append(entry);
         qDebug("[AppCore] Module: %s -> %s", qPrintable(m.name), qPrintable(entryPoint));
     }
+
+    // Extra top-level rows contributed by module backends. Probed, not connected —
+    // the same idiom as get_auth_state (see get_module_auth_state): a backend that
+    // declares Q_INVOKABLE QVariantList get_menu_entries() can add main-menu rows
+    // without ModuleList.qml knowing anything about what they are. A backend
+    // supplies only {name, params}; entry_point is filled in from its manifest
+    // here, so a backend can't get that wrong.
+    //
+    // Appended AFTER all module rows on purpose: module row indices then stay
+    // stable, so the saved menu position still restores onto the same row when a
+    // contributed row is added or removed.
+    for (const auto &m : m_modules) {
+        if (!isModuleEnabled(m, modulesConfig)) continue;
+        const QVariantList extras = menuEntriesForModule(m.id);
+        for (const QVariant &v : extras) {
+            QVariantMap entry = v.toMap();
+            if (entry.value("name").toString().isEmpty()) {
+                qWarning("[AppCore] %s contributed a menu entry with no name — skipped",
+                         qPrintable(m.id));
+                continue;
+            }
+            if (!entry.contains("entry_point"))
+                entry["entry_point"] = QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
+            displayData.append(entry);
+            qDebug("[AppCore] Menu entry from %s: %s -> %s", qPrintable(m.id),
+                   qPrintable(entry.value("name").toString()),
+                   qPrintable(entry.value("entry_point").toString()));
+        }
+    }
+
     emit modulesLoaded(displayData);
+}
+
+QVariantList AppCore::menuEntriesForModule(const QString &moduleId) const {
+    auto it = m_backends.find(moduleId);
+    if (it == m_backends.end()) return {};
+    if (it.value()->metaObject()->indexOfMethod(
+            QMetaObject::normalizedSignature("get_menu_entries()")) < 0) {
+        return {};
+    }
+    QVariantList result;
+    bool ok = QMetaObject::invokeMethod(
+        it.value(), "get_menu_entries",
+        Qt::DirectConnection,
+        Q_RETURN_ARG(QVariantList, result)
+    );
+    if (!ok) return {};
+    return result;
 }
 
 QVariant AppCore::get_settings() {
@@ -388,6 +436,47 @@ QString AppCore::parentDirectory(const QString &path) {
 
 QString AppCore::homePath() {
     return QDir::homePath();
+}
+
+// A device typically has several addresses (RPi: eth0 + wlan0; SteamOS: wlan0 plus
+// Docker/Flatpak bridges; macOS: en0 plus awdl/bridge/utun VPN interfaces), so pick
+// rather than take the first: skip loopback, virtual/tunnel and down interfaces, keep
+// only routable IPv4, and prefer wired over wireless over anything else.
+QString AppCore::localIpAddress() const {
+    // Interface names that are virtual/tunnel/link-local by convention on the three
+    // targets. Qt's type() misses some of these (Docker bridges report as Ethernet).
+    static const QRegularExpression kVirtualIface(
+        "^(docker|br-|bridge|veth|virbr|vmnet|vboxnet|utun|tun|tap|ipsec|zt|awdl|llw|anpi|ap\\d)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    QString best;
+    int bestScore = -1;
+
+    const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface &iface : interfaces) {
+        const QNetworkInterface::InterfaceFlags flags = iface.flags();
+        if (!flags.testFlag(QNetworkInterface::IsUp)) continue;
+        if (!flags.testFlag(QNetworkInterface::IsRunning)) continue;
+        if (flags.testFlag(QNetworkInterface::IsLoopBack)) continue;
+        if (iface.type() == QNetworkInterface::Virtual) continue;
+        if (kVirtualIface.match(iface.name()).hasMatch()) continue;
+
+        int score = 0;
+        if (iface.type() == QNetworkInterface::Ethernet) score = 2;
+        else if (iface.type() == QNetworkInterface::Wifi) score = 1;
+        if (score <= bestScore) continue;
+
+        const QList<QNetworkAddressEntry> entries = iface.addressEntries();
+        for (const QNetworkAddressEntry &entry : entries) {
+            const QHostAddress addr = entry.ip();
+            if (addr.protocol() != QAbstractSocket::IPv4Protocol) continue;
+            if (addr.isLoopback() || addr.isLinkLocal()) continue;
+            best = addr.toString();
+            bestScore = score;
+            break;
+        }
+    }
+    return best;
 }
 
 QString AppCore::startupModuleEntryPoint() const {

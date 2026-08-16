@@ -136,24 +136,29 @@ FocusScope {
         }
 
         Keys.onUpPressed: {
-            if (currentIndex > 0) {
-                currentIndex--
-            } else {
-                currentIndex = menuList.model.length-1
-            }
+            if (count === 0) return
+            if (currentIndex > 0) currentIndex--
+            else                  currentIndex = count - 1
+            menuList.positionViewAtIndex(menuList.currentIndex, ListView.Contain)
         }
         Keys.onDownPressed: {
-            if (currentIndex < menuList.model.length-1) {
-                currentIndex++
-            } else {
-                currentIndex = 0
-            }
+            if (count === 0) return
+            if (currentIndex < count - 1) currentIndex++
+            else                          currentIndex = 0
+            menuList.positionViewAtIndex(menuList.currentIndex, ListView.Contain)
         }
-        
+
+
         Keys.onReturnPressed: {
-            var selectedModulePath = menuList.model[menuList.currentIndex].entry_point
-            console.log("Routing to: " + selectedModulePath)
-            appRoot.navigateTo(selectedModulePath, {}, { currentIndex: menuList.currentIndex })
+            // A row is {name, entry_point, params}. Module rows carry no params;
+            // rows contributed by a backend (see AppCore::menuEntriesForModule) use
+            // them to tell the module's router what was picked. This view stays
+            // ignorant of what any of them mean.
+            var row = menuList.model[menuList.currentIndex]
+            if (!row) return
+            console.log("Routing to: " + row.entry_point)
+            appRoot.navigateTo(row.entry_point, row.params || {},
+                               { currentIndex: menuList.currentIndex })
         }
 
         Keys.onPressed: function(event) {

@@ -6,7 +6,7 @@
 
 Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. Try to think of each module as a different input on a VHS deck. There are 8 included modules currently: [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), Emby, [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader), [Weather](https://github.com/anthonycaccese/240-MP/wiki/Module:-Weather) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
-It's built to work in conjuction with MPV which will be installed (or updated) as a dependency during the [install](#Install) steps.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" section.
+It's built to work in conjuction with [MPV](https://github.com/anthonycaccese/240-MP/wiki/MPV) which will be installed (or updated) as a dependency during the [install](#Install) steps.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" sections.
 
 ## Video Overview
 
@@ -86,6 +86,16 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Full library browsing by letter
 - Show/Season browsing
 - Video quality selection: Direct Playback (Default) or Transcode options
+
+### Scripts ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Scripts))
+- Run your own `.sh` scripts from a folder, so 240-MP can launch anything else on the machine (FieldStation42, RetroArch, `yt-dlp -U`, updates)
+- Two run modes per script, set in its `.txt` file:
+    - `console` — 240-MP stays on screen and shows the script's output
+    - `takeover` — the script gets the whole display, and 240-MP returns when it exits
+- A `.txt` file beside each script sets its display name and options; one is created for you automatically the first time a script is seen
+- Mark a script as a favorite to put it on the main menu alongside the other modules (press play/pause on it in the list)
+- Optionally auto-run one script when 240-MP starts
+- Off by default; enable it in Settings and point it at your scripts folder
 
 ### Weather ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Weather))
 - Inspired by [WeatherStar 3000+](https://github.com/netbymatt/ws3kp) by netbymatt

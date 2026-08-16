@@ -691,6 +691,10 @@ QVariantMap EmbyBackend::formatItem(const QJsonObject &item) const {
     map["itemId"]          = item["Id"].toString();
     map["seriesId"]        = item["SeriesId"].toString();
     map["title"]           = item["Name"].toString();
+    // Server-side sort key (only present when the caller asked for the SortName
+    // field). The letter-nav panel buckets on this so its letters agree with the
+    // sortBy=SortName ordering the browse queries use.
+    map["titleSort"]       = item["SortName"].toString().toUpper();
     map["type"]            = item["Type"].toString().toLower();
     map["overview"]        = item["Overview"].toString();
     QString releaseDate = item["ReleaseDate"].toString();
@@ -811,7 +815,7 @@ void EmbyBackend::load_items(const QString &parentId, const QString &includeType
     // Browse rows only need title/year/overview/played state. Skip the heavy
     // per-item MediaSources/MediaStreams here (now that the list is unbounded) —
     // Item.qml re-fetches full detail via load_item_detail when an item is opened.
-    q.addQueryItem("fields", "Overview,Genres,UserData");
+    q.addQueryItem("fields", "Overview,Genres,UserData,SortName");
     if (!includeTypes.isEmpty())
         q.addQueryItem("includeItemTypes", includeTypes);
     if (!sortBy.isEmpty()) {
@@ -947,7 +951,7 @@ void EmbyBackend::load_folder_children(const QString &parentId) {
     QUrlQuery q;
     q.addQueryItem("parentId", parentId);
     q.addQueryItem("recursive", "false");
-    q.addQueryItem("fields", "Overview,Genres,UserData,ChildCount");
+    q.addQueryItem("fields", "Overview,Genres,UserData,ChildCount,SortName");
     q.addQueryItem("sortBy", "SortName");
     q.addQueryItem("sortOrder", "Ascending");
     url.setQuery(q);

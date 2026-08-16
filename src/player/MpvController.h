@@ -7,21 +7,7 @@
 #include <QStringList>
 
 class AppCore;
-
-#ifdef Q_OS_LINUX
-#include <xf86drm.h>
-#include <xf86drmMode.h>
-
-struct DrmSavedState {
-    uint32_t crtcId      = 0;
-    uint32_t connectorId = 0;
-    uint32_t fbId        = 0;
-    int      x           = 0;
-    int      y           = 0;
-    drmModeModeInfo mode = {};
-    bool     valid       = false;
-};
-#endif
+class DisplayHandoff;
 
 class MpvController : public QObject {
     Q_OBJECT
@@ -31,7 +17,9 @@ class MpvController : public QObject {
 
 public:
     explicit MpvController(const QString &appRoot, const QString &dataRoot,
-                           AppCore *appCore = nullptr, QObject *parent = nullptr);
+                           AppCore *appCore = nullptr,
+                           DisplayHandoff *handoff = nullptr,
+                           QObject *parent = nullptr);
     ~MpvController() override;
 
     int position()    const { return m_position;    }
@@ -109,8 +97,6 @@ private:
     enum class VideoProfile { Pi3, Pi4, PiFullKms, Generic };
 
     void sendCommand(const QJsonArray &args);
-    void doHeadlessRestore(int pos, int dur, const QString &reason);
-    bool detectHeadlessMode() const;
     VideoProfile detectVideoProfile() const;
     // Appends the profile-specific --vo/--gpu-context/--hwdec flags (honouring the
     // app-level "mpv_video_args" override) to a forming mpv argument list.
@@ -128,16 +114,12 @@ private:
     // App-level "video_output_levels" setting (default "Auto"). Returns the mpv
     // value for --video-output-levels ("limited"/"full"), or empty on Auto/unset.
     QString videoOutputLevels() const;
-    int  getActiveVt() const;
-    int  findFreeVt() const;
-    int  findQtDrmFd() const;
-    void switchToVt(int vt);
-#ifdef Q_OS_LINUX
-    void saveDrmCrtcState(int fd);
-    void restoreDrmCrtcState(int fd);
-#endif
 
-    AppCore      *m_appCore        = nullptr;
+    // Owner token handed to DisplayHandoff, so the app can tell who has the screen.
+    static constexpr const char *kHandoffOwner = "mpv";
+
+    AppCore        *m_appCore      = nullptr;
+    DisplayHandoff *m_handoff      = nullptr;
     VideoProfile  m_videoProfile  = VideoProfile::Generic;
     QProcess     *m_process        = nullptr;
     QLocalSocket *m_ipc            = nullptr;
@@ -165,8 +147,4 @@ private:
     bool          m_hasMpvOscScript     = false;
     bool          m_hasAmbientOscScript = false;
     bool          m_hasMediaKeysScript  = false;
-    int           m_qtDrmFd      = -1;
-#ifdef Q_OS_LINUX
-    DrmSavedState m_savedDrm     = {};
-#endif
 };

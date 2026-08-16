@@ -1,0 +1,37 @@
+{
+  "id": "com.240mp.scripts",
+  "name": "Scripts",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "ENABLED",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "scripts_directory",
+      "label": "Scripts Directory",
+      "type": "directory_browser",
+      "default": "",
+      "description": "Folder holding your .sh files\nDefault: user_scripts in the 240-MP data directory"
+    },
+    {
+      "key": "startup_script",
+      "label": "Auto-Run On Startup",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "getStartupScriptOptions",
+      "default": "None",
+      "description": "Runs automatically when 240-MP starts on this module\nSet START ON MODULE to Scripts in app settings"
+    },
+    {
+      "key": "rescan",
+      "label": "Rescan Scripts",
+      "type": "action",
+      "action_slot": "rescanScripts",
+      "description": "Re-read the scripts folder and create any missing .txt files"
+    }
+  ]
+}

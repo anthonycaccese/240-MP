@@ -21,6 +21,25 @@
 
 static const QString PLEX_TV = QStringLiteral("https://plex.tv");
 
+// Auth logging helpers.  plex.tv issues JWTs while PMS only accepts opaque
+// per-server tokens, so "which kind of token did we end up with" is the single
+// most useful thing to see in a bug report — and it can be logged safely.
+// tokenShape reports the kind and length only, midTail reduces a machine ID to
+// its last four characters, which is enough to correlate lines.  Neither ever
+// emits credential material; keep it that way if you add call sites.
+static QString tokenShape(const QString &t) {
+    if (t.isEmpty()) return QStringLiteral("<empty>");
+    return QStringLiteral("%1 len=%2")
+        .arg(t.startsWith(QLatin1String("eyJ")) ? QStringLiteral("JWT")
+                                                : QStringLiteral("opaque"),
+             QString::number(t.size()));
+}
+
+static QString midTail(const QString &mid) {
+    if (mid.isEmpty()) return QStringLiteral("<empty>");
+    return QStringLiteral("…") + mid.right(4);
+}
+
 static const QSet<QString> kSupportedLibraryTypes = {"movie", "show", "clip"};
 
 #ifdef Q_OS_MAC
@@ -496,21 +515,122 @@ QString PlexBackend::serverToken() const {
     return accountToken();
 }
 
+// The subset of a plex.tv Home user we persist and hand to QML. Single definition
+// so the link-time fetch and the live PIN-flag check cannot drift apart.
+QJsonObject PlexBackend::homeUserEntry(const QJsonObject &u) {
+    QJsonObject entry;
+    entry["id"]      = QString::number(u["id"].toInt());
+    entry["uuid"]    = u["uuid"].toString();
+    entry["title"]   = u["title"].toString(u["username"].toString()).toUpper();
+    entry["managed"] = u["managed"].toBool();
+    // "protected" means the profile has a PIN. Authoritative for prompting;
+    // see activateUser for why it is re-read live rather than trusted from cache.
+    entry["protected"] = u["protected"].toBool();
+    entry["admin"]     = u["admin"].toBool();
+    return entry;
+}
+
+QJsonObject PlexBackend::cachedUser(const QString &userId) const {
+    for (const auto &v : loadAuth()["users"].toArray()) {
+        if (v.toObject()["id"].toString() == userId) return v.toObject();
+    }
+    return {};
+}
+
 bool PlexBackend::isAccountOwner(const QString &userId) const {
     QString aid = loadAuth()["account_user_id"].toString();
     return !aid.isEmpty() && aid == userId;
 }
 
+// Reports whether a switch response is plex.tv refusing the switch for want of a
+// PIN.  Error code 1041 ("A valid PIN is required to perform this action") covers
+// both "the profile is PIN-protected and you sent none" and "that PIN was wrong".
+//
+// A 403 with no code we recognise is treated as a PIN refusal too, since that is
+// what a forbidden switch has meant in every report so far — but a bare 401 is
+// not: that is an invalid account token, and prompting for a PIN would send the
+// user down the wrong path entirely.
+static bool switchNeedsPin(int status, const QByteArray &body) {
+    if (status != 401 && status != 403) return false;
+
+    QJsonArray errors = QJsonDocument::fromJson(body).object()["errors"].toArray();
+    for (const auto &ev : errors)
+        if (ev.toObject()["code"].toInt() == 1041) return true;
+
+    return status == 403 && errors.isEmpty();
+}
+
 // Single consolidated user-switch path.  All three public callers (select_user,
 // reauth_select_user, applyCurrentUserSetting) delegate here and supply a callback
 // that handles the caller-specific signal and any post-switch state writes.
-void PlexBackend::activateUser(const QString &userId,
+//
+// pin is empty on the first attempt and only set when the caller is retrying after
+// userPinRequired.  It goes on the wire and is never written to disk.
+void PlexBackend::activateUser(const QString &userId, const QString &pin,
                                 std::function<void(const QVariantList &)> callback) {
-    QJsonObject auth = loadAuth();
-    QJsonObject user;
-    for (const auto &v : auth["users"].toArray()) {
-        if (v.toObject()["id"].toString() == userId) { user = v.toObject(); break; }
-    }
+    QJsonObject user = cachedUser(userId);
+    if (user.isEmpty()) { emit errorOccurred("USER NOT FOUND"); return; }
+
+    m_pendingPinUserId.clear();   // re-armed below if this attempt is refused
+
+    // Retrying with a PIN in hand: the gate has already been answered.
+    if (!pin.isEmpty()) { performUserSwitch(userId, pin, callback); return; }
+
+    // Honour the profile's own PIN gate before asking plex.tv to switch. plex.tv
+    // only *validates* a PIN when one is supplied — on many accounts it will
+    // happily switch into a "PIN Required" profile when none is sent — so this
+    // flag is what makes the parental control mean anything, and it is what every
+    // other Plex client prompts on. A supplied PIN is still checked server-side,
+    // so this is a gate, not a pretence.
+    //
+    // Read it live rather than from plex_auth.json: the cached copy is written at
+    // link time, so a PIN added in Plex afterwards would be silently ignored (and
+    // a PIN removed would prompt forever). A switch is an explicit, infrequent
+    // action that already costs two round trips, so one more is worth not having
+    // a security gate depend on stale state. If the request fails we fall back to
+    // the cached flag, and the 1041 refusal path still backstops us either way.
+    auto *usersReply = plexGet(QUrl(PLEX_TV + "/api/v2/home/users"), accountToken());
+    connect(usersReply, &QNetworkReply::finished, this,
+            [this, usersReply, userId, user, callback]() {
+        usersReply->deleteLater();
+
+        bool isProtected = user["protected"].toBool();
+        if (usersReply->error() == QNetworkReply::NoError) {
+            QJsonArray fresh;
+            for (const auto &v : QJsonDocument::fromJson(usersReply->readAll())
+                                     .object()["users"].toArray()) {
+                QJsonObject entry = homeUserEntry(v.toObject());
+                if (entry["id"].toString() == userId)
+                    isProtected = entry["protected"].toBool();
+                fresh.append(entry);
+            }
+            // Keep the cache honest while we have the answer — this is also how
+            // renamed, added and removed profiles get picked up.
+            if (!fresh.isEmpty()) {
+                QJsonObject a = loadAuth();
+                a["users"] = fresh;
+                saveAuth(a);
+            }
+        } else {
+            qWarning().noquote() << "[PlexAuth] live PIN-flag check failed ("
+                                 << usersReply->errorString()
+                                 << ") — falling back to cached flag";
+        }
+
+        if (isProtected) {
+            qWarning().noquote() << "[PlexAuth] profile is PIN-protected — prompting";
+            m_pendingPinUserId = userId;
+            emit userPinRequired(userId, false);
+            return;
+        }
+        performUserSwitch(userId, QString(), callback);
+    });
+}
+
+// The switch itself, split out so activateUser can gate on the PIN flag first.
+void PlexBackend::performUserSwitch(const QString &userId, const QString &pin,
+                                     std::function<void(const QVariantList &)> callback) {
+    QJsonObject user = cachedUser(userId);
     if (user.isEmpty()) { emit errorOccurred("USER NOT FOUND"); return; }
 
     QString switchKey = user["uuid"].toString();
@@ -518,16 +638,46 @@ void PlexBackend::activateUser(const QString &userId,
     QString masterToken = accountToken();
     bool owner = isAccountOwner(userId);
 
-    auto *switchReply = plexPost(
-        QUrl(PLEX_TV + "/api/v2/home/users/" + switchKey + "/switch"), masterToken);
+    QUrl switchUrl(PLEX_TV + "/api/v2/home/users/" + switchKey + "/switch");
+    if (!pin.isEmpty()) {
+        QUrlQuery pq;
+        pq.addQueryItem("pin", pin);
+        switchUrl.setQuery(pq);
+    }
+    bool hadPin = !pin.isEmpty();
+
+    auto *switchReply = plexPost(switchUrl, masterToken);
     connect(switchReply, &QNetworkReply::finished, this,
-            [this, switchReply, userId, masterToken, owner, callback]() mutable {
+            [this, switchReply, userId, masterToken, owner, hadPin, callback]() mutable {
         switchReply->deleteLater();
+        int switchStatus = switchReply->attribute(
+            QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QByteArray switchBody = switchReply->readAll();
+
+        // A PIN-protected profile refuses the switch outright.  Stop here rather
+        // than falling through to the resource fetch: without a switch token the
+        // owner's per-server tokens stay JWTs, PMS rejects every one of them, and
+        // the failure only surfaces much later as an unexplained 401.
+        if (switchNeedsPin(switchStatus, switchBody)) {
+            qWarning().noquote() << "[PlexAuth] switch needs PIN — status=" << switchStatus
+                                 << "retry=" << hadPin;
+            // Park the user so a caller with no UI to prompt from (the
+            // current_user_id setting) can hand off to Root.qml on module entry.
+            // In-module callers prompt immediately and clear this on the retry.
+            m_pendingPinUserId = userId;
+            if (hadPin) emit errorOccurred("INCORRECT PIN");
+            emit userPinRequired(userId, hadPin);
+            return;
+        }
+
         QString switchToken = masterToken;
         if (switchReply->error() == QNetworkReply::NoError) {
-            QString t = QJsonDocument::fromJson(switchReply->readAll()).object()["authToken"].toString();
+            QString t = QJsonDocument::fromJson(switchBody).object()["authToken"].toString();
             if (!t.isEmpty()) switchToken = t;
         }
+        qWarning().noquote() << "[PlexAuth] switch status=" << switchStatus
+                             << "token=" << tokenShape(switchToken)
+                             << "differsFromMaster=" << (switchToken != masterToken);
 
         QUrl resUrl(PLEX_TV + "/api/v2/resources");
         QUrlQuery q;
@@ -563,6 +713,33 @@ void PlexBackend::activateUser(const QString &userId,
                             tokenMap[it.key()] = switchToken;
                     }
                 }
+            }
+
+            // Never persist a JWT as a server token.  plex.tv hands back the account
+            // JWT as the accessToken for owned servers, and PMS rejects those, so a
+            // JWT that survived the swap above is not a credential — storing it only
+            // buys an unexplained 401 later.  Shared servers (owned=false) come with
+            // real opaque tokens straight from /api/v2/resources and are unaffected.
+            int dropped = 0;
+            for (const QString &mid : tokenMap.keys()) {
+                if (tokenMap[mid].toString().startsWith(QLatin1String("eyJ"))) {
+                    tokenMap.remove(mid);
+                    dropped++;
+                }
+            }
+            qWarning().noquote() << "[PlexAuth] server tokens usable=" << tokenMap.size()
+                                 << "dropped(JWT)=" << dropped;
+
+            // Every token we were given is unusable — activating would leave the
+            // module authenticated but unable to reach any server.  Say so now.
+            // (An empty map with nothing dropped just means the resource fetch
+            // failed; that path still falls through and keeps the previous tokens.)
+            if (tokenMap.isEmpty() && dropped > 0) {
+                emit errorOccurred("PLEX DID NOT ISSUE A SERVER TOKEN FOR THIS DEVICE");
+                return;
+            }
+
+            if (owner) {
                 if (!tokenMap.isEmpty())
                     a["user_server_tokens"] = tokenMap;
                 a["managed_user_tokens"] = QJsonObject{}; // cleared on owner switch
@@ -626,6 +803,7 @@ QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
     return QVariantMap{
         {"ratingKey",              m["ratingKey"].toString()},
         {"title",                  m["title"].toString().toUpper()},
+        {"titleSort",              m["titleSort"].toString().toUpper()},
         {"editionTitle",           m["editionTitle"].toString()},
         {"year",                   m["year"].toVariant()},
         {"duration",               m["duration"].toInt()},
@@ -846,15 +1024,8 @@ void PlexBackend::fetchUsersAndServers(const QString &token) {
         QJsonObject usersData = QJsonDocument::fromJson(usersReply->readAll()).object();
         QJsonArray rawUsers = usersData["users"].toArray();
         QJsonArray users;
-        for (const auto &v : rawUsers) {
-            QJsonObject u = v.toObject();
-            QJsonObject entry;
-            entry["id"]      = QString::number(u["id"].toInt());
-            entry["uuid"]    = u["uuid"].toString();
-            entry["title"]   = u["title"].toString(u["username"].toString()).toUpper();
-            entry["managed"] = u["managed"].toBool();
-            users.append(entry);
-        }
+        for (const auto &v : rawUsers)
+            users.append(homeUserEntry(v.toObject()));
 
         // Step 2: fetch resources (servers)
         QUrl resUrl(PLEX_TV + "/api/v2/resources");
@@ -1058,8 +1229,8 @@ void PlexBackend::load_users_from_cache() {
 // select_user
 // ---------------------------------------------------------------------------
 
-void PlexBackend::select_user(const QString &userId) {
-    activateUser(userId, [this, userId](const QVariantList &accessibleServers) {
+void PlexBackend::select_user(const QString &userId, const QString &pin) {
+    activateUser(userId, pin, [this, userId](const QVariantList &accessibleServers) {
         QJsonObject cfg = loadConfig();
         QJsonObject mods = cfg["modules"].toObject();
         QJsonObject plexCfg = mods["com.240mp.plex"].toObject();
@@ -1168,6 +1339,12 @@ void PlexBackend::load_libraries_impl() {
     QString token = serverToken();
     if (uri.isEmpty()) { emit errorOccurred("NO SERVER CONFIGURED"); return; }
 
+    // The one line that says whether we are about to hand PMS something it can
+    // use.  "JWT" here means a 401 is coming; see tokenShape.
+    qWarning().noquote() << "[PlexAuth] load_libraries mid="
+                         << midTail(loadAuth()["active_server_machine_id"].toString())
+                         << "token=" << tokenShape(token);
+
     // Check continue watching
     QUrl cwUrl(uri + "/hubs/continueWatching");
     QUrlQuery cwq; cwq.addQueryItem("limit","1");
@@ -1191,15 +1368,49 @@ void PlexBackend::load_libraries_impl() {
                     handle498([this]{ load_libraries_impl(); });
                 } else if (secStatus == 401) {
                     // 401 from PMS means this server rejected our token — the plex.tv account
-                    // auth is NOT invalidated. Do not delete plex_auth.json. The server may be
-                    // running an older version that doesn't accept JWTs yet; the user should
-                    // try selecting a different server or update their Plex Media Server.
-                    emit errorOccurred("SERVER AUTHENTICATION FAILED. TRY SELECTING A DIFFERENT SERVER OR UPDATE YOUR PLEX MEDIA SERVER.");
+                    // auth is NOT invalidated. Do not delete plex_auth.json.
+                    //
+                    // The usual cause is a stale per-server token: the map is first written at
+                    // link time straight from /api/v2/resources, where servers the user owns
+                    // come back with a plex.tv JWT that PMS does not accept. activateUser swaps
+                    // those for a PMS-usable token during user selection, but that swap is
+                    // skipped silently if either of its two requests fails (a brief network
+                    // blip during first-run setup is enough), leaving the JWT in place forever.
+                    //
+                    // So before surfacing an error, re-run activateUser for the active user to
+                    // refetch and rewrite the token map, then retry once. m_serverAuthRetried
+                    // keeps that to a single attempt.
+                    // activateUser emits its own "USER NOT FOUND" if the id isn't in the
+                    // cached users array, which would be a confusing thing to show here —
+                    // so only take the retry path when we know it will resolve.
+                    QJsonObject a = loadAuth();
+                    QString uid = a["active_user_id"].toString();
+                    bool known = false;
+                    for (const auto &v : a["users"].toArray())
+                        if (v.toObject()["id"].toString() == uid) { known = true; break; }
+                    if (!m_serverAuthRetried && !uid.isEmpty() && known) {
+                        m_serverAuthRetried = true;
+                        qWarning("[PlexBackend] PMS rejected our token — refreshing server tokens and retrying");
+                        // No PIN here: if the profile needs one, activateUser emits
+                        // userPinRequired and the view prompts.
+                        activateUser(uid, QString(),
+                                     [this](const QVariantList &) { load_libraries_impl(); });
+                    } else {
+                        m_serverAuthRetried = false;
+                        // A JWT-shaped token means plex.tv never issued a server
+                        // credential for us — naming that is more use than "try again".
+                        emit errorOccurred(
+                            serverToken().startsWith(QLatin1String("eyJ"))
+                                ? "PLEX DID NOT ISSUE A SERVER TOKEN FOR THIS DEVICE. "
+                                  "SIGN OUT AND SIGN IN AGAIN."
+                                : "SERVER REJECTED THIS DEVICE. PLEASE TRY AGAIN.");
+                    }
                 } else {
                     emit errorOccurred("LOAD LIBRARIES FAILED: " + secReply->errorString());
                 }
                 return;
             }
+            m_serverAuthRetried = false; // this server accepted our token; re-arm the retry
             QJsonArray sections = QJsonDocument::fromJson(secReply->readAll())
                                   .object()["MediaContainer"].toObject()["Directory"].toArray();
 
@@ -2283,7 +2494,10 @@ void PlexBackend::applyCurrentUserSetting() {
                      ["com.240mp.plex"].toObject()["current_user_id"].toString();
     if (userId.isEmpty()) return;
 
-    activateUser(userId, [this](const QVariantList &accessibleServers) {
+    // This runs from the app Settings screen, where the Plex views are not loaded
+    // and so cannot prompt.  activateUser parks the user in m_pendingPinUserId and
+    // Root.qml drains it on the next module entry, ahead of the auto_sign_in branch.
+    activateUser(userId, QString(), [this](const QVariantList &accessibleServers) {
         QJsonObject a = loadAuth();
         QString curMid = a["active_server_machine_id"].toString();
         bool curAccessible = false;
@@ -2333,8 +2547,26 @@ void PlexBackend::applyCurrentServerSetting() {
 // reauth_select_user
 // ---------------------------------------------------------------------------
 
-void PlexBackend::reauth_select_user(const QString &userId) {
-    activateUser(userId, [this, userId](const QVariantList &accessibleServers) {
+// Backing out of a PIN prompt.  The current_user_id setting may already name the
+// user we failed to switch to, so put it back to whoever is actually active —
+// otherwise config claims a user the app never activated.
+void PlexBackend::cancel_pending_pin() {
+    m_pendingPinUserId.clear();
+
+    QString activeId = loadAuth()["active_user_id"].toString();
+    QJsonObject cfg = loadConfig();
+    QJsonObject mods = cfg["modules"].toObject();
+    QJsonObject plexCfg = mods["com.240mp.plex"].toObject();
+    if (plexCfg["current_user_id"].toString() == activeId) return;
+
+    plexCfg["current_user_id"] = activeId;
+    mods["com.240mp.plex"] = plexCfg;
+    cfg["modules"] = mods;
+    saveConfig(cfg);
+}
+
+void PlexBackend::reauth_select_user(const QString &userId, const QString &pin) {
+    activateUser(userId, pin, [this, userId](const QVariantList &accessibleServers) {
         QJsonObject a = loadAuth();
         QJsonObject cfg = loadConfig();
         QJsonObject mods = cfg["modules"].toObject();

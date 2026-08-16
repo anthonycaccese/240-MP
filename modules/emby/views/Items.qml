@@ -27,16 +27,31 @@ FocusScope {
     property bool letterNavActive: false
     property var letterIndex: []
 
-    // Sort key for a title: strip a leading article, take the first A–Z char,
-    // else group under "#".
-    function sortKey(title) {
-        var t = (title || "").toLowerCase()
-        var articles = ["the ", "a ", "an "]
-        for (var i = 0; i < articles.length; i++) {
-            if (t.indexOf(articles[i]) === 0) { t = t.substring(articles[i].length); break }
+    // Sort key for an item: take the first A–Z char of the server's sort name
+    // (which the browse queries also sort by, and which already has articles
+    // stripped per the server's config), else group under "#". Falls back to
+    // stripping a leading article from the display title when no sort name came
+    // back — otherwise the letters would disagree with the list order.
+    function sortKey(item) {
+        var sortTitle = (item && item.titleSort) || ""
+        var t = (sortTitle || (item && item.title) || "").toLowerCase()
+        if (!sortTitle) {
+            var articles = ["the ", "a ", "an "]
+            for (var i = 0; i < articles.length; i++) {
+                if (t.indexOf(articles[i]) === 0) { t = t.substring(articles[i].length); break }
+            }
         }
         var ch = t.charAt(0).toUpperCase()
         return (ch >= 'A' && ch <= 'Z') ? ch : '#'
+    }
+
+    // Highlights the letter matching the currently selected item.
+    function syncLetterToItem() {
+        var curLetter = sortKey(items[itemList.currentIndex])
+        for (var i = 0; i < letterIndex.length; i++) {
+            if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
+        }
+        letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
     }
 
     // Build [{letter, firstIndex}] over the (already alpha-sorted) item list.
@@ -44,7 +59,7 @@ FocusScope {
         var seen = {}
         var result = []
         for (var i = 0; i < itemArr.length; i++) {
-            var letter = sortKey(itemArr[i].title || "")
+            var letter = sortKey(itemArr[i])
             if (!seen[letter]) {
                 seen[letter] = true
                 result.push({ letter: letter, firstIndex: i })
@@ -231,11 +246,7 @@ FocusScope {
             if (count === 0) return
             if (currentIndex > 0) {
                 currentIndex--
-                var curLetter = sortKey((items[itemList.currentIndex] && items[itemList.currentIndex].title) || "")
-                for (var i = 0; i < letterIndex.length; i++) {
-                    if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
-                }
-                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+                itemListRoot.syncLetterToItem()
             }
             else {
                 currentIndex = count - 1
@@ -248,11 +259,7 @@ FocusScope {
             if (count === 0) return
             if (currentIndex < count - 1) {
                 currentIndex++
-                var curLetter = sortKey((items[itemList.currentIndex] && items[itemList.currentIndex].title) || "")
-                for (var i = 0; i < letterIndex.length; i++) {
-                    if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
-                }
-                letterList.positionViewAtIndex(letterList.currentIndex, ListView.Contain)
+                itemListRoot.syncLetterToItem()
             }
             else {
                 currentIndex = 0
@@ -265,10 +272,7 @@ FocusScope {
         Keys.onPressed: function(event) {
             // Right hands focus to the letter panel, synced to the current letter.
             if (event.key === Qt.Key_Right && showLetterNav && letterIndex.length > 0) {
-                var curLetter = sortKey((items[itemList.currentIndex] && items[itemList.currentIndex].title) || "")
-                for (var i = 0; i < letterIndex.length; i++) {
-                    if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
-                }
+                itemListRoot.syncLetterToItem()
                 letterNavActive = true
                 letterList.forceActiveFocus()
                 event.accepted = true

@@ -9,7 +9,9 @@
 #include <QWindow>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QTimer>
 #include <locale.h>
+#include <csignal>
 
 #include "AppCore.h"
 #include "modules/local_files/LocalFilesBackend.h"
@@ -20,11 +22,13 @@
 #include "modules/nfc_reader/NfcReaderBackend.h"
 #include "modules/youtube/YouTubeBackend.h"
 #include "modules/weather/WeatherBackend.h"
+#include "modules/scripts/ScriptsBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
 #include "input/IdleTracker.h"
 #include "update/UpdateManager.h"
 #include "util/ExecPath.h"
+#include "util/DisplayHandoff.h"
 #ifdef Q_OS_MAC
 #include "util/MacosUtils.h"
 #endif
@@ -56,6 +60,17 @@ static QString resolveDataRoot() {
     return path;
 }
 
+// Terminating signals must unwind normally rather than killing the process where
+// it stands. Without this, `systemctl stop`, `pkill`, or a shutdown can leave mpv
+// or another process running and with the scripts module (takeover specifically), it
+// could also leave a headless Pi on a blank VT with DRM master dropped, because
+// ~DisplayHandoff never got the chance to put the display back.
+//
+// Async-signal-safe: only sets a flag. A 100 ms timer in main() polls it and calls
+// quit() from the event loop, where destructors run properly.
+static volatile std::sig_atomic_t g_termRequested = 0;
+extern "C" void mp240HandleTerm(int) { g_termRequested = 1; }
+
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("240-MP");
@@ -73,6 +88,19 @@ int main(int argc, char *argv[]) {
 #endif
 
     setlocale(LC_NUMERIC, "C");
+
+    std::signal(SIGTERM, mp240HandleTerm);
+    std::signal(SIGINT,  mp240HandleTerm);
+    std::signal(SIGHUP,  mp240HandleTerm);
+    QTimer termPoll;
+    termPoll.setInterval(100);
+    QObject::connect(&termPoll, &QTimer::timeout, &app, [&app]() {
+        if (g_termRequested) {
+            qInfo("[main] Termination signal received — shutting down cleanly");
+            app.quit();
+        }
+    });
+    termPoll.start();
 
     // Once, before anything looks for or spawns mpv / yt-dlp: the locators are
     // pure queries and deliberately do not touch the environment themselves.
@@ -129,7 +157,9 @@ int main(int argc, char *argv[]) {
     NfcReaderBackend    nfcReader(appRoot, dataRoot);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     WeatherBackend      weatherBackend(appRoot, dataRoot);
-    MpvController       mpvController(appRoot, dataRoot, &appCore);
+    DisplayHandoff      displayHandoff;
+    ScriptsBackend      scriptsBackend(appRoot, dataRoot, &displayHandoff);
+    MpvController       mpvController(appRoot, dataRoot, &appCore, &displayHandoff);
     InputManager        inputManager(dataRoot, &appCore);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
     UpdateManager       updateManager(appRoot, dataRoot);
@@ -155,6 +185,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.nfc_reader",   "nfcReaderBackend",   &nfcReader,   ctx);
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
     appCore.registerModule("com.240mp.weather",      "weatherBackend",     &weatherBackend, ctx);
+    appCore.registerModule("com.240mp.scripts",      "scriptsBackend",     &scriptsBackend, ctx);
 
     ctx->setContextProperty("idleTracker",   &idleTracker);
     ctx->setContextProperty("appCore",       &appCore);

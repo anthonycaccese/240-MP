@@ -45,6 +45,7 @@ public:
     Q_INVOKABLE QVariantList listDirectories(const QString &path);
     Q_INVOKABLE QString parentDirectory(const QString &path);
     Q_INVOKABLE QString homePath();
+    Q_INVOKABLE QString localIpAddress() const;
     Q_INVOKABLE QString startupModuleEntryPoint() const;
     Q_INVOKABLE QString get_module_auth_state(const QString &moduleId);
 
@@ -72,6 +73,9 @@ private:
     QJsonObject loadConfig() const;
     void saveConfig(const QJsonObject &config) const;
     QString moduleIdForBackend(QObject *backend) const;
+    // Extra top-level menu rows a module's backend wants to contribute. Probed,
+    // not connected — see the comment at the call site in scan_for_modules.
+    QVariantList menuEntriesForModule(const QString &moduleId) const;
     // Resolve a module's enabled state: config override if present, else the
     // manifest default (an "enabled" setting whose default is "OFF"), else true.
     bool isModuleEnabled(const ModuleEntry &m, const QJsonObject &modulesConfig) const;

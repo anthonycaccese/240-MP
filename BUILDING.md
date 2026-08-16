@@ -25,13 +25,15 @@ brew install mpv
 
 Note: 240-MP uses mpv as an external subprocess for video playback. It does not link against libmpv at build time, so mpv only needs to be on your `PATH` when running the app.
 
-**Install yt-dlp (optional, required only for the YouTube module):**
+**Install yt-dlp and Deno (optional, required only for the YouTube module):**
 
 ```bash
-brew install yt-dlp
+brew install yt-dlp deno
 ```
 
 mpv's ytdl hook uses `yt-dlp` to resolve YouTube URLs at playback time. The YouTube module also expects at least one of two files in the data directory (`#` comments allowed in both; each file only gates its own menu entries): `youtube_subscriptions.txt` (one channel ID per line — enables Subscriptions/Channels; see [INSTALL.md](INSTALL.md)) and/or `youtube_playlists.txt` (one playlist URL or ID per line, optional `My Name | <url>` display-name prefix — enables Playlists; contents are fetched by running `yt-dlp` directly).
+
+For full YouTube support, current yt-dlp versions also use an external JavaScript runtime. Deno is the recommended runtime. See yt-dlp's [EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS) for the currently supported runtimes and versions.
 
 **Install SDL2 (required, gamepad input):**
 
@@ -125,6 +127,21 @@ For the YouTube module, additionally install `yt-dlp` — mpv's ytdl hook uses i
 ```bash
 sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp
 ```
+
+For full YouTube support, yt-dlp also uses an external JavaScript runtime; install the recommended Deno runtime by following yt-dlp's [EJS setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS), and make sure `deno` is on the `PATH` of the user or systemd service that runs 240-MP.
+
+If yt-dlp is current and Deno is detected but YouTube still returns `Sign in to confirm you're not a bot`, the response can be route-specific. On a system that already has working IPv6, compare:
+
+```bash
+yt-dlp --verbose --simulate --force-ipv4 \
+  'https://www.youtube.com/watch?v=VIDEO_ID'
+yt-dlp --verbose --simulate --force-ipv6 \
+  'https://www.youtube.com/watch?v=VIDEO_ID'
+```
+
+If IPv4 returns the bot-check error while IPv6 succeeds, the failure is tied to the IPv4 route rather than the yt-dlp installation. A working IPv6 route may allow playback to proceed, but enabling it is a device and network configuration choice outside 240-MP.
+
+IPv6 is not a 240-MP requirement, and 240-MP should not enable or force it automatically; these commands are only a diagnostic.
 
 ### Get the source
 
