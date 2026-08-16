@@ -13,6 +13,8 @@ FocusScope {
     property string pinCode: ""
     property bool waiting: false
     property string errorMsg: ""
+    // Remembered only so a PIN prompt can name the profile it is asking about.
+    property var autoUser: null
 
     Connections {
         target: plexBackend
@@ -30,10 +32,23 @@ FocusScope {
         function onUsersLoaded(users) {
             if (users.length === 1) {
                 // Only one user — auto-select and go straight to server select
+                pinAuthRoot.autoUser = users[0]
                 plexBackend.select_user(users[0].id)
             } else {
                 pinAuthRoot.replaceWith("UserSelect.qml", { users: users })
             }
+        }
+
+        // The auto-selected profile is PIN-protected. Hand off rather than sitting
+        // on "Waiting..." forever.
+        function onUserPinRequired(userId, wrongPin) {
+            pinAuthRoot.waiting = false
+            pinAuthRoot.replaceWith("ProfilePin.qml", {
+                userId: userId,
+                title: pinAuthRoot.autoUser ? pinAuthRoot.autoUser.title : "",
+                reauth: false,
+                wrongPin: wrongPin
+            })
         }
 
         function onServersLoaded(servers) {
