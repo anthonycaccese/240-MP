@@ -5,6 +5,7 @@
 #include "../util/DisplayHandoff.h"
 #include "../util/FontconfigOverride.h"
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -420,6 +421,34 @@ void MpvController::loadAndPlay(const QString &url, float startSeconds,
         args << QString("--input-conf=%1").arg(m_inputConfPath)
              << "--video-sync=audio"
              << "--fullscreen" << "--no-native-fs";
+        // Playback follows the UI's display (app-level "display_index"). Only
+        // when a non-default display is configured, so the default command
+        // line is untouched. Which form of the option works depends on the
+        // windowing system mpv itself ends up on:
+        //  - macOS: numeric --fs-screen indexes NSScreen.screens, the same
+        //    ordering Qt's screen list (and display_index) already relies on.
+        //  - X11 / native Wayland: --fs-screen-name matched against the RandR
+        //    output / wl_output name, which is exactly QScreen::name() there.
+        //    (Numeric would mean Xinerama order, not guaranteed to match Qt's.)
+        //  - Qt on Wayland but DISPLAY set: the env block above stripped
+        //    WAYLAND_DISPLAY, so mpv runs on Xwayland where RandR outputs are
+        //    named "XWAYLAND0..." and can't match QScreen::name(). Fall back
+        //    to numeric — Xwayland's screen order follows wl_output
+        //    announcement order like Qt's list does. Best effort; on a
+        //    mismatch mpv warns and uses the current screen.
+        if (m_displayIndex > 0) {
+#ifdef Q_OS_MACOS
+            args << QString("--fs-screen=%1").arg(m_displayIndex);
+#else
+            const bool mpvOnXwayland =
+                QGuiApplication::platformName() == QLatin1String("wayland")
+                && !qEnvironmentVariable("DISPLAY").trimmed().isEmpty();
+            if (mpvOnXwayland || m_displayScreenName.isEmpty())
+                args << QString("--fs-screen=%1").arg(m_displayIndex);
+            else
+                args << QString("--fs-screen-name=%1").arg(m_displayScreenName);
+#endif
+        }
         appendVideoArgs(args);
 #ifdef Q_OS_MACOS
         // mpv runs as a separate process and can't see the app-bundle font via
@@ -695,6 +724,11 @@ bool MpvController::smoothPlaybackEnabled() const {
     if (!v.isValid() || v.toString().isEmpty())
         return true;
     return v.toString().compare(QStringLiteral("Off"), Qt::CaseInsensitive) != 0;
+}
+
+void MpvController::setTargetDisplay(int index, const QString &screenName) {
+    m_displayIndex      = index;
+    m_displayScreenName = screenName;
 }
 
 bool MpvController::autoCropEnabled() const {
