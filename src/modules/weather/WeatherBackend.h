@@ -49,7 +49,8 @@ class WeatherBackend : public QObject {
 
 public:
     explicit WeatherBackend(const QString &appRoot, const QString &dataRoot,
-                            QObject *parent = nullptr);
+                            QObject *parent = nullptr,
+                            QNetworkAccessManager *networkAccessManager = nullptr);
     ~WeatherBackend() override;
 
     QString     locationName()     const { return m_locationName; }
@@ -158,6 +159,12 @@ private:
     QString m_dataRoot;
     QNetworkAccessManager *m_nam = nullptr;
     QTimer  *m_refresh = nullptr;
+
+    // Primary and Other Locations are independent request families. Each new
+    // request invalidates older callbacks in only its own family, so replies
+    // that finish out of order cannot overwrite the newest snapshot.
+    quint64 m_weatherRequestGeneration = 0;
+    quint64 m_otherRequestGeneration = 0;
 
     // Resolved location, cached for the life of the process. Deliberately not
     // persisted: the project writes config.json only on direct user

@@ -18,6 +18,8 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
 find_package(OpenSSL REQUIRED)
 find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
+include(CTest)
+
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
 # around mpv playback so Qt EGLFS can resume cleanly after mpv exits.
 if(NOT APPLE)
@@ -108,6 +110,26 @@ endif()
 target_include_directories(240mp PRIVATE
     src
 )
+
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+
+    add_executable(weather_units_race_repro
+        tests/weather/WeatherUnitsRaceRepro.cpp
+        src/modules/weather/WeatherBackend.cpp
+        src/util/MpvLocator.cpp
+    )
+
+    target_compile_definitions(weather_units_race_repro PRIVATE APP_VERSION="test")
+    target_include_directories(weather_units_race_repro PRIVATE src)
+    target_link_libraries(weather_units_race_repro PRIVATE
+        Qt6::Core
+        Qt6::Network
+        Qt6::Test
+    )
+
+    add_test(NAME weather_units_race_repro COMMAND weather_units_race_repro)
+endif()
 
 # ── macOS bundle metadata ──────────────────────────────────────────────────────
 set_target_properties(240mp PROPERTIES
