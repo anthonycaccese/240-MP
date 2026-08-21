@@ -64,6 +64,12 @@ public:
 
     // Playback
     Q_INVOKABLE void load_item_detail(const QString &ratingKey);
+    // Resolves an NFC card's Plex guid to a playable item detail (same shape as
+    // load_item_detail) and emits cardItemReady, or cardError with a message the
+    // UI can show verbatim. mode is "shuffle" for a jukebox-style show/season card
+    // and empty otherwise; it is ignored for movies and episodes. See the
+    // implementation comment for why resolution is a single unscoped guid query.
+    Q_INVOKABLE void resolve_card(const QString &guid, const QString &mode);
     Q_INVOKABLE void request_transcode(const QString &ratingKey, const QString &partKey,
                                        const QString &sessionId,
                                        const QString &audioId, const QString &subtitleId,
@@ -122,6 +128,8 @@ signals:
     void extrasLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);
     void nextEpisodeReady(const QVariant &detail);
+    void cardItemReady(const QVariant &detail);
+    void cardError(const QString &message);
 
     void liveChannelsLoaded(const QVariant &channels);
 
@@ -171,6 +179,14 @@ private:
     // Expands any season-type items in rawItems into their child episodes, then calls callback.
     // Order is preserved. callback is called synchronously if no seasons are present.
     void flattenSeasons(const QVariantList &rawItems, std::function<void(const QVariantList &)> callback);
+
+    // NFC card resolution helpers.
+    void fetchChildren(const QString &ratingKey,
+                       std::function<void(const QVariantList &)> callback);
+    // Chooses the episode a show/season card plays: a random one for "shuffle",
+    // otherwise on-deck (first in-progress, else first unwatched, else first).
+    static QVariantMap pickCardEpisode(const QVariantList &pool, const QString &mode);
+    void emitCardDetail(const QString &ratingKey, bool trackProgress);
 
     // Connection probing
     void probeConnections(const QJsonArray &connections,

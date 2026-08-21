@@ -14,6 +14,7 @@
 #include <QVariantMap>
 #include <QDebug>
 #include <QDateTime>
+#include <QRandomGenerator>
 
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -802,6 +803,7 @@ QString PlexBackend::msToDisplay(int ms) {
 QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
     return QVariantMap{
         {"ratingKey",              m["ratingKey"].toString()},
+        {"guid",                   m["guid"].toString()},
         {"title",                  m["title"].toString().toUpper()},
         {"titleSort",              m["titleSort"].toString().toUpper()},
         {"editionTitle",           m["editionTitle"].toString()},
@@ -1863,6 +1865,7 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
 
     return QVariantMap{
         {"ratingKey",        meta["ratingKey"].toString()},
+        {"guid",             meta["guid"].toString()},
         {"title",            meta["title"].toString().toUpper()},
         {"editionTitle",     meta["editionTitle"].toString()},
         {"year",             meta["year"].toVariant()},
@@ -2064,6 +2067,168 @@ void PlexBackend::load_next_episode(const QString &currentRatingKey) {
                 emit nextEpisodeReady(buildItemDetail(arr[0].toObject()));
             });
         });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// NFC card resolution
+//
+// An NFC card stores a Plex guid verbatim (e.g. "plex://show/5f57bdaf…"), never
+// a ratingKey: guids survive library re-scans and moves between servers, which a
+// physical card on a shelf needs and a ratingKey cannot promise.
+//
+// Resolution starts with an unscoped /library/all?guid= query. Unscoped matters
+// twice over: it searches every section, so the card says *what* to play and we
+// decide *where* it lives, and it needs no "type" hint (a section-scoped query
+// would require type=4 to match episodes).
+//
+// That query identifies the item but never returns a playable one: /library/all
+// omits Media/Part unless a type= filter is supplied, and the type is exactly
+// what we are asking it for. So the chosen item is always re-fetched by
+// ratingKey, which does carry Media.
+//
+// Verified against PMS 2026-08-20 at movie/show/season/episode level. External
+// ids (imdb://, tmdb://, tvdb://) do NOT resolve through this filter even though
+// they appear in the item's Guid[] array — only plex:// guids work.
+// ---------------------------------------------------------------------------
+
+// Fetches an item's children as formatItem maps. Errors yield an empty list —
+// every caller here treats "no children" and "couldn't fetch children" the same.
+void PlexBackend::fetchChildren(const QString &ratingKey,
+                                std::function<void(const QVariantList &)> callback) {
+    auto *reply = plexGet(QUrl(serverUrl() + "/library/metadata/" + ratingKey + "/children"),
+                          serverToken());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, callback]() {
+        reply->deleteLater();
+        QVariantList out;
+        if (reply->error() == QNetworkReply::NoError) {
+            QJsonArray meta = QJsonDocument::fromJson(reply->readAll())
+                              .object()["MediaContainer"].toObject()["Metadata"].toArray();
+            for (const auto &mv : meta) out.append(formatItem(mv.toObject()));
+        }
+        callback(out);
+    });
+}
+
+// Picks the episode a show/season card should play.
+//
+// The on-deck choice is derived from the episode pool rather than from
+// /library/metadata/{key}/onDeck, for two reasons: that endpoint 404s outright
+// when a show has nothing on deck (fully unwatched or fully watched), and
+// load_on_deck_for only reports episodes with viewOffset > 0, so it answers
+// "what's part-watched", not "what's next". The pool is already in season/episode
+// order, so first-in-progress → first-unwatched → first is exactly on-deck.
+QVariantMap PlexBackend::pickCardEpisode(const QVariantList &pool, const QString &mode) {
+    if (pool.isEmpty()) return {};
+
+    if (mode == QLatin1String("shuffle")) {
+        return pool.at(QRandomGenerator::global()->bounded(pool.size())).toMap();
+    }
+    for (const auto &v : pool) {
+        if (v.toMap()["viewOffset"].toInt() > 0) return v.toMap();
+    }
+    for (const auto &v : pool) {
+        if (v.toMap()["viewCount"].toInt() == 0) return v.toMap();
+    }
+    return pool.first().toMap();
+}
+
+// Loads a chosen episode's full detail and emits it as the card's result.
+void PlexBackend::emitCardDetail(const QString &ratingKey, bool trackProgress) {
+    auto *reply = plexGet(QUrl(serverUrl() + "/library/metadata/" + ratingKey), serverToken());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, trackProgress]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit cardError(QStringLiteral("COULD NOT LOAD ITEM")); return;
+        }
+        QJsonArray arr = QJsonDocument::fromJson(reply->readAll())
+                         .object()["MediaContainer"].toObject()["Metadata"].toArray();
+        if (arr.isEmpty()) { emit cardError(QStringLiteral("COULD NOT LOAD ITEM")); return; }
+        QVariantMap detail = buildItemDetail(arr[0].toObject());
+        if (detail.isEmpty()) {
+            emit cardError(QStringLiteral("THIS ITEM HAS NO PLAYABLE MEDIA")); return;
+        }
+        detail["trackProgress"] = trackProgress;
+        emit cardItemReady(detail);
+    });
+}
+
+void PlexBackend::resolve_card(const QString &guid, const QString &mode) {
+    if (guid.isEmpty()) { emit cardError(QStringLiteral("THIS CARD HAS NO PLEX ITEM")); return; }
+    const QString uri = serverUrl(), token = serverToken();
+    if (uri.isEmpty() || token.isEmpty()) {
+        emit cardError(QStringLiteral("NOT SIGNED IN TO PLEX")); return;
+    }
+
+    // A shuffle card is a jukebox: it must not disturb the show's real progress,
+    // so its playback reports no timeline at all (see Player.qml trackProgress).
+    const bool trackProgress = (mode != QLatin1String("shuffle"));
+
+    QUrl url(uri + "/library/all");
+    QUrlQuery q;
+    q.addQueryItem("guid", guid);
+    url.setQuery(q);
+
+    auto *reply = plexGet(url, token);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, guid, mode, trackProgress]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this, guid, mode]{ resolve_card(guid, mode); }); return;
+            }
+            emit cardError(QStringLiteral("PLEX SERVER UNREACHABLE")); return;
+        }
+        QJsonArray arr = QJsonDocument::fromJson(reply->readAll())
+                         .object()["MediaContainer"].toObject()["Metadata"].toArray();
+        if (arr.isEmpty()) {
+            // Also the "this user can't see it" case: Plex filters by the token's
+            // access rather than returning 403, so a permission miss looks the same.
+            emit cardError(QStringLiteral("NOT FOUND ON THIS SERVER")); return;
+        }
+
+        const QJsonObject meta = arr[0].toObject();
+        const QString type = meta["type"].toString();
+        const QString ratingKey = meta["ratingKey"].toString();
+        qDebug() << "[Plex] Card resolved —" << type << meta["title"].toString()
+                 << "| mode:" << (mode.isEmpty() ? QStringLiteral("(default)") : mode);
+
+        // The guid query identifies the item but cannot play it: /library/all omits
+        // Media/Part unless given a type= filter, and the type isn't known until
+        // this response arrives. So every path re-fetches the chosen item by
+        // ratingKey, which always carries Media. Shows and seasons additionally
+        // have to be resolved down to an episode first — buildItemDetail on one of
+        // them returns an empty map that would read as a generic failure.
+        if (type == QLatin1String("movie") || type == QLatin1String("episode")
+            || type == QLatin1String("clip")) {
+            emitCardDetail(ratingKey, trackProgress);
+            return;
+        }
+
+        if (type == QLatin1String("season")) {
+            fetchChildren(ratingKey, [this, mode, trackProgress](const QVariantList &eps) {
+                QVariantMap pick = pickCardEpisode(eps, mode);
+                if (pick.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
+                emitCardDetail(pick["ratingKey"].toString(), trackProgress);
+            });
+            return;
+        }
+
+        if (type == QLatin1String("show")) {
+            // Children of a show are seasons; flattenSeasons expands them into the
+            // full episode pool in season/episode order.
+            fetchChildren(ratingKey, [this, mode, trackProgress](const QVariantList &seasons) {
+                if (seasons.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
+                flattenSeasons(seasons, [this, mode, trackProgress](const QVariantList &eps) {
+                    QVariantMap pick = pickCardEpisode(eps, mode);
+                    if (pick.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
+                    emitCardDetail(pick["ratingKey"].toString(), trackProgress);
+                });
+            });
+            return;
+        }
+
+        emit cardError(QStringLiteral("UNSUPPORTED ITEM TYPE"));
     });
 }
 
