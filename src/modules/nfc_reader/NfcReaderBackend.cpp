@@ -1,4 +1,6 @@
 #include "NfcReaderBackend.h"
+
+#include "../../AppCore.h"
 #include "NfcDriver.h"
 #include "PcscDriver.h"
 #include "Pn532SerialDriver.h"
@@ -27,6 +29,29 @@ static constexpr int kMaxRespawns = 5;
 // be reopened twice a second.
 static constexpr qint64 kDetectIntervalMs = 2000;
 static const char *kTagsDirName = "nfc_tags";
+
+// Card refs that carry a URI scheme belonging to another module are handed off to
+// it rather than played here. Adding a module means adding a row: the rest of the
+// handoff path is scheme-agnostic.
+//
+// http/https are deliberately absent — those are stream URLs this module's own
+// player hands straight to mpv, not handoffs.
+static const QHash<QString, QString> kHandoffModules = {
+    {QStringLiteral("plex"), QStringLiteral("com.240mp.plex")},
+};
+
+// Scheme of a card ref ("plex" for "plex://show/…"), empty for a plain path.
+static QString refScheme(const QString &ref) {
+    const qsizetype sep = ref.indexOf(QLatin1String("://"));
+    if (sep <= 0) return {};
+    const QString scheme = ref.left(sep);
+    // A scheme is alphanumeric plus +-. — anything else is a path that happens to
+    // contain "://", not a URI.
+    for (const QChar c : scheme) {
+        if (!c.isLetterOrNumber() && c != u'+' && c != u'-' && c != u'.') return {};
+    }
+    return scheme.toLower();
+}
 // Must track the "enabled" toggle's default in modules/nfc_reader/manifest.json,
 // which is what AppCore falls back to when config.json has no value yet.
 static constexpr bool kManifestEnabledDefault = false;
@@ -102,8 +127,10 @@ void NfcPollWorker::poll() {
 // NfcReaderBackend — main-thread state machine + QML API.
 // ---------------------------------------------------------------------------
 
-NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRoot, QObject *parent)
+NfcReaderBackend::NfcReaderBackend(const QString &appRoot, const QString &dataRoot,
+                                   AppCore *appCore, QObject *parent)
     : QObject(parent)
+    , m_appCore(appCore)
     , m_appRoot(appRoot)
     , m_dataRoot(dataRoot)
 {
@@ -301,9 +328,15 @@ void NfcReaderBackend::onSettingChanged(const QString &moduleId, const QString &
 // One .txt file per card: the filename (minus .txt) is the display title, the
 // first non-empty line is the card UID (any formatting — it's normalized), and
 // the second non-empty line is the playback path (absolute, appRoot/dataRoot-
-// relative, or a URL). A file with a UID but no path is a valid "known but
-// unmapped" card. Lines past the second are ignored.
-bool NfcReaderBackend::parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut) const {
+// relative, or a URL — including a module handoff ref such as a Plex guid). A
+// file with a UID but no path is a valid "known but unmapped" card.
+//
+// The optional third non-empty line is a bare mode token ("shuffle"). It is kept
+// deliberately generic rather than Plex-specific so .m3u and YouTube-playlist
+// cards can use the same slot later. Lines past the third are ignored. Older tag
+// files simply have no third line, so this stays backwards-compatible.
+bool NfcReaderBackend::parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut,
+                                    QString &modeOut) const {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
         qWarning("[NfcReader] Cannot open tag file %s: %s",
@@ -318,13 +351,14 @@ bool NfcReaderBackend::parseTagFile(const QString &filePath, QString &uidOut, QS
     for (QString line : text.split(u'\n')) {
         line = line.trimmed();  // also strips the \r of CRLF files
         if (!line.isEmpty()) lines.append(line);
-        if (lines.size() == 2) break;
+        if (lines.size() == 3) break;
     }
     if (lines.isEmpty()) return false;
 
     uidOut = normalizeUid(lines.at(0));
     if (uidOut.isEmpty()) return false;
     pathOut = lines.size() > 1 ? lines.at(1) : QString();
+    modeOut = lines.size() > 2 ? lines.at(2).toLower() : QString();
     return true;
 }
 
@@ -343,8 +377,8 @@ void NfcReaderBackend::scanTagsDir() {
         if (fi.suffix().compare(QLatin1String("txt"), Qt::CaseInsensitive) != 0)
             continue;
 
-        QString uid, path;
-        if (!parseTagFile(fi.absoluteFilePath(), uid, path)) {
+        QString uid, path, mode;
+        if (!parseTagFile(fi.absoluteFilePath(), uid, path, mode)) {
             qWarning("[NfcReader] Skipping tag file with no usable UID: %s",
                      qPrintable(fi.fileName()));
             continue;
@@ -354,7 +388,7 @@ void NfcReaderBackend::scanTagsDir() {
                      qPrintable(uid), qPrintable(fi.fileName()));
             continue;
         }
-        m_mapping.insert(uid, MappingEntry{path, fi.completeBaseName()});
+        m_mapping.insert(uid, MappingEntry{path, fi.completeBaseName(), mode});
         fileCount++;
     }
     qDebug("[NfcReader] Scanned %d tag files from %s", fileCount, qPrintable(tagsDirPath()));
@@ -378,7 +412,7 @@ void NfcReaderBackend::writeStubFile(const QString &normalizedUid) {
     file.write((normalizedUid + "\n").toUtf8());
     qDebug("[NfcReader] Created stub tag file: %s", qPrintable(path));
     // Register as known-unmapped so a lift-and-retap doesn't re-scan/re-write.
-    m_mapping.insert(normalizedUid, MappingEntry{QString(), name});
+    m_mapping.insert(normalizedUid, MappingEntry{QString(), name, QString()});
 }
 
 void NfcReaderBackend::reloadMapping() {
@@ -530,6 +564,10 @@ QString NfcReaderBackend::normalizeUid(const QString &uid) const {
 QString NfcReaderBackend::resolveVideoPath(const QString &path) const {
     if (path.isEmpty()) return QString();
 
+    // Anything with a URI scheme is a stream URL or a module handoff ref, never a
+    // file: hand it back untouched rather than probing appRoot/dataRoot for it.
+    if (!refScheme(path).isEmpty()) return path;
+
     if (QFileInfo(path).isAbsolute()) {
         return path;
     }
@@ -604,6 +642,26 @@ void NfcReaderBackend::onSampled(bool readerConnected, const QString &uid, const
     }
 
     if (it != m_mapping.constEnd() && !it->path.isEmpty()) {
+        // A ref whose scheme belongs to another module is handed off to it rather
+        // than played here — the receiving module owns auth, resolution and
+        // playback for its own content.
+        const QString handoffModule = kHandoffModules.value(refScheme(it->path));
+        if (!handoffModule.isEmpty()) {
+            if (!m_appCore || !m_appCore->is_module_enabled(handoffModule)) {
+                qWarning("[NfcReader] Card %s needs %s, which is not enabled",
+                         qPrintable(normalizedUid), qPrintable(handoffModule));
+                setCardState("unmatched", normalizedUid);
+                return;
+            }
+            qDebug("[NfcReader] Handoff: %s -> %s (%s%s)", qPrintable(normalizedUid),
+                   qPrintable(handoffModule), qPrintable(it->path),
+                   it->mode.isEmpty() ? "" : qPrintable(", mode " + it->mode));
+            m_playbackActive = true;
+            setCardState("matched", normalizedUid, it->title);
+            emit cardHandoffRequested(handoffModule, it->path, it->mode);
+            return;
+        }
+
         QString resolvedPath = resolveVideoPath(it->path);
         qDebug("[NfcReader] Mapping found: %s -> %s", qPrintable(normalizedUid), qPrintable(resolvedPath));
         m_playbackActive = true;

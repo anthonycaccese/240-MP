@@ -30,6 +30,12 @@ FocusScope {
     // Extras pass false: "next episode" has no meaning for a trailer/clip, so a
     // natural end must return to the Extras list instead of probing for one.
     property bool   allowAutoplay:      navParams.allowAutoplay !== false
+    // Shuffle-mode NFC cards play as a jukebox: no timeline is reported, so the
+    // show's watched state, Continue Watching and on-deck are all left alone.
+    // Progress reporting is entirely client-side (the two update_timeline calls
+    // below are the only ones), so suppressing them is sufficient — nothing
+    // server-side marks an item watched.
+    property bool   trackProgress:      navParams.trackProgress !== false
 
     property bool stoppedReported:    false
     property bool playbackStarted:    false
@@ -111,6 +117,7 @@ FocusScope {
     function reportStopped(finalPositionMs, finalDurationMs) {
         if (stoppedReported) return
         stoppedReported = true
+        if (!trackProgress) return
         var pos = lastKnownPositionMs || finalPositionMs
         var dur = lastKnownDurationMs || finalDurationMs
         plexBackend.update_timeline(ratingKey, partKey, "stopped", pos, dur)
@@ -380,7 +387,7 @@ FocusScope {
         repeat:   true
         running:  true
         onTriggered: {
-            if (mpvController.position > 0)
+            if (trackProgress && mpvController.position > 0)
                 plexBackend.update_timeline(ratingKey, partKey, "playing",
                                             mpvController.position, mpvController.duration)
         }

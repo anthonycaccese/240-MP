@@ -236,6 +236,22 @@ QVariant AppCore::get_module_info(const QString &moduleId) {
     return QVariantMap{};
 }
 
+bool AppCore::is_module_enabled(const QString &moduleId) const {
+    const QJsonObject modulesConfig = loadConfig()["modules"].toObject();
+    for (const auto &m : m_modules) {
+        if (m.id == moduleId) return isModuleEnabled(m, modulesConfig);
+    }
+    return false;
+}
+
+QString AppCore::module_entry_point(const QString &moduleId) const {
+    for (const auto &m : m_modules) {
+        if (m.id == moduleId)
+            return QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
+    }
+    return {};
+}
+
 QVariant AppCore::get_module_settings_schema(const QString &moduleId) {
     for (const auto &m : m_modules) {
         if (m.id == moduleId)
