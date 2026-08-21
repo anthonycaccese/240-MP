@@ -114,8 +114,11 @@ FocusScope {
                 // A shuffle card is a jukebox: report no timeline, so it leaves the
                 // show's watched state and Continue Watching untouched.
                 trackProgress:      d.trackProgress !== false,
-                // Autoplaying the "next" episode after a random one is incoherent.
-                allowAutoplay:      cardRoot.cardMode !== "shuffle"
+                // Set only for a shuffle card. It makes the Player draw the next
+                // episode from the card's show/season instead of taking the
+                // sequential next one — a shuffle card keeps rolling, it just
+                // rolls randomly. Autoplay itself is left to the user's setting.
+                shuffleScope:       d.cardScope || ""
             })
         }
 

@@ -2110,20 +2110,26 @@ void PlexBackend::fetchChildren(const QString &ratingKey,
     });
 }
 
-// Picks the episode a show/season card should play.
-//
-// The on-deck choice is derived from the episode pool rather than from
-// /library/metadata/{key}/onDeck, for two reasons: that endpoint 404s outright
-// when a show has nothing on deck (fully unwatched or fully watched), and
-// load_on_deck_for only reports episodes with viewOffset > 0, so it answers
-// "what's part-watched", not "what's next". The pool is already in season/episode
-// order, so first-in-progress → first-unwatched → first is exactly on-deck.
-QVariantMap PlexBackend::pickCardEpisode(const QVariantList &pool, const QString &mode) {
-    if (pool.isEmpty()) return {};
+// Every episode under a show or season, in season/episode order. flattenSeasons
+// is a no-op when the children are already episodes, so one path serves both.
+void PlexBackend::fetchEpisodePool(const QString &scopeRatingKey,
+                                   std::function<void(const QVariantList &)> callback) {
+    fetchChildren(scopeRatingKey, [this, callback](const QVariantList &children) {
+        if (children.isEmpty()) { callback({}); return; }
+        flattenSeasons(children, callback);
+    });
+}
 
-    if (mode == QLatin1String("shuffle")) {
-        return pool.at(QRandomGenerator::global()->bounded(pool.size())).toMap();
-    }
+// Picks the episode an on-deck (default) show/season card should play.
+//
+// Derived from the pool rather than /library/metadata/{key}/onDeck, for two
+// reasons: that endpoint 404s outright when a show has nothing on deck (fully
+// unwatched or fully watched), and load_on_deck_for only reports episodes with
+// viewOffset > 0, so it answers "what's part-watched", not "what's next". The
+// pool is already in season/episode order, so first-in-progress →
+// first-unwatched → first is exactly on-deck.
+QVariantMap PlexBackend::pickOnDeckEpisode(const QVariantList &pool) {
+    if (pool.isEmpty()) return {};
     for (const auto &v : pool) {
         if (v.toMap()["viewOffset"].toInt() > 0) return v.toMap();
     }
@@ -2133,10 +2139,48 @@ QVariantMap PlexBackend::pickCardEpisode(const QVariantList &pool, const QString
     return pool.first().toMap();
 }
 
+// Draws the next episode for a shuffle card.
+//
+// A bag — a shuffled permutation played to exhaustion, then reshuffled — rather
+// than an independent random draw each time. Independent draws repeat and clump
+// badly over the hours a jukebox card runs, and because shuffle playback reports
+// no timeline there is no watched state to fall back on for variety. The bag is
+// rebuilt when the card's scope changes or the permutation runs out, which also
+// bounds how stale it can get if the library changes mid-session.
+QString PlexBackend::takeFromShuffleBag(const QString &scopeRatingKey,
+                                        const QVariantList &pool) {
+    if (pool.isEmpty()) return {};
+
+    if (m_shuffleScope != scopeRatingKey || m_shuffleBag.isEmpty()) {
+        m_shuffleScope = scopeRatingKey;
+        m_shuffleBag.clear();
+        for (const auto &v : pool) {
+            const QString key = v.toMap()["ratingKey"].toString();
+            if (!key.isEmpty()) m_shuffleBag.append(key);
+        }
+        // Fisher-Yates.
+        for (qsizetype i = m_shuffleBag.size() - 1; i > 0; --i)
+            m_shuffleBag.swapItemsAt(i, QRandomGenerator::global()->bounded(int(i) + 1));
+
+        // Don't let a reshuffle replay the episode that just finished.
+        if (m_shuffleBag.size() > 1 && m_shuffleBag.constLast() == m_lastShuffledKey)
+            m_shuffleBag.swapItemsAt(m_shuffleBag.size() - 1, 0);
+
+        qDebug("[Plex] Shuffle bag rebuilt for scope %s — %lld episodes",
+               qPrintable(scopeRatingKey), qlonglong(m_shuffleBag.size()));
+    }
+
+    // Drawn from the back so the swap above targets the next one out.
+    m_lastShuffledKey = m_shuffleBag.takeLast();
+    return m_lastShuffledKey;
+}
+
 // Loads a chosen episode's full detail and emits it as the card's result.
-void PlexBackend::emitCardDetail(const QString &ratingKey, bool trackProgress) {
+void PlexBackend::emitCardDetail(const QString &ratingKey, bool trackProgress,
+                                 const QString &scopeRatingKey) {
     auto *reply = plexGet(QUrl(serverUrl() + "/library/metadata/" + ratingKey), serverToken());
-    connect(reply, &QNetworkReply::finished, this, [this, reply, trackProgress]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, trackProgress, scopeRatingKey]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             emit cardError(QStringLiteral("COULD NOT LOAD ITEM")); return;
@@ -2149,7 +2193,34 @@ void PlexBackend::emitCardDetail(const QString &ratingKey, bool trackProgress) {
             emit cardError(QStringLiteral("THIS ITEM HAS NO PLAYABLE MEDIA")); return;
         }
         detail["trackProgress"] = trackProgress;
+        // Non-empty only for a shuffle card: it tells the Player which show or
+        // season to draw the next episode from when this one ends.
+        detail["cardScope"] = scopeRatingKey;
         emit cardItemReady(detail);
+    });
+}
+
+// Same fetch, reported through the signal the Player's autoplay already handles.
+// An empty map means "nothing to advance to", which the Player treats as the end.
+void PlexBackend::emitNextEpisode(const QString &ratingKey) {
+    if (ratingKey.isEmpty()) { emit nextEpisodeReady(QVariantMap{}); return; }
+    auto *reply = plexGet(QUrl(serverUrl() + "/library/metadata/" + ratingKey), serverToken());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit nextEpisodeReady(QVariantMap{}); return;
+        }
+        QJsonArray arr = QJsonDocument::fromJson(reply->readAll())
+                         .object()["MediaContainer"].toObject()["Metadata"].toArray();
+        if (arr.isEmpty()) { emit nextEpisodeReady(QVariantMap{}); return; }
+        emit nextEpisodeReady(buildItemDetail(arr[0].toObject()));
+    });
+}
+
+void PlexBackend::load_random_episode(const QString &scopeRatingKey) {
+    if (scopeRatingKey.isEmpty()) { emit nextEpisodeReady(QVariantMap{}); return; }
+    fetchEpisodePool(scopeRatingKey, [this, scopeRatingKey](const QVariantList &pool) {
+        emitNextEpisode(takeFromShuffleBag(scopeRatingKey, pool));
     });
 }
 
@@ -2201,34 +2272,32 @@ void PlexBackend::resolve_card(const QString &guid, const QString &mode) {
         // them returns an empty map that would read as a generic failure.
         if (type == QLatin1String("movie") || type == QLatin1String("episode")
             || type == QLatin1String("clip")) {
-            emitCardDetail(ratingKey, trackProgress);
+            // No scope: a single item has nothing to shuffle within.
+            emitCardDetail(ratingKey, trackProgress, QString());
             return;
         }
 
-        if (type == QLatin1String("season")) {
-            fetchChildren(ratingKey, [this, mode, trackProgress](const QVariantList &eps) {
-                QVariantMap pick = pickCardEpisode(eps, mode);
-                if (pick.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
-                emitCardDetail(pick["ratingKey"].toString(), trackProgress);
-            });
+        if (type != QLatin1String("season") && type != QLatin1String("show")) {
+            emit cardError(QStringLiteral("UNSUPPORTED ITEM TYPE"));
             return;
         }
 
-        if (type == QLatin1String("show")) {
-            // Children of a show are seasons; flattenSeasons expands them into the
-            // full episode pool in season/episode order.
-            fetchChildren(ratingKey, [this, mode, trackProgress](const QVariantList &seasons) {
-                if (seasons.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
-                flattenSeasons(seasons, [this, mode, trackProgress](const QVariantList &eps) {
-                    QVariantMap pick = pickCardEpisode(eps, mode);
-                    if (pick.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
-                    emitCardDetail(pick["ratingKey"].toString(), trackProgress);
-                });
-            });
-            return;
-        }
-
-        emit cardError(QStringLiteral("UNSUPPORTED ITEM TYPE"));
+        const bool shuffle = (mode == QLatin1String("shuffle"));
+        fetchEpisodePool(ratingKey, [this, ratingKey, shuffle, trackProgress](const QVariantList &pool) {
+            if (pool.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
+            if (shuffle) {
+                // The first episode is drawn from the same bag the autoplay
+                // advance draws from, so a card's whole run is one permutation
+                // rather than a random first pick followed by a separate cycle.
+                // The scope travels with the detail so the Player can ask for the
+                // next draw when this episode ends.
+                emitCardDetail(takeFromShuffleBag(ratingKey, pool), trackProgress, ratingKey);
+                return;
+            }
+            const QVariantMap pick = pickOnDeckEpisode(pool);
+            if (pick.isEmpty()) { emit cardError(QStringLiteral("NO EPISODES FOUND")); return; }
+            emitCardDetail(pick["ratingKey"].toString(), trackProgress, QString());
+        });
     });
 }
 

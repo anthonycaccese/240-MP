@@ -36,6 +36,9 @@ FocusScope {
     // below are the only ones), so suppressing them is sufficient — nothing
     // server-side marks an item watched.
     property bool   trackProgress:      navParams.trackProgress !== false
+    // Show/season ratingKey a shuffle card draws its episodes from; empty for
+    // every other kind of playback, which advances sequentially.
+    property string shuffleScope:       navParams.shuffleScope || ""
 
     property bool stoppedReported:    false
     property bool playbackStarted:    false
@@ -375,7 +378,12 @@ FocusScope {
             reportStopped(finalPositionMs, finalDurationMs)
             if (reason === "eof" && autoplayNext) {
                 pendingNextEpisode = true
-                plexBackend.load_next_episode(ratingKey)
+                // Same advance machinery either way — only the source of the next
+                // episode differs, and both report through nextEpisodeReady.
+                if (shuffleScope !== "")
+                    plexBackend.load_random_episode(shuffleScope)
+                else
+                    plexBackend.load_next_episode(ratingKey)
                 return
             }
             goBack()

@@ -21,19 +21,43 @@ FocusScope {
     readonly property bool hasExtras: extras.length > 0
 
     // Displayed name — also used as the Extras view's header subtitle
+    // Name written on an NFC card for this item. Movies keep their display name;
+    // episodes are qualified by season/episode number so writing several episodes
+    // of the same show produces distinct tag files.
+    function cardName() {
+        var d = detail || item
+        if (item.type === "episode") {
+            var show = item.grandparentTitle || d.grandparentTitle || item.title
+            var sn = (d.parentIndex !== undefined) ? d.parentIndex : item.parentIndex
+            var en = (d.index !== undefined) ? d.index : item.index
+            if (sn !== undefined && en !== undefined)
+                return show + " - S" + sn + "E" + en
+            return show
+        }
+        return displayName
+    }
+
     readonly property string displayName: {
         var base = (item.type === "episode" && item.grandparentTitle)
                    ? item.grandparentTitle : item.title
         return item.editionTitle ? base + " (" + item.editionTitle + ")" : base
     }
 
-    // Focus rows: 0=play button, 1=extras (when hasExtras), 2=audio, 3=subtitles
+    // Focus rows: 0=play button, 1=extras (when hasExtras), 4=write NFC card
+    // (when a reader is present), 2=audio, 3=subtitles.
+    //
+    // The NFC row is 4, not 2, deliberately: stepFocus walks activeRows() by
+    // array position, so visual order comes from the array, not the values.
+    // Renumbering audio/subtitles to make room would break the saved-focus
+    // restores that compare against literal row numbers (onExtrasLoaded below,
+    // and the { focusRow: 1 } Extras.qml passes back).
     property int focusRow: 0
 
     // Ordered list of currently reachable focus rows
     function activeRows() {
         var rows = [0]
         if (hasExtras) rows.push(1)
+        if (cardWriter.available) rows.push(4)
         if (detail && detail.audioStreams && detail.audioStreams.length > 0) rows.push(2)
         if (detail && detail.subtitleStreams && detail.subtitleStreams.length > 1) rows.push(3)
         return rows
@@ -60,6 +84,8 @@ FocusScope {
     // (see Keys.onReturnPressed): reusing one lets Plex hand back a stale
     // transcode session built with the previously selected audio/subtitle.
     property string sessionId: newSessionId()
+
+    property color baseColor: root.primaryColor
 
     function newSessionId() {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -181,6 +207,10 @@ FocusScope {
     }
     Keys.onReturnPressed: {
         if (isLaunching) return
+        if (focusRow === 4 && cardWriter.available) {
+            cardWriter.open()
+            return
+        }
         if (focusRow === 1 && hasExtras) {
             navigateTo("Extras.qml", {
                 extras: extras,
@@ -294,7 +324,7 @@ FocusScope {
                 Rectangle {
                     id: extrasButton
                     visible: detailRoot.hasExtras
-                    color: focusRow === 1 ? root.accentColor : "transparent"
+                    color: focusRow === 1 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
                     width: parent.width
                     height: extrasLabel.implicitHeight + root.sh * 0.025 //12
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -302,7 +332,28 @@ FocusScope {
                     Text {
                         id: extrasLabel
                         text: "VIEW EXTRAS"
-                        color: focusRow === 1 ? root.surfaceColor : root.secondaryColor
+                        color: focusRow === 1 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        anchors.centerIn: parent
+                        font.pixelSize: root.sh * 0.025 //12
+                    }
+                }
+
+                // Write NFC Card. Sits directly under Extras so it collapses
+                // upward when there are no extras, leaving the screen height
+                // unchanged either way.
+                Rectangle {
+                    id: writeCardButton
+                    visible: cardWriter.available
+                    color: focusRow === 4 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
+                    width: parent.width
+                    height: writeCardLabel.implicitHeight + root.sh * 0.025 //12
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    Text {
+                        id: writeCardLabel
+                        text: "WRITE NFC TAG"
+                        color: focusRow === 4 ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         anchors.centerIn: parent
                         font.pixelSize: root.sh * 0.025 //12
@@ -555,4 +606,16 @@ FocusScope {
             font.pixelSize: root.sh * 0.0333333 //16
         }
     }
+    NfcCardWriter {
+        id: cardWriter
+        anchors.fill: parent
+        // Movies and episodes are single items — nothing to shuffle.
+        offerShuffle: false
+        cardRef:   (detail && detail.guid) ? detail.guid : (item.guid || "")
+        // Episodes get "Show - S1E5" so several episodes of one show don't collide
+        // on a single filename (the card title is also the tag file's name).
+        cardTitle: detailRoot.cardName()
+        onClosed: detailRoot.forceActiveFocus()
+    }
+
 }

@@ -70,6 +70,10 @@ public:
     // and empty otherwise; it is ignored for movies and episodes. See the
     // implementation comment for why resolution is a single unscoped guid query.
     Q_INVOKABLE void resolve_card(const QString &guid, const QString &mode);
+    // Next episode for a shuffle card, drawn from a shuffle bag over the card's
+    // show/season. Emits nextEpisodeReady (the same signal autoplay already
+    // consumes) or an empty map, so the Player advances identically either way.
+    Q_INVOKABLE void load_random_episode(const QString &scopeRatingKey);
     Q_INVOKABLE void request_transcode(const QString &ratingKey, const QString &partKey,
                                        const QString &sessionId,
                                        const QString &audioId, const QString &subtitleId,
@@ -183,10 +187,28 @@ private:
     // NFC card resolution helpers.
     void fetchChildren(const QString &ratingKey,
                        std::function<void(const QVariantList &)> callback);
-    // Chooses the episode a show/season card plays: a random one for "shuffle",
-    // otherwise on-deck (first in-progress, else first unwatched, else first).
-    static QVariantMap pickCardEpisode(const QVariantList &pool, const QString &mode);
-    void emitCardDetail(const QString &ratingKey, bool trackProgress);
+    // Every episode under a show or season, in season/episode order. Works for
+    // both: flattenSeasons is a no-op when the children are already episodes.
+    void fetchEpisodePool(const QString &scopeRatingKey,
+                          std::function<void(const QVariantList &)> callback);
+    // Chooses the episode a show/season card plays in on-deck mode: first
+    // in-progress, else first unwatched, else the first episode.
+    static QVariantMap pickOnDeckEpisode(const QVariantList &pool);
+    // Draws the next ratingKey from the shuffle bag for this scope, rebuilding
+    // and reshuffling when the scope changes or the bag runs out.
+    QString takeFromShuffleBag(const QString &scopeRatingKey, const QVariantList &pool);
+    void emitCardDetail(const QString &ratingKey, bool trackProgress,
+                        const QString &scopeRatingKey);
+    void emitNextEpisode(const QString &ratingKey);
+
+    // Shuffle-card state. A bag (a shuffled permutation played to exhaustion,
+    // then reshuffled) rather than independent random draws: independent draws
+    // clump badly over a long session, and shuffle cards report no timeline, so
+    // there is no watched state to fall back on for variety. Caching the bag also
+    // means a multi-season show costs one pool fetch per cycle, not per episode.
+    QString     m_shuffleScope;
+    QStringList m_shuffleBag;
+    QString     m_lastShuffledKey;
 
     // Connection probing
     void probeConnections(const QJsonArray &connections,

@@ -66,6 +66,21 @@ public:
     // whether card events may change state or request playback.
     Q_INVOKABLE void setModuleActive(bool active);
 
+    // Card-write capture. While armed, the next tapped card is reported via
+    // cardCaptured instead of being played, and it works from anywhere in the app
+    // (unlike ordinary taps, which are gated on the NFC module being on screen).
+    // Arming is always a deliberate user action — never a passive listen — so a
+    // card set down near the reader while browsing can't trigger a write.
+    Q_INVOKABLE void setCardCapture(bool armed);
+    // Existing mapping title for a UID, or empty when the card is unmapped. Lets
+    // the writer confirm before replacing a card that already plays something.
+    Q_INVOKABLE QString mappedTitleForUid(const QString &uid) const;
+    // Writes (or replaces) a card's tag file. title becomes the filename and the
+    // display name; ref is the line-2 playback ref; mode is the optional line-3
+    // token, omitted when empty. Returns false and warns on failure.
+    Q_INVOKABLE bool writeCardFile(const QString &uid, const QString &title,
+                                   const QString &ref, const QString &mode);
+
     Q_INVOKABLE QVariantMap getSavedPosition(const QString &videoPath);
     Q_INVOKABLE void        savePosition(const QString &videoPath, int positionMs, int playlistPos);
     Q_INVOKABLE void        clearPosition(const QString &videoPath);
@@ -104,6 +119,9 @@ signals:
     // through untouched. Kept separate from playbackRequested so the file/stream
     // playback path is unaffected.
     void cardHandoffRequested(const QString &moduleId, const QString &ref, const QString &mode);
+    // A card tapped while capture was armed. existingTitle is non-empty when the
+    // card already maps to something, so the writer can confirm before replacing.
+    void cardCaptured(const QString &uid, const QString &existingTitle);
     void dynamicOptionsReady(const QString &key, const QVariant &options);
 
 public slots:
@@ -138,6 +156,7 @@ private:
     QString m_lastUid;
     bool m_playbackActive = false;
     bool m_moduleActive = false;
+    bool m_captureArmed = false;
 
     QString     historyFilePath() const;
     QVariantMap loadHistory() const;
