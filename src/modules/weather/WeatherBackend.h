@@ -49,8 +49,7 @@ class WeatherBackend : public QObject {
 
 public:
     explicit WeatherBackend(const QString &appRoot, const QString &dataRoot,
-                            QObject *parent = nullptr,
-                            QNetworkAccessManager *networkAccessManager = nullptr);
+                            QObject *parent = nullptr);
     ~WeatherBackend() override;
 
     QString     locationName()     const { return m_locationName; }

@@ -435,14 +435,11 @@ QString cardinal(double degrees) {
 } // namespace
 
 WeatherBackend::WeatherBackend(const QString &appRoot, const QString &dataRoot,
-                               QObject *parent,
-                               QNetworkAccessManager *networkAccessManager)
+                               QObject *parent)
     : QObject(parent)
     , m_appRoot(appRoot)
     , m_dataRoot(dataRoot)
-    , m_nam(networkAccessManager
-                ? networkAccessManager
-                : new QNetworkAccessManager(this))
+    , m_nam(new QNetworkAccessManager(this))
     , m_refresh(new QTimer(this)) {
     m_refresh->setInterval(kRefreshMs);
     connect(m_refresh, &QTimer::timeout, this, [this]() {
@@ -905,8 +902,7 @@ void WeatherBackend::fetchWeather() {
     url.setQuery(q);
 
     QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this,
-            [this, reply, us, requestGeneration]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, us, requestGeneration]() {
         reply->deleteLater();
         if (requestGeneration != m_weatherRequestGeneration) return;
         if (reply->error() != QNetworkReply::NoError) {
@@ -1365,8 +1361,7 @@ void WeatherBackend::fetchOthers() {
     url.setQuery(q);
 
     QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this,
-            [this, reply, requestGeneration]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestGeneration]() {
         reply->deleteLater();
         if (requestGeneration != m_otherRequestGeneration) return;
         if (reply->error() != QNetworkReply::NoError) {
