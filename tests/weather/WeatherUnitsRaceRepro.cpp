@@ -1,7 +1,6 @@
 #include "modules/weather/WeatherBackend.h"
 
 #include <QFile>
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -21,37 +20,31 @@ constexpr auto kOtherLatitude = "48.8566";
 
 class ControlledReply final : public QNetworkReply {
 public:
-    ControlledReply(QNetworkAccessManager::Operation operation,
-                    const QNetworkRequest &request, QObject *parent)
+    ControlledReply(const QUrl &url, QObject *parent)
         : QNetworkReply(parent) {
-        setOperation(operation);
-        setRequest(request);
-        setUrl(request.url());
+        setUrl(url);
         open(QIODevice::ReadOnly | QIODevice::Unbuffered);
     }
 
     void succeed(const QByteArray &body) {
         m_body = body;
-        m_offset = 0;
-        setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        setHeader(QNetworkRequest::ContentTypeHeader,
+                  QStringLiteral("application/json"));
         setAttribute(QNetworkRequest::HttpStatusCodeAttribute, 200);
         setFinished(true);
         emit readyRead();
         emit finished();
     }
 
-    void fail(QNetworkReply::NetworkError error, const QString &message,
-              int statusCode) {
-        setError(error, message);
-        setAttribute(QNetworkRequest::HttpStatusCodeAttribute, statusCode);
+    void fail(QNetworkReply::NetworkError error) {
+        setError(error, QStringLiteral("fake network response"));
         setFinished(true);
         emit finished();
     }
 
     void abort() override {
         if (!isFinished())
-            fail(QNetworkReply::OperationCanceledError,
-                 QStringLiteral("request aborted"), 0);
+            fail(QNetworkReply::OperationCanceledError);
     }
 
     qint64 bytesAvailable() const override {
@@ -78,12 +71,6 @@ private:
 
 class ControlledNetworkAccessManager final : public QNetworkAccessManager {
 public:
-    struct ForecastRequest {
-        QString latitude;
-        QString temperatureUnit;
-        ControlledReply *reply = nullptr;
-    };
-
     ControlledReply *takeForecast(const QString &latitude,
                                   const QString &temperatureUnit) {
         for (qsizetype i = 0; i < m_forecasts.size(); ++i) {
@@ -105,7 +92,8 @@ protected:
                                  const QNetworkRequest &request,
                                  QIODevice *outgoingData) override {
         Q_UNUSED(outgoingData)
-        auto *reply = new ControlledReply(operation, request, this);
+        Q_UNUSED(operation)
+        auto *reply = new ControlledReply(request.url(), this);
         const QUrl url = request.url();
 
         if (url.host() == QLatin1String("api.open-meteo.com")
@@ -119,109 +107,65 @@ protected:
             return reply;
         }
 
-        if (url.host() == QLatin1String("api.weather.gov")) {
-            QTimer::singleShot(0, reply, [reply]() {
-                reply->fail(QNetworkReply::ContentNotFoundError,
-                            QStringLiteral("fake non-US NWS response"), 404);
-            });
-            return reply;
-        }
-
-        m_unexpectedUrls.append(url.toString());
+        if (url.host() != QLatin1String("api.weather.gov"))
+            m_unexpectedUrls.append(url.toString());
         QTimer::singleShot(0, reply, [reply]() {
-            reply->fail(QNetworkReply::ProtocolInvalidOperationError,
-                        QStringLiteral("unexpected network request"), 400);
+            reply->fail(QNetworkReply::ContentNotFoundError);
         });
         return reply;
     }
 
 private:
+    struct ForecastRequest {
+        QString latitude;
+        QString temperatureUnit;
+        ControlledReply *reply = nullptr;
+    };
+
     QList<ForecastRequest> m_forecasts;
     QStringList m_unexpectedUrls;
 };
 
 QByteArray forecastResponse(int currentTemperature, int low, int high) {
-    const QJsonArray dates{
-        QStringLiteral("2026-08-21"),
-        QStringLiteral("2026-08-22"),
-        QStringLiteral("2026-08-23"),
-    };
-    const QJsonArray lows{ low, low + 1, low + 2 };
-    const QJsonArray highs{ high, high + 1, high + 2 };
-    const QJsonArray codes{ 0, 1, 2 };
-    const QJsonArray sunrises{
-        QStringLiteral("2026-08-21T06:00"),
-        QStringLiteral("2026-08-22T06:01"),
-        QStringLiteral("2026-08-23T06:02"),
-    };
-    const QJsonArray sunsets{
-        QStringLiteral("2026-08-21T20:00"),
-        QStringLiteral("2026-08-22T19:59"),
-        QStringLiteral("2026-08-23T19:58"),
-    };
-
-    const QJsonObject current{
-        { QStringLiteral("temperature_2m"), currentTemperature },
-        { QStringLiteral("relative_humidity_2m"), 50 },
-        { QStringLiteral("dew_point_2m"), currentTemperature - 2 },
-        { QStringLiteral("pressure_msl"), 1000.0 },
-        { QStringLiteral("wind_speed_10m"), 8.0 },
-        { QStringLiteral("wind_direction_10m"), 90.0 },
-        { QStringLiteral("visibility"), 10000.0 },
-        { QStringLiteral("weather_code"), 0 },
-        { QStringLiteral("is_day"), 1 },
-    };
-    const QJsonObject daily{
-        { QStringLiteral("time"), dates },
-        { QStringLiteral("temperature_2m_min"), lows },
-        { QStringLiteral("temperature_2m_max"), highs },
-        { QStringLiteral("weather_code"), codes },
-        { QStringLiteral("sunrise"), sunrises },
-        { QStringLiteral("sunset"), sunsets },
-    };
-    return QJsonDocument(QJsonObject{
-        { QStringLiteral("utc_offset_seconds"), 0 },
-        { QStringLiteral("current"), current },
-        { QStringLiteral("daily"), daily },
-    }).toJson(QJsonDocument::Compact);
+    return QStringLiteral(R"({
+        "utc_offset_seconds": 0,
+        "current": {"temperature_2m": %1, "weather_code": 0, "is_day": 1},
+        "daily": {
+            "time": ["2026-08-21"],
+            "temperature_2m_min": [%2],
+            "temperature_2m_max": [%3],
+            "weather_code": [0],
+            "sunrise": ["2026-08-21T06:00"],
+            "sunset": ["2026-08-21T20:00"]
+        }
+    })").arg(currentTemperature).arg(low).arg(high).toUtf8();
 }
 
 QByteArray otherLocationResponse(int temperature) {
-    return QJsonDocument(QJsonObject{
-        { QStringLiteral("current"), QJsonObject{
-              { QStringLiteral("temperature_2m"), temperature },
-              { QStringLiteral("weather_code"), 0 },
-              { QStringLiteral("wind_speed_10m"), 8.0 },
-              { QStringLiteral("wind_direction_10m"), 90.0 },
-              { QStringLiteral("is_day"), 1 },
-          } },
-    }).toJson(QJsonDocument::Compact);
+    return QStringLiteral(R"({
+        "current": {"temperature_2m": %1, "weather_code": 0, "is_day": 1}
+    })").arg(temperature).toUtf8();
 }
 
 void writeConfig(const QString &dataRoot, const QString &units) {
-    const QJsonObject weather{
-        { QStringLiteral("units"), units },
-        { QStringLiteral("hours_format"), QStringLiteral("24-hour") },
-        { QStringLiteral("music"), false },
-    };
-    const QJsonObject modules{
-        { QString::fromLatin1(kWeatherModuleId), weather },
-    };
+    const QByteArray contents = QStringLiteral(R"({
+        "modules": {"com.240mp.weather": {
+            "units": "%1", "hours_format": "24-hour", "music": false
+        }}
+    })").arg(units).toUtf8();
     QFile file(dataRoot + QStringLiteral("/config.json"));
     QVERIFY2(file.open(QIODevice::WriteOnly | QIODevice::Truncate),
              qPrintable(file.errorString()));
-    QCOMPARE(file.write(QJsonDocument(QJsonObject{
-        { QStringLiteral("modules"), modules },
-    }).toJson()), qint64(file.size()));
+    QCOMPARE(file.write(contents), qint64(contents.size()));
 }
 
 void writeLocations(const QString &dataRoot, bool includeOther) {
+    QByteArray contents("51.5007, -0.1246, PRIMARY\n");
+    if (includeOther) contents += "48.8566, 2.3522, OTHER\n";
+
     QFile file(dataRoot + QStringLiteral("/weather_location.txt"));
     QVERIFY2(file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text),
              qPrintable(file.errorString()));
-    QByteArray contents("51.5007, -0.1246, PRIMARY\n");
-    if (includeOther)
-        contents += "48.8566, 2.3522, OTHER\n";
     QCOMPARE(file.write(contents), qint64(contents.size()));
 }
 
@@ -251,16 +195,26 @@ QString stateDump(const WeatherBackend &backend, const QString &dataRoot) {
              compactJson(backend.otherLocations()));
 }
 
-QVariantMap firstForecast(const WeatherBackend &backend) {
-    return backend.forecast().isEmpty()
-        ? QVariantMap{}
-        : backend.forecast().first().toMap();
+QVariantMap first(const QVariantList &values) {
+    return values.isEmpty() ? QVariantMap{} : values.first().toMap();
 }
 
-QVariantMap firstOther(const WeatherBackend &backend) {
-    return backend.otherLocations().isEmpty()
-        ? QVariantMap{}
-        : backend.otherLocations().first().toMap();
+void verifyFinalUsState(const WeatherBackend &backend, const QString &dataRoot,
+                        bool checkOtherLocation) {
+    const QVariantMap day = first(backend.forecast());
+    bool latestRequestWon =
+        backend.current().value(QStringLiteral("temperature")).toString()
+            == QStringLiteral("50°")
+        && day.value(QStringLiteral("lo")).toString() == QStringLiteral("40")
+        && day.value(QStringLiteral("hi")).toString() == QStringLiteral("60")
+        && backend.tempUnitLabel() == QStringLiteral("°F")
+        && configuredUnit(dataRoot) == QStringLiteral("US");
+    if (checkOtherLocation) {
+        latestRequestWon = latestRequestWon
+            && first(backend.otherLocations()).value(QStringLiteral("temp")).toString()
+                == QStringLiteral("50");
+    }
+    QVERIFY2(latestRequestWon, qPrintable(stateDump(backend, dataRoot)));
 }
 
 } // namespace
@@ -277,7 +231,6 @@ private slots:
 
         ControlledNetworkAccessManager network;
         WeatherBackend backend(dataRoot.path(), dataRoot.path(), nullptr, &network);
-
         backend.start();
         QCOMPARE(network.pendingForecastCount(), 1);
 
@@ -292,9 +245,9 @@ private slots:
         requestB->succeed(forecastResponse(50, 40, 60));
         QCOMPARE(backend.current().value(QStringLiteral("temperature")).toString(),
                  QStringLiteral("50°"));
-        QCOMPARE(firstForecast(backend).value(QStringLiteral("lo")).toString(),
+        QCOMPARE(first(backend.forecast()).value(QStringLiteral("lo")).toString(),
                  QStringLiteral("40"));
-        QCOMPARE(firstForecast(backend).value(QStringLiteral("hi")).toString(),
+        QCOMPARE(first(backend.forecast()).value(QStringLiteral("hi")).toString(),
                  QStringLiteral("60"));
 
         auto *requestA = network.takeForecast(
@@ -302,16 +255,8 @@ private slots:
         QVERIFY(requestA);
         requestA->succeed(forecastResponse(10, 5, 15));
 
-        const QVariantMap day = firstForecast(backend);
-        const bool latestRequestWon =
-            backend.current().value(QStringLiteral("temperature")).toString()
-                == QStringLiteral("50°")
-            && day.value(QStringLiteral("lo")).toString() == QStringLiteral("40")
-            && day.value(QStringLiteral("hi")).toString() == QStringLiteral("60")
-            && backend.tempUnitLabel() == QStringLiteral("°F")
-            && configuredUnit(dataRoot.path()) == QStringLiteral("US");
         QVERIFY(network.unexpectedUrls().isEmpty());
-        QVERIFY2(latestRequestWon, qPrintable(stateDump(backend, dataRoot.path())));
+        verifyFinalUsState(backend, dataRoot.path(), false);
     }
 
     void otherLocationsLatestRequestWins() {
@@ -322,7 +267,6 @@ private slots:
 
         ControlledNetworkAccessManager network;
         WeatherBackend backend(dataRoot.path(), dataRoot.path(), nullptr, &network);
-
         backend.start();
         QCOMPARE(network.pendingForecastCount(), 2);
 
@@ -331,7 +275,7 @@ private slots:
                                  QStringLiteral("units"), QStringLiteral("US"));
         QCOMPARE(network.pendingForecastCount(), 4);
 
-        // Keep the primary family on the new US snapshot so this case isolates
+        // Keep primary Weather on its new US snapshot so this case isolates
         // the independently racing Other Locations request family.
         auto *primaryA = network.takeForecast(
             QString::fromLatin1(kPrimaryLatitude), QStringLiteral("celsius"));
@@ -346,7 +290,7 @@ private slots:
             QString::fromLatin1(kOtherLatitude), QStringLiteral("fahrenheit"));
         QVERIFY(requestB);
         requestB->succeed(otherLocationResponse(50));
-        QCOMPARE(firstOther(backend).value(QStringLiteral("temp")).toString(),
+        QCOMPARE(first(backend.otherLocations()).value(QStringLiteral("temp")).toString(),
                  QStringLiteral("50"));
         QCOMPARE(backend.tempUnitLabel(), QStringLiteral("°F"));
 
@@ -355,18 +299,8 @@ private slots:
         QVERIFY(requestA);
         requestA->succeed(otherLocationResponse(10));
 
-        const QVariantMap other = firstOther(backend);
-        const QVariantMap day = firstForecast(backend);
-        const bool latestRequestWon =
-            backend.current().value(QStringLiteral("temperature")).toString()
-                == QStringLiteral("50°")
-            && day.value(QStringLiteral("lo")).toString() == QStringLiteral("40")
-            && day.value(QStringLiteral("hi")).toString() == QStringLiteral("60")
-            && other.value(QStringLiteral("temp")).toString() == QStringLiteral("50")
-            && backend.tempUnitLabel() == QStringLiteral("°F")
-            && configuredUnit(dataRoot.path()) == QStringLiteral("US");
         QVERIFY(network.unexpectedUrls().isEmpty());
-        QVERIFY2(latestRequestWon, qPrintable(stateDump(backend, dataRoot.path())));
+        verifyFinalUsState(backend, dataRoot.path(), true);
     }
 };
 

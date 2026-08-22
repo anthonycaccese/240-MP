@@ -18,6 +18,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
 find_package(OpenSSL REQUIRED)
 find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
+option(BUILD_TESTING "Build automated tests" OFF)
 include(CTest)
 
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
