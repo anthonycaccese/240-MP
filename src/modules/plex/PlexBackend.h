@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QHash>
 #include <functional>
 #include <openssl/evp.h>
 
@@ -61,6 +62,13 @@ public:
     // nextEpisodeReady with a full playable detail (same shape as load_item_detail),
     // or an empty map when there is no next episode / on any failure.
     Q_INVOKABLE void load_next_episode(const QString &currentRatingKey);
+
+    // Looks up a show's year by its ratingKey, for naming an NFC card written
+    // from an episode: an episode carries only its own air year and Plex sends no
+    // grandparentYear, so the show must be fetched. Answers from cache when it
+    // can, and emits showYearReady(showRatingKey, year) either way; year is 0
+    // when the show has none. Callers should only ask when they will use it.
+    Q_INVOKABLE void load_show_year(const QString &showRatingKey);
 
     // Playback
     Q_INVOKABLE void load_item_detail(const QString &ratingKey);
@@ -127,6 +135,7 @@ signals:
     void capabilitiesLoaded(const QVariant &capabilities);
 
     void itemLoaded(const QVariant &detail);
+    void showYearReady(const QString &showRatingKey, int year);
     void streamUrlReady(const QString &url, const QString &plexToken);
     void childrenLoaded(const QVariant &items);
     void extrasLoaded(const QVariant &items);
@@ -209,6 +218,10 @@ private:
     QString     m_shuffleScope;
     QStringList m_shuffleBag;
     QString     m_lastShuffledKey;
+
+    // showRatingKey -> year, so revisiting a show's episodes costs one lookup.
+    // Cleared on a server switch, since ratingKeys are server-local.
+    QHash<QString, int> m_showYears;
 
     // Connection probing
     void probeConnections(const QJsonArray &connections,

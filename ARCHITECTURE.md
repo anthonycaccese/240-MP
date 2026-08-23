@@ -569,6 +569,9 @@ Call `open()` to show it; it emits `closed()` when done. Two things worth preser
 
 Writing also offers an option to the user to replace any previous tag file for that UID, that way a card can be written easily from with the UI.
 
+- **Two cards never share a filename.** `writeCardFile` suffixes the name (`Dune (2021) (2).txt`) when the target name already belongs to a different UID. Hosts should still qualify `cardTitle` so the suffix stays rare.  For example Plex names cards with the year of the item like: `Dune (2021)`, `Cowboy Bebop (1998) - S1`, `Cowboy Bebop (1998) - S1E5`.
+- **The host's title is passed through verbatim.**  To keep the NFC writing generalized for other callers its built to just pass the name through cleanly and the NFC card writing portion doesn't reason about it. I had a use case in my Plex library where an item already carried the year in its title (e.g. Cowboy Bebop (2021)) so for that case the name written is `Cowboy Bebop (2021) (2021).txt`. This is deliberate because inferring if trailing `(NNNN)` is a year or something else would guess at a user's own metadata (think of the the use case for Cyberpunk 2077). The cost of guessing wrong I think outweighs a cosmetic repeat and users can always choose rename the tag file manually as well without any impact to the mapping.
+
 ## Config Storage
 
 User configuration is stored in `config.json` in the app's data directory:

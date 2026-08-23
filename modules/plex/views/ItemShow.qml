@@ -464,7 +464,9 @@ FocusScope {
         anchors.fill: parent
         offerShuffle: true
         cardRef:   item.guid || ""
-        cardTitle: item.title || ""
+        // Year included so two shows sharing a title stay distinct on disk.
+        // Season and episode cards omit it — they are already unique by number.
+        cardTitle: (item.title || "") + (item.year ? " (" + item.year + ")" : "")
         onClosed: showRoot.forceActiveFocus()
     }
 

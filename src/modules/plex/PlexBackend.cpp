@@ -817,6 +817,11 @@ QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
         {"grandparentTitle",       m["grandparentTitle"].toString()},
         {"parentTitle",            m["parentTitle"].toString()},
         {"parentRatingKey",        m["parentRatingKey"].toString()},
+        // The show's year on a season row, and the show's key on an episode row.
+        // Neither is derivable from the item itself: an episode's own "year" is
+        // its air year, not the show's, and Plex never sends a grandparentYear.
+        {"parentYear",             m["parentYear"].toVariant()},
+        {"grandparentRatingKey",   m["grandparentRatingKey"].toString()},
         {"index",                  m["index"].toInt()},
         {"parentIndex",            m["parentIndex"].toInt()},
         {"leafCount",              m["leafCount"].toInt()},
@@ -1256,6 +1261,10 @@ void PlexBackend::select_server(const QString &machineId) {
         if (s["machineId"].toString() == machineId) { server = s; break; }
     }
     if (server.isEmpty()) { emit errorOccurred("SERVER NOT FOUND"); return; }
+
+    // ratingKeys are server-local, so a cached year would be attributed to
+    // whatever unrelated show holds that key on the new server.
+    m_showYears.clear();
 
     auth["active_server_uri"]        = server["uri"].toString();
     auth["active_server_machine_id"] = machineId;
@@ -1886,7 +1895,38 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
         {"parentRatingKey",  meta["parentRatingKey"].toString()},
         {"grandparentTitle", meta["grandparentTitle"].toString()},
         {"parentTitle",      meta["parentTitle"].toString()},
+        {"parentYear",       meta["parentYear"].toVariant()},
+        {"grandparentRatingKey", meta["grandparentRatingKey"].toString()},
     };
+}
+
+void PlexBackend::load_show_year(const QString &showRatingKey) {
+    if (showRatingKey.isEmpty()) return;
+    const auto cached = m_showYears.constFind(showRatingKey);
+    if (cached != m_showYears.constEnd()) {
+        emit showYearReady(showRatingKey, *cached);
+        return;
+    }
+
+    QString uri = serverUrl(), token = serverToken();
+    auto *reply = plexGet(QUrl(uri + "/library/metadata/" + showRatingKey), token);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, showRatingKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this, showRatingKey]{ load_show_year(showRatingKey); }); return;
+            }
+            // Only a card's filename depends on this, so a failure is silent —
+            // the caller falls back to a name without the year.
+            return;
+        }
+        QJsonArray metaArr = QJsonDocument::fromJson(reply->readAll())
+                             .object()["MediaContainer"].toObject()["Metadata"].toArray();
+        if (metaArr.isEmpty()) return;
+        const int year = metaArr[0].toObject()["year"].toInt();
+        m_showYears.insert(showRatingKey, year);
+        emit showYearReady(showRatingKey, year);
+    });
 }
 
 void PlexBackend::load_item_detail(const QString &ratingKey) {

@@ -21,20 +21,38 @@ FocusScope {
     readonly property bool hasExtras: extras.length > 0
 
     // Displayed name — also used as the Extras view's header subtitle
-    // Name written on an NFC card for this item. Movies keep their display name;
-    // episodes are qualified by season/episode number so writing several episodes
-    // of the same show produces distinct tag files.
+    // The show's year, for naming an episode's NFC card. An episode's own "year"
+    // is its air year and Plex sends no grandparentYear, so this is fetched (see
+    // showYearRequest below). 0 until it arrives, or if the lookup fails.
+    property int showYear: 0
+
+    // Name written on an NFC card for this item. Both carry the year, so two
+    // items sharing a title — Dune 1984 / Dune 2021, or a show remade decades
+    // later — read apart on disk; episodes are additionally qualified by
+    // season/episode number.
     function cardName() {
         var d = detail || item
         if (item.type === "episode") {
             var show = item.grandparentTitle || d.grandparentTitle || item.title
+            if (showYear) show += " (" + showYear + ")"
             var sn = (d.parentIndex !== undefined) ? d.parentIndex : item.parentIndex
             var en = (d.index !== undefined) ? d.index : item.index
             if (sn !== undefined && en !== undefined)
                 return show + " - S" + sn + "E" + en
             return show
         }
-        return displayName
+        var yr = item.year || d.year
+        return yr ? displayName + " (" + yr + ")" : displayName
+    }
+
+    // Ask for the show's year only when a card could actually be written — it
+    // costs a request, and nothing else on this screen uses it. The tap that
+    // follows takes seconds, so the answer is always in hand before the write.
+    function showYearRequest() {
+        if (item.type !== "episode" || showYear || !cardWriter.available) return
+        var key = item.grandparentRatingKey
+                  || (detail ? detail.grandparentRatingKey : "")
+        if (key) plexBackend.load_show_year(key)
     }
 
     readonly property string displayName: {
@@ -106,8 +124,16 @@ FocusScope {
     Connections {
         target: plexBackend
 
+        function onShowYearReady(showRatingKey, year) {
+            var key = detailRoot.item.grandparentRatingKey
+                      || (detailRoot.detail ? detailRoot.detail.grandparentRatingKey : "")
+            if (showRatingKey === key) detailRoot.showYear = year
+        }
+
         function onItemLoaded(d) {
             detailRoot.detail = d
+            // The list row may not have carried grandparentRatingKey; the detail does.
+            detailRoot.showYearRequest()
             // Set initial stream indices
             detailRoot.audioIdx = 0
             detailRoot.subtitleIdx = 0
@@ -176,6 +202,7 @@ FocusScope {
             plexBackend.load_item_detail(item.ratingKey)
             plexBackend.load_extras(item.ratingKey)
         }
+        showYearRequest()
         focusRow = 0
     }
 
@@ -612,9 +639,14 @@ FocusScope {
         // Movies and episodes are single items — nothing to shuffle.
         offerShuffle: false
         cardRef:   (detail && detail.guid) ? detail.guid : (item.guid || "")
-        // Episodes get "Show - S1E5" so several episodes of one show don't collide
-        // on a single filename (the card title is also the tag file's name).
+        // Episodes get "Show (Year) - S1E5" so several episodes of one show — and
+        // two shows sharing a name — don't collide on a single filename (the card
+        // title is also the tag file's name). Bound, not snapshot, so the name
+        // picks up the show year whenever that lookup lands.
         cardTitle: detailRoot.cardName()
+        // A reader plugged in after this screen opened is the moment the year
+        // becomes worth fetching.
+        onAvailableChanged: detailRoot.showYearRequest()
         onClosed: detailRoot.forceActiveFocus()
     }
 

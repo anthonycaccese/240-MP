@@ -487,15 +487,31 @@ bool NfcReaderBackend::writeCardFile(const QString &uid, const QString &title,
     if (name.isEmpty()) name = QString(normalizedUid).replace(u':', u'-');
 
     QDir().mkpath(tagsDirPath());
+
+    // The file this UID is mapped to today, if any. It is the one existing file
+    // this write is allowed to truncate.
+    const auto prev = m_mapping.constFind(normalizedUid);
+    const QString prevName = (prev != m_mapping.constEnd()) ? prev->title : QString();
+
+    // Two cards must never land on one filename: the second write would truncate
+    // the first card's file and silently break that card. Titles alone are not
+    // unique — the same film in two libraries, two editions, or a hand-made file
+    // all collide — so suffix until the name is free.
+    // The counter is kept separate from the name rather than parsed back out of
+    // it: titles legitimately end in parentheses (a movie carries its year), and
+    // re-reading that as a counter would rename "Dune (2021)" to "Dune (2022)".
+    const QString base = name;
+    for (int n = 2; name != prevName && QFile::exists(tagsDirPath() + "/" + name + ".txt"); ++n)
+        name = base + " (" + QString::number(n) + ")";
+
     const QString path = tagsDirPath() + "/" + name + ".txt";
 
     // Replacing a card means removing whatever file previously held this UID.
     // Leaving it behind would make two files claim one card, and scanTagsDir
     // resolves that by keeping the alphabetically earlier one — which might be
     // the stale one.
-    const auto prev = m_mapping.constFind(normalizedUid);
-    if (prev != m_mapping.constEnd() && !prev->title.isEmpty()) {
-        const QString prevPath = tagsDirPath() + "/" + prev->title + ".txt";
+    if (!prevName.isEmpty()) {
+        const QString prevPath = tagsDirPath() + "/" + prevName + ".txt";
         if (prevPath != path && QFile::exists(prevPath)) {
             if (QFile::remove(prevPath))
                 qDebug("[NfcReader] Removed previous tag file: %s", qPrintable(prevPath));

@@ -30,11 +30,13 @@ FocusScope {
     // Extras pass false: "next episode" has no meaning for a trailer/clip, so a
     // natural end must return to the Extras list instead of probing for one.
     property bool   allowAutoplay:      navParams.allowAutoplay !== false
+    // False when this playback session must not write anything back to Plex.
     // Shuffle-mode NFC cards play as a jukebox: no timeline is reported, so the
     // show's watched state, Continue Watching and on-deck are all left alone.
     // Progress reporting is entirely client-side (the two update_timeline calls
     // below are the only ones), so suppressing them is sufficient — nothing
-    // server-side marks an item watched.
+    // server-side marks an item watched. It also gates the per-part audio and
+    // subtitle selections persisted on autoplay (see advanceToEpisode).
     property bool   trackProgress:      navParams.trackProgress !== false
     // Show/season ratingKey a shuffle card draws its episodes from; empty for
     // every other kind of playback, which advances sequentially.
@@ -321,9 +323,13 @@ FocusScope {
         selectedSubtitleId = subId
         captureCarryLanguages()
 
-        // Persist the chosen tracks to Plex so a transcode burns the right streams
-        // (mirrors Item.qml's behavior before playback).
-        if (partId) {
+        // Persist the chosen tracks to Plex, so the next play of this episode
+        // anywhere remembers them (mirrors Item.qml's behavior before playback).
+        // Skipped when this session doesn't write back to Plex: CardPlay.qml
+        // skips the same call for a card's first episode, and the languages
+        // carried onto a shuffled episode are a match, not a user choice — the
+        // transcode gets its stream IDs from request_transcode's query either way.
+        if (trackProgress && partId) {
             if (audioId) plexBackend.set_audio_stream(audioId, partId)
             plexBackend.set_subtitle_stream(subId, partId)
         }

@@ -408,9 +408,12 @@ FocusScope {
         anchors.fill: parent
         offerShuffle: true
         cardRef:   item.guid || ""
-        // "Show - S1" rather than "Show - Season 1", so season cards for one show
-        // stay distinct and sort next to that show's episode cards.
+        // "Show (Year) - S1" rather than "Show - Season 1", so season cards for one
+        // show stay distinct, sort next to that show's episode cards, and don't
+        // collide with a same-named show from another year. parentYear is the
+        // show's year — a season carries no year of its own.
         cardTitle: seasonRoot.showTitle
+                   + (item.parentYear ? " (" + item.parentYear + ")" : "")
                    + (item.index !== undefined ? " - S" + item.index : "")
         onClosed: seasonRoot.forceActiveFocus()
     }
