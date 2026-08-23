@@ -21,8 +21,13 @@ FocusScope {
     property var extras: []
     readonly property bool hasExtras: extras.length > 0
 
-    // Focus rows: 0 = play button, 1 = extras (when hasExtras), 2 = episode list
+    // Focus rows: 0 = play button, 1 = extras (when hasExtras),
+    // 4 = write NFC card (when a reader is present), 2 = episode list.
+    // The NFC row is 4 rather than 3 so the existing saved-focus restores, which
+    // compare against literal row numbers, keep working untouched.
     property int focusRow: 0
+
+    property color baseColor: root.primaryColor
 
     Connections {
         target: plexBackend
@@ -72,14 +77,18 @@ FocusScope {
             if (episodeList.currentIndex > 0) {
                 episodeList.currentIndex--
             } else {
-                focusRow = hasExtras ? 1 : 0
+                focusRow = cardWriter.available ? 4 : (hasExtras ? 1 : 0)
             }
+        } else if (focusRow === 4) {
+            focusRow = hasExtras ? 1 : 0
         } else if (focusRow === 1) {
             focusRow = 0
         } else {
             if (episodes.length > 0) {
                 episodeList.currentIndex = episodes.length - 1
                 focusRow = 2
+            } else if (cardWriter.available) {
+                focusRow = 4
             } else if (hasExtras) {
                 focusRow = 1
             }
@@ -89,11 +98,20 @@ FocusScope {
     Keys.onDownPressed: {
         if (focusRow === 0) {
             if (hasExtras) focusRow = 1
+            else if (cardWriter.available) focusRow = 4
             else if (episodes.length > 0) {
                 episodeList.currentIndex = 0
                 focusRow = 2
             }
         } else if (focusRow === 1) {
+            if (cardWriter.available) focusRow = 4
+            else if (episodes.length > 0) {
+                episodeList.currentIndex = 0
+                focusRow = 2
+            } else {
+                focusRow = 0
+            }
+        } else if (focusRow === 4) {
             if (episodes.length > 0) {
                 episodeList.currentIndex = 0
                 focusRow = 2
@@ -113,6 +131,8 @@ FocusScope {
     Keys.onReturnPressed: {
         if (focusRow === 0) {
             playBestEpisode()
+        } else if (focusRow === 4) {
+            cardWriter.open()
         } else if (focusRow === 1) {
             var label = seasonLabel()
             seasonRoot.navigateTo("Extras.qml", {
@@ -232,7 +252,7 @@ FocusScope {
                 Rectangle {
                     id: extrasButton
                     visible: seasonRoot.hasExtras
-                    color: focusRow === 1 ? root.accentColor : "transparent"
+                    color: focusRow === 1 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
                     width: parent.width
                     height: extrasLabel.implicitHeight + root.sh * 0.025 //12
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -240,7 +260,27 @@ FocusScope {
                     Text {
                         id: extrasLabel
                         text: "VIEW EXTRAS"
-                        color: focusRow === 1 ? root.surfaceColor : root.secondaryColor
+                        color: focusRow === 1 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        anchors.centerIn: parent
+                        font.pixelSize: root.sh * 0.025 //12
+                    }
+                }
+
+                // Write NFC Card. Directly under Extras so it collapses upward
+                // when there are no extras, leaving screen height unchanged.
+                Rectangle {
+                    id: writeCardButton
+                    visible: cardWriter.available
+                    color: focusRow === 4 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
+                    width: parent.width
+                    height: writeCardLabel.implicitHeight + root.sh * 0.025 //12
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    Text {
+                        id: writeCardLabel
+                        text: "WRITE NFC TAG"
+                        color: focusRow === 4 ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         anchors.centerIn: parent
                         font.pixelSize: root.sh * 0.025 //12
@@ -284,27 +324,13 @@ FocusScope {
             }
         }
 
-        // Seasons
-        Text {
-            id: episodeListLabel
-            anchors.top: seasonDetails.bottom
-            text: "Episodes:"
-            color: root.secondaryColor
-            font.family: root.globalFont
-            font.capitalization: Font.AllUppercase
-            anchors.topMargin: root.sh * 0.0145833 //7
-            leftPadding: root.sw * 0.009375 //6;
-            rightPadding: root.sw * 0.009375 //6;
-            font.pixelSize: root.sh * 0.0291667 //14
-        }
-
         ListView {
             id: episodeList
             model: episodes
-            anchors.top: episodeListLabel.bottom
+            anchors.top: seasonDetails.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.topMargin: root.sh * 0.0145833 //7
+            anchors.topMargin: root.sh * 0.05625 //27
             height: root.sh * 0.2916667 //140
             clip: true
 
@@ -377,4 +403,19 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125 //80
         font.pixelSize: root.sh * 0.0333333 //16
     }
+    NfcCardWriter {
+        id: cardWriter
+        anchors.fill: parent
+        offerShuffle: true
+        cardRef:   item.guid || ""
+        // "Show (Year) - S1" rather than "Show - Season 1", so season cards for one
+        // show stay distinct, sort next to that show's episode cards, and don't
+        // collide with a same-named show from another year. parentYear is the
+        // show's year — a season carries no year of its own.
+        cardTitle: seasonRoot.showTitle
+                   + (item.parentYear ? " (" + item.parentYear + ")" : "")
+                   + (item.index !== undefined ? " - S" + item.index : "")
+        onClosed: seasonRoot.forceActiveFocus()
+    }
+
 }

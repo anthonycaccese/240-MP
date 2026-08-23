@@ -66,6 +66,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 
 ### NFC Reader ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader))
 - Start video playback via NFC cards
+  - Supports the mapping of video paths, YouTube URLs and content from a Plex library
 - Reader support:
   - `PN532 USB` — recommended. Needs no drivers or daemon on any platform, so it also works on immutable distros like SteamOS
   - `ACS ACR122U` and other PC/SC contactless readers — needs `pcscd` (see `scripts/setup-nfc-reader.sh`)
@@ -80,6 +81,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Select specific libraries to display
 - Continue Watching and Resume
 - Autoplay next episode in a season (optional, off by default)
+- Write an NFC card for any movie, episode, season or show from its detail screen to use with the NFC Reader module
 - Hub, Playlist, Collection and Category support
 - Movie editions
 - Select preferred audio/subtitle track before playback and switch tracks during playback

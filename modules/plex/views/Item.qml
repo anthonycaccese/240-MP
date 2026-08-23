@@ -21,19 +21,61 @@ FocusScope {
     readonly property bool hasExtras: extras.length > 0
 
     // Displayed name — also used as the Extras view's header subtitle
+    // The show's year, for naming an episode's NFC card. An episode's own "year"
+    // is its air year and Plex sends no grandparentYear, so this is fetched (see
+    // showYearRequest below). 0 until it arrives, or if the lookup fails.
+    property int showYear: 0
+
+    // Name written on an NFC card for this item. Both carry the year, so two
+    // items sharing a title — Dune 1984 / Dune 2021, or a show remade decades
+    // later — read apart on disk; episodes are additionally qualified by
+    // season/episode number.
+    function cardName() {
+        var d = detail || item
+        if (item.type === "episode") {
+            var show = item.grandparentTitle || d.grandparentTitle || item.title
+            if (showYear) show += " (" + showYear + ")"
+            var sn = (d.parentIndex !== undefined) ? d.parentIndex : item.parentIndex
+            var en = (d.index !== undefined) ? d.index : item.index
+            if (sn !== undefined && en !== undefined)
+                return show + " - S" + sn + "E" + en
+            return show
+        }
+        var yr = item.year || d.year
+        return yr ? displayName + " (" + yr + ")" : displayName
+    }
+
+    // Ask for the show's year only when a card could actually be written — it
+    // costs a request, and nothing else on this screen uses it. The tap that
+    // follows takes seconds, so the answer is always in hand before the write.
+    function showYearRequest() {
+        if (item.type !== "episode" || showYear || !cardWriter.available) return
+        var key = item.grandparentRatingKey
+                  || (detail ? detail.grandparentRatingKey : "")
+        if (key) plexBackend.load_show_year(key)
+    }
+
     readonly property string displayName: {
         var base = (item.type === "episode" && item.grandparentTitle)
                    ? item.grandparentTitle : item.title
         return item.editionTitle ? base + " (" + item.editionTitle + ")" : base
     }
 
-    // Focus rows: 0=play button, 1=extras (when hasExtras), 2=audio, 3=subtitles
+    // Focus rows: 0=play button, 1=extras (when hasExtras), 4=write NFC card
+    // (when a reader is present), 2=audio, 3=subtitles.
+    //
+    // The NFC row is 4, not 2, deliberately: stepFocus walks activeRows() by
+    // array position, so visual order comes from the array, not the values.
+    // Renumbering audio/subtitles to make room would break the saved-focus
+    // restores that compare against literal row numbers (onExtrasLoaded below,
+    // and the { focusRow: 1 } Extras.qml passes back).
     property int focusRow: 0
 
     // Ordered list of currently reachable focus rows
     function activeRows() {
         var rows = [0]
         if (hasExtras) rows.push(1)
+        if (cardWriter.available) rows.push(4)
         if (detail && detail.audioStreams && detail.audioStreams.length > 0) rows.push(2)
         if (detail && detail.subtitleStreams && detail.subtitleStreams.length > 1) rows.push(3)
         return rows
@@ -61,6 +103,8 @@ FocusScope {
     // transcode session built with the previously selected audio/subtitle.
     property string sessionId: newSessionId()
 
+    property color baseColor: root.primaryColor
+
     function newSessionId() {
         var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         var id = ""
@@ -80,8 +124,16 @@ FocusScope {
     Connections {
         target: plexBackend
 
+        function onShowYearReady(showRatingKey, year) {
+            var key = detailRoot.item.grandparentRatingKey
+                      || (detailRoot.detail ? detailRoot.detail.grandparentRatingKey : "")
+            if (showRatingKey === key) detailRoot.showYear = year
+        }
+
         function onItemLoaded(d) {
             detailRoot.detail = d
+            // The list row may not have carried grandparentRatingKey; the detail does.
+            detailRoot.showYearRequest()
             // Set initial stream indices
             detailRoot.audioIdx = 0
             detailRoot.subtitleIdx = 0
@@ -150,6 +202,7 @@ FocusScope {
             plexBackend.load_item_detail(item.ratingKey)
             plexBackend.load_extras(item.ratingKey)
         }
+        showYearRequest()
         focusRow = 0
     }
 
@@ -181,6 +234,10 @@ FocusScope {
     }
     Keys.onReturnPressed: {
         if (isLaunching) return
+        if (focusRow === 4 && cardWriter.available) {
+            cardWriter.open()
+            return
+        }
         if (focusRow === 1 && hasExtras) {
             navigateTo("Extras.qml", {
                 extras: extras,
@@ -294,7 +351,7 @@ FocusScope {
                 Rectangle {
                     id: extrasButton
                     visible: detailRoot.hasExtras
-                    color: focusRow === 1 ? root.accentColor : "transparent"
+                    color: focusRow === 1 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
                     width: parent.width
                     height: extrasLabel.implicitHeight + root.sh * 0.025 //12
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -302,7 +359,28 @@ FocusScope {
                     Text {
                         id: extrasLabel
                         text: "VIEW EXTRAS"
-                        color: focusRow === 1 ? root.surfaceColor : root.secondaryColor
+                        color: focusRow === 1 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        anchors.centerIn: parent
+                        font.pixelSize: root.sh * 0.025 //12
+                    }
+                }
+
+                // Write NFC Card. Sits directly under Extras so it collapses
+                // upward when there are no extras, leaving the screen height
+                // unchanged either way.
+                Rectangle {
+                    id: writeCardButton
+                    visible: cardWriter.available
+                    color: focusRow === 4 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
+                    width: parent.width
+                    height: writeCardLabel.implicitHeight + root.sh * 0.025 //12
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    Text {
+                        id: writeCardLabel
+                        text: "WRITE NFC TAG"
+                        color: focusRow === 4 ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         anchors.centerIn: parent
                         font.pixelSize: root.sh * 0.025 //12
@@ -555,4 +633,21 @@ FocusScope {
             font.pixelSize: root.sh * 0.0333333 //16
         }
     }
+    NfcCardWriter {
+        id: cardWriter
+        anchors.fill: parent
+        // Movies and episodes are single items — nothing to shuffle.
+        offerShuffle: false
+        cardRef:   (detail && detail.guid) ? detail.guid : (item.guid || "")
+        // Episodes get "Show (Year) - S1E5" so several episodes of one show — and
+        // two shows sharing a name — don't collide on a single filename (the card
+        // title is also the tag file's name). Bound, not snapshot, so the name
+        // picks up the show year whenever that lookup lands.
+        cardTitle: detailRoot.cardName()
+        // A reader plugged in after this screen opened is the moment the year
+        // becomes worth fetching.
+        onAvailableChanged: detailRoot.showYearRequest()
+        onClosed: detailRoot.forceActiveFocus()
+    }
+
 }

@@ -286,6 +286,33 @@ The **scripts module** (`modules/scripts/`, `src/modules/scripts/`) is the secon
 - **Report only after the display is restored.** The caller pops its view on the "finished" signal; doing that while the framebuffer still belongs to the child draws into memory you don't own.
 - **No stop key during a takeover.** A takeover child should own input for it's whole run, and on EGLFS every keystroke is double-delivered (Qt's libinput and the child both read the same evdev devices) so any tap-to-stop key would also fire inside inside a launched takeover application (For example ESC/Back is used by RetroArch's to navigate its menus just like its used inside 240-MP so pressing that key while RA is open would SIGTERM the session mid-run). With this in mind, the runner view is set up to swallow Back events while a takeover is busy and offers no direct stop key. What covers failures instead: the started-watchdog and `FailedToStart` handling, the downgrade-to-console refusal when display state can't be saved, and `~ScriptLauncher`'s SIGTERM → SIGKILL + `releaseNow()` at app quit. Console mode and downgraded runs (where 240-MP kept the screen) still have the Back-to-stop key with `requestStop()`'s SIGTERM → SIGKILL escalation.
 
+## Card Hand-off (NFC → a module)
+
+An NFC card's tag file can point at content another module owns, rather than at a file this module can play itself. The NFC module resolves *which* module, and that module resolves *what to play* — auth, lookup and playback stay where they already live.
+
+**The tag file.** Line 1 is the card UID, line 2 the ref, and an optional line 3 a bare mode token (`shuffle`). Line 3 is deliberately generic rather than Plex-specific so `.m3u` and YouTube-playlist cards can use the same slot later. `parseTagFile` stopped at two lines before, so a third line is backwards-compatible meaning existing cards are unaffected.
+
+**Routing.** `handoffModuleForRef()` in `NfcReaderBackend.cpp` maps a ref's URI scheme to a module id via `kHandoffModules`. `http`/`https` are deliberately absent as those are stream URLs this module hands straight to mpv. A recognised scheme emits `cardHandoffRequested(moduleId, ref, mode)` instead of `playbackRequested(videoPath)`; the file/stream path is untouched. If the target module is disabled the card is refused (`AppCore::is_module_enabled`).
+
+**Navigation.** `Items.qml` resolves the target's entry point with `AppCore::module_entry_point(moduleId)` and emits the **shell-level** `navigateTo` (not the router's internal one). That is why `nfc_reader/views/Root.qml` declares `signal navigateTo(...)` and calls its own router function `navigateToView()`: `Main.qml` only listens for a signal named exactly `navigateTo` on the loaded module, so the name has to be free.
+
+**The receiving module carries a `CardPlay.qml`.** `modules/plex/views/CardPlay.qml` is the reference. It is a thin resolver, not a view the user navigates to:
+
+- `Root.qml` routes to it on `navParams.cardRef`, **ahead of and exclusive of the auth/user gate**. For Plex, falling through that would land a card tap on `UserSelect.qml` whenever `auto_sign_in` is off, and switching profiles from a card would sidestep the profile PIN. A missing sign-in or a pending PIN is surfaced as an error, never a prompt.
+- So it resolves the ref, builds the stream, then **`replaceWith("Player.qml", …)`** — `replaceWith` doesn't push to the nav stack, so the stack stays `[NFC Root] → [Player]` and backing out of playback returns straight to the NFC tap screen instead of stranding the user inside a module so they can tap another card easily after playback stops.
+- It doesn't write player state back to the service (Plex's `set_audio_stream` / `set_subtitle_stream`) — a card tap must not mutate stored per-item preferences. Whatever the server already prefers is what plays.
+- Errors render in the NFC module's visual language, so a card tap looks the same whichever module ends up serving it.
+
+**Adding another module** (e.g. Jellyfin, Emby, …) means: a row in `kHandoffModules`, a `CardPlay.qml`, and a `cardRef` branch in that module's `Root.qml`. Nothing in the NFC module is service-specific.
+
+### Plex specifics
+
+- Cards store a Plex **guid** (`plex://movie/…`), never a ratingKey because guids survive library re-scans and moves between servers, which a physical card on a shelf will benefit from. Resolution is `/library/all?guid=` unscoped: it searches every section, so the card says *what* to play and the app decides *where* it lives. That query omits `Media`/`Part` unless given a `type=` filter so the chosen item is always re-fetched by ratingKey. External ids (`imdb://`, `tmdb://`) are **not** resolvable through this filter.
+- Libraries on a legacy metadata agent report `com.plexapp.agents.*://…` guids. They resolve fine and are routed to Plex by prefix, but they're agent-scoped: re-agenting such a library breaks cards written against it.
+- **Cards never switch server or user.** `select_server` persists config (see the settings-write rule), and auto-switching a Plex Home profile would be a PIN bypass in physical form. Wrong server / no permission / signed out are all errors.
+- A **shuffle** card sets `trackProgress: false` on the Player, suppressing both `update_timeline` calls. Progress reporting is entirely client-side, so that is sufficient to leave watched state, Continue Watching and on-deck untouched.
+- Shuffle keeps rolling via a **shuffle bag** in `PlexBackend` (`m_shuffleBag`): a shuffled permutation played to exhaustion then reshuffled, rather than independent random draws, which clump badly over the hours a jukebox card runs. `resolve_card` reports the show/season as `cardScope`; the Player's EOF branch calls `load_random_episode(scope)` instead of `load_next_episode(ratingKey)`. Both emit `nextEpisodeReady`, so the advance itself is shared. Continuation respects the module's `autoplay_next_episode` setting.
+
 ## Input (InputManager)
 
 All input arrives in QML as **ordinary key events** — views bind `Keys.onPressed` / `Keys.onUpPressed` / etc. and never know which physical device produced the event. Keyboards and keyboard-emulating USB remotes deliver real key events natively; **USB game controllers** are translated by `InputManager` (`src/input/InputManager.h/.cpp`, exposed to QML as the context property **`inputManager`**).
@@ -523,6 +550,27 @@ Shared QML components live in `views/Components/` (registered via `qmldir`, impo
 | `subtitle` | `string` | Optional context label (hidden when empty) |
 
 The icon is automatically colorized to the app accent color
+
+### NfcCardWriter (`views/Components/NfcCardWriter.qml`)
+
+Full-screen takeover that writes an NFC card for the item a detail view is showing. Shared so every module reachable from a card writes them the same way; the host supplies only what goes on the card.
+
+| Property | Type | Description |
+|---|---|---|
+| `cardRef` | `string` | Line 2 of the tag file — e.g. a Plex guid |
+| `cardTitle` | `string` | Filename **and** display title |
+| `offerShuffle` | `bool` | Show the shuffle option — only meaningful for a show or season |
+| `available` | `bool` | Read-only. True when the NFC module is enabled and a reader is connected — bind the host's entry-point row's `visible` to this |
+
+Call `open()` to show it; it emits `closed()` when done. Two things worth preserving if you touch it:
+
+- **Capture is armed only while it is open**, so a card resting near the reader while the user browses can never trigger a write. Arming is always a deliberate action, never a passive listen. The backend handles capture *ahead of* its module-active gate, because arming happens from another module's screen.
+- **Choices carry a stable `action` field; behaviour never keys off the label text.** An earlier version matched `indexOf("shuffle")` on the label and silently broke the moment the wording changed.
+
+Writing also offers an option to the user to replace any previous tag file for that UID, that way a card can be written easily from with the UI.
+
+- **Two cards never share a filename.** `writeCardFile` suffixes the name (`Dune (2021) (2).txt`) when the target name already belongs to a different UID. Hosts should still qualify `cardTitle` so the suffix stays rare.  For example Plex names cards with the year of the item like: `Dune (2021)`, `Cowboy Bebop (1998) - S1`, `Cowboy Bebop (1998) - S1E5`.
+- **The host's title is passed through verbatim.**  To keep the NFC writing generalized for other callers its built to just pass the name through cleanly and the NFC card writing portion doesn't reason about it. I had a use case in my Plex library where an item already carried the year in its title (e.g. Cowboy Bebop (2021)) so for that case the name written is `Cowboy Bebop (2021) (2021).txt`. This is deliberate because inferring if trailing `(NNNN)` is a year or something else would guess at a user's own metadata (think of the the use case for Cyberpunk 2077). The cost of guessing wrong I think outweighs a cosmetic repeat and users can always choose rename the tag file manually as well without any impact to the mapping.
 
 ## Config Storage
 

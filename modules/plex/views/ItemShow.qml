@@ -20,12 +20,17 @@ FocusScope {
     property var extras: []
     readonly property bool hasExtras: extras.length > 0
 
-    // Focus rows: 0 = play button, 1 = extras (when hasExtras), 2 = season list
+    // Focus rows: 0 = play button, 1 = extras (when hasExtras),
+    // 4 = write NFC card (when a reader is present), 2 = season list.
+    // The NFC row is 4 rather than 3 so the existing saved-focus restores, which
+    // compare against literal row numbers, keep working untouched.
     property int focusRow: 0
 
     // When true, the next childrenLoaded signal carries episodes to play, not seasons to display
     property bool playOnLoad: false
     property bool waitingForOnDeck: false
+
+    property color baseColor: root.primaryColor
 
     Connections {
         target: plexBackend
@@ -115,14 +120,18 @@ FocusScope {
             if (seasonList.currentIndex > 0) {
                 seasonList.currentIndex--
             } else {
-                focusRow = hasExtras ? 1 : 0
+                focusRow = cardWriter.available ? 4 : (hasExtras ? 1 : 0)
             }
+        } else if (focusRow === 4) {
+            focusRow = hasExtras ? 1 : 0
         } else if (focusRow === 1) {
             focusRow = 0
         } else {
             if (seasons.length > 0) {
                 seasonList.currentIndex = seasons.length - 1
                 focusRow = 2
+            } else if (cardWriter.available) {
+                focusRow = 4
             } else if (hasExtras) {
                 focusRow = 1
             }
@@ -132,11 +141,20 @@ FocusScope {
     Keys.onDownPressed: {
         if (focusRow === 0) {
             if (hasExtras) focusRow = 1
+            else if (cardWriter.available) focusRow = 4
             else if (seasons.length > 0) {
                 seasonList.currentIndex = 0
                 focusRow = 2
             }
         } else if (focusRow === 1) {
+            if (cardWriter.available) focusRow = 4
+            else if (seasons.length > 0) {
+                seasonList.currentIndex = 0
+                focusRow = 2
+            } else {
+                focusRow = 0
+            }
+        } else if (focusRow === 4) {
             if (seasons.length > 0) {
                 seasonList.currentIndex = 0
                 focusRow = 2
@@ -158,6 +176,8 @@ FocusScope {
             if (seasons.length === 0) return
             showRoot.waitingForOnDeck = true
             plexBackend.load_on_deck_for(item.ratingKey)
+        } else if (focusRow === 4) {
+            cardWriter.open()
         } else if (focusRow === 1) {
             showRoot.navigateTo("Extras.qml", {
                 extras: extras,
@@ -245,7 +265,7 @@ FocusScope {
                 Rectangle {
                     id: extrasButton
                     visible: showRoot.hasExtras
-                    color: focusRow === 1 ? root.accentColor : "transparent"
+                    color: focusRow === 1 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
                     width: parent.width
                     height: extrasLabel.implicitHeight + root.sh * 0.025 //12
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -253,7 +273,27 @@ FocusScope {
                     Text {
                         id: extrasLabel
                         text: "VIEW EXTRAS"
-                        color: focusRow === 1 ? root.surfaceColor : root.secondaryColor
+                        color: focusRow === 1 ? root.surfaceColor : root.primaryColor
+                        font.family: root.globalFont
+                        anchors.centerIn: parent
+                        font.pixelSize: root.sh * 0.025 //12
+                    }
+                }
+
+                // Write NFC Card. Directly under Extras so it collapses upward
+                // when there are no extras, leaving screen height unchanged.
+                Rectangle {
+                    id: writeCardButton
+                    visible: cardWriter.available
+                    color: focusRow === 4 ? root.accentColor : Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.1)
+                    width: parent.width
+                    height: writeCardLabel.implicitHeight + root.sh * 0.025 //12
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    Text {
+                        id: writeCardLabel
+                        text: "WRITE NFC CARD"
+                        color: focusRow === 4 ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         anchors.centerIn: parent
                         font.pixelSize: root.sh * 0.025 //12
@@ -419,4 +459,15 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125 //80
         font.pixelSize: root.sh * 0.0333333 //16
     }
+    NfcCardWriter {
+        id: cardWriter
+        anchors.fill: parent
+        offerShuffle: true
+        cardRef:   item.guid || ""
+        // Year included so two shows sharing a title stay distinct on disk.
+        // Season and episode cards omit it — they are already unique by number.
+        cardTitle: (item.title || "") + (item.year ? " (" + item.year + ")" : "")
+        onClosed: showRoot.forceActiveFocus()
+    }
+
 }

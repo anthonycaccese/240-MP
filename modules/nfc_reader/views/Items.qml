@@ -126,7 +126,25 @@ FocusScope {
         repeat: false
         property string pendingPath: ""
         property string pendingTitle: ""
-        onTriggered: navigateTo("Player.qml", { videoPath: pendingPath, title: pendingTitle }, {})
+        // Set for a handoff card; empty for an ordinary file/stream card.
+        property string pendingModule: ""
+        property string pendingRef: ""
+        property string pendingMode: ""
+        onTriggered: {
+            if (pendingModule !== "") {
+                // Leaves this module entirely: the shell pushes the NFC module as
+                // the back target, so ending playback returns to the tap screen.
+                var entry = appCore.module_entry_point(pendingModule)
+                if (entry === "") return
+                moduleRoot.navigateTo(entry, {
+                    cardRef:   pendingRef,
+                    cardMode:  pendingMode,
+                    cardTitle: pendingTitle
+                }, {})
+                return
+            }
+            navigateTo("Player.qml", { videoPath: pendingPath, title: pendingTitle }, {})
+        }
     }
 
     Connections {
@@ -134,7 +152,18 @@ FocusScope {
         // A matched card tap hands off to Player.qml, which owns the whole mpv
         // session (launch, key forwarding over IPC, exit handling).
         function onPlaybackRequested(videoPath) {
+            matchedDwell.pendingModule = ""
             matchedDwell.pendingPath = videoPath
+            matchedDwell.pendingTitle = nfcReaderBackend.videoTitle
+            matchedDwell.restart()
+        }
+        // A card pointing at another module's content (e.g. a Plex guid). Same
+        // dwell-then-hand-off shape; that module owns resolution and playback.
+        function onCardHandoffRequested(moduleId, ref, mode) {
+            matchedDwell.pendingModule = moduleId
+            matchedDwell.pendingRef   = ref
+            matchedDwell.pendingMode  = mode
+            matchedDwell.pendingPath  = ""
             matchedDwell.pendingTitle = nfcReaderBackend.videoTitle
             matchedDwell.restart()
         }

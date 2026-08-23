@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
     JellyfinBackend     jellyfinBackend(appRoot, dataRoot);
     EmbyBackend         embyBackend(appRoot, dataRoot);
     AmbientModeBackend  ambientMode(dataRoot);
-    NfcReaderBackend    nfcReader(appRoot, dataRoot);
+    NfcReaderBackend    nfcReader(appRoot, dataRoot, &appCore);
     YouTubeBackend      youtubeBackend(appRoot, dataRoot);
     WeatherBackend      weatherBackend(appRoot, dataRoot);
     DisplayHandoff      displayHandoff;

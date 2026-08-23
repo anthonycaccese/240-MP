@@ -1,2 +1,3 @@
 module Components
 AppBar AppBar.qml
+NfcCardWriter NfcCardWriter.qml

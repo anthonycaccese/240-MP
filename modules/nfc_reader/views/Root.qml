@@ -4,6 +4,11 @@ FocusScope {
     id: moduleRoot
 
     signal goBack()
+    // Routes out of this module entirely, to another module's entry point — the
+    // app shell handles this one (Main.qml), not the internal Loader below. Named
+    // to match the shell's handler, which is why the internal view navigation is
+    // navigateToView() rather than navigateTo().
+    signal navigateTo(string path, var params, var listState)
 
     property var navParams: ({})
 
@@ -15,7 +20,7 @@ FocusScope {
     property var navStack: []
     property var currentParams: ({})
 
-    function navigateTo(viewPath, params, fromState) {
+    function navigateToView(viewPath, params, fromState) {
         var resolved = Qt.resolvedUrl(viewPath)
         navStack.push({ source: internalLoader.source, params: currentParams, listState: fromState || {} })
         currentParams = params || {}
@@ -47,7 +52,7 @@ FocusScope {
         Connections {
             target: internalLoader.item
             ignoreUnknownSignals: true
-            function onNavigateTo(path, params, listState) { moduleRoot.navigateTo(path, params, listState) }
+            function onNavigateTo(path, params, listState) { moduleRoot.navigateToView(path, params, listState) }
             function onGoBack() { moduleRoot.navigateBack() }
         }
     }
@@ -116,7 +121,7 @@ FocusScope {
         if (nfcReaderBackend.available) {
             nfcReaderBackend.setModuleActive(true)
             nfcReaderBackend.reloadMapping()
-            navigateTo("Items.qml", {})
+            navigateToView("Items.qml", {})
         }
     }
 

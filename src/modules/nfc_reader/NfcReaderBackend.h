@@ -10,6 +10,7 @@
 #include <vector>
 
 class NfcDriver;
+class AppCore;
 
 // Runs all reader I/O on a dedicated thread. On macOS, SCardConnect can block
 // inside the ctkpcscd daemon for a minute or more (sometimes forever) after
@@ -51,7 +52,10 @@ class NfcReaderBackend : public QObject {
     Q_PROPERTY(QString cardUid READ cardUid NOTIFY cardStateChanged)
     Q_PROPERTY(QString videoTitle READ videoTitle NOTIFY cardStateChanged)
 public:
-    explicit NfcReaderBackend(const QString &appRoot, const QString &dataRoot, QObject *parent = nullptr);
+    // appCore is used only to check whether a card's target module is enabled
+    // before handing off to it; may be null in tests.
+    explicit NfcReaderBackend(const QString &appRoot, const QString &dataRoot,
+                              AppCore *appCore = nullptr, QObject *parent = nullptr);
     ~NfcReaderBackend() override;
 
     Q_INVOKABLE void reloadMapping();
@@ -61,6 +65,21 @@ public:
     // enabled setting owns polling lifetime; active view state only decides
     // whether card events may change state or request playback.
     Q_INVOKABLE void setModuleActive(bool active);
+
+    // Card-write capture. While armed, the next tapped card is reported via
+    // cardCaptured instead of being played, and it works from anywhere in the app
+    // (unlike ordinary taps, which are gated on the NFC module being on screen).
+    // Arming is always a deliberate user action — never a passive listen — so a
+    // card set down near the reader while browsing can't trigger a write.
+    Q_INVOKABLE void setCardCapture(bool armed);
+    // Existing mapping title for a UID, or empty when the card is unmapped. Lets
+    // the writer confirm before replacing a card that already plays something.
+    Q_INVOKABLE QString mappedTitleForUid(const QString &uid) const;
+    // Writes (or replaces) a card's tag file. title becomes the filename and the
+    // display name; ref is the line-2 playback ref; mode is the optional line-3
+    // token, omitted when empty. Returns false and warns on failure.
+    Q_INVOKABLE bool writeCardFile(const QString &uid, const QString &title,
+                                   const QString &ref, const QString &mode);
 
     Q_INVOKABLE QVariantMap getSavedPosition(const QString &videoPath);
     Q_INVOKABLE void        savePosition(const QString &videoPath, int positionMs, int playlistPos);
@@ -95,6 +114,14 @@ signals:
     void readerConnectedChanged();
     void cardStateChanged();
     void playbackRequested(const QString &videoPath);
+    // A tapped card whose ref belongs to another module (e.g. a Plex guid). The
+    // receiving view routes to moduleId's entry point; ref and mode are passed
+    // through untouched. Kept separate from playbackRequested so the file/stream
+    // playback path is unaffected.
+    void cardHandoffRequested(const QString &moduleId, const QString &ref, const QString &mode);
+    // A card tapped while capture was armed. existingTitle is non-empty when the
+    // card already maps to something, so the writer can confirm before replacing.
+    void cardCaptured(const QString &uid, const QString &existingTitle);
     void dynamicOptionsReady(const QString &key, const QVariant &options);
 
 public slots:
@@ -107,8 +134,10 @@ private:
     struct MappingEntry {
         QString path;  // empty = known card with a tag file but no path yet
         QString title;
+        QString mode;  // optional line-3 token ("shuffle"), empty when absent
     };
 
+    AppCore *m_appCore = nullptr;
     QString m_appRoot;
     QString m_dataRoot;
     QString m_tagsDir;
@@ -127,6 +156,7 @@ private:
     QString m_lastUid;
     bool m_playbackActive = false;
     bool m_moduleActive = false;
+    bool m_captureArmed = false;
 
     QString     historyFilePath() const;
     QVariantMap loadHistory() const;
@@ -135,7 +165,8 @@ private:
     QString tagsDirPath() const;
     void setTagsDir(const QString &path);
     void scanTagsDir();
-    bool parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut) const;
+    bool parseTagFile(const QString &filePath, QString &uidOut, QString &pathOut,
+                      QString &modeOut) const;
     void writeStubFile(const QString &normalizedUid);
     void setPollingEnabled(bool enabled);
     void startPolling();
