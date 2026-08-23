@@ -879,6 +879,7 @@ void WeatherBackend::resolveOthers(const QStringList &lines) {
 
 void WeatherBackend::fetchWeather() {
     if (!m_resolved) return;
+    const quint64 requestGeneration = ++m_weatherRequestGeneration;
     const bool us = useUsUnits();
 
     QUrl url(QString::fromLatin1(kForecastUrl));
@@ -901,8 +902,9 @@ void WeatherBackend::fetchWeather() {
     url.setQuery(q);
 
     QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, us]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, us, requestGeneration]() {
         reply->deleteLater();
+        if (requestGeneration != m_weatherRequestGeneration) return;
         if (reply->error() != QNetworkReply::NoError) {
             qWarning("[Weather] fetch failed: %s", qPrintable(reply->errorString()));
             emit fetchError(reply->errorString());
@@ -1330,6 +1332,7 @@ QString WeatherBackend::tempUnitLabel() const {
 // coordinates and answers with an array in the same order — so the whole table
 // is a single round trip no matter how many places are listed.
 void WeatherBackend::fetchOthers() {
+    const quint64 requestGeneration = ++m_otherRequestGeneration;
     if (m_otherPoints.isEmpty()) {
         m_otherLocations.clear();
         emit dataChanged();
@@ -1358,8 +1361,9 @@ void WeatherBackend::fetchOthers() {
     url.setQuery(q);
 
     QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestGeneration]() {
         reply->deleteLater();
+        if (requestGeneration != m_otherRequestGeneration) return;
         if (reply->error() != QNetworkReply::NoError) {
             qWarning("[Weather] other-locations fetch failed: %s",
                      qPrintable(reply->errorString()));

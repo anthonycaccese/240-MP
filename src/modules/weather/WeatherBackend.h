@@ -159,6 +159,12 @@ private:
     QNetworkAccessManager *m_nam = nullptr;
     QTimer  *m_refresh = nullptr;
 
+    // Primary and Other Locations are independent request families. Each new
+    // request invalidates older callbacks in only its own family, so replies
+    // that finish out of order cannot overwrite the newest snapshot.
+    quint64 m_weatherRequestGeneration = 0;
+    quint64 m_otherRequestGeneration = 0;
+
     // Resolved location, cached for the life of the process. Deliberately not
     // persisted: the project writes config.json only on direct user
     // interaction, and re-geocoding once per module entry is one small request.
