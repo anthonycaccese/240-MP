@@ -84,4 +84,41 @@ if [ -n "${DISPLAY:-}" ]; then
     export QT_QPA_PLATFORM
 fi
 
+# Qt settings that belong to us, not to the session we happen to start in.
+#
+# A Linux session exports Qt variables to every Qt program under it, knowing
+# nothing about any of them. KDE-derived setups point QT_QUICK_CONTROLS_STYLE at
+# org.kde.desktop, whose QML plugin links against the HOST's Qt — pulled into our
+# bundled Qt that is two Qt copies in one process, and the app dies before the
+# first frame (issue #258, CachyOS under Steam Big Picture).
+#
+# Which systems export it is a per-distro packaging choice, not a property of KDE:
+# SteamOS desktop mode is also Plasma and does NOT trigger this, and #258 fired
+# under Big Picture with no Plasma session running at all — so CachyOS is setting
+# it more globally than a session script would. Don't reason from "is it KDE?";
+# assume any host may hand us any of these, and pin regardless.
+#
+# So these are pinned unconditionally rather than deferred to with ${VAR:-...}
+# like QT_QPA_PLATFORM above, and the difference is who the value is about.
+# X11-vs-Wayland is a property of the user's machine: the session knows it better
+# than we do, and yielding is right. A widget style is a property of OUR design —
+# a fixed look, with nothing here to theme — so a value arriving in it is not a
+# choice made for 240-MP, it is ambient session state. ${VAR:-...} cannot tell
+# the two apart, because both reach us under the same name.
+#
+# Pin by name, never by namespace: QT_LOGGING_RULES / QSG_* are how we ask a user
+# to debug a black screen, and swallowing their launch option would make that
+# miserable. QT_QPA_PLATFORM and scale-factor variables stay theirs too.
+#
+# If an override is ever genuinely needed — 240-MP starts using real Qt Quick
+# Controls types, or someone hits a case where a pin here is wrong for their
+# hardware — add an MP240_-prefixed variable to read instead. Nothing else on any
+# system sets that prefix, so a value found in one is deliberate by construction,
+# while the session's broadcast stays locked out. Do not reopen these names.
+QT_QUICK_CONTROLS_STYLE=Basic
+QT_QUICK_CONTROLS_FALLBACK_STYLE=Basic
+export QT_QUICK_CONTROLS_STYLE QT_QUICK_CONTROLS_FALLBACK_STYLE
+unset QT_QPA_PLATFORMTHEME QT_STYLE_OVERRIDE
+unset QT_PLUGIN_PATH QML2_IMPORT_PATH QML_IMPORT_PATH
+
 exec "$HERE/usr/bin/240mp" "$@"
