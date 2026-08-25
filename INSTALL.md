@@ -182,7 +182,13 @@ However, if you already have Raspberry Pi OS set up and working on your TV then 
     - Expand filesystem: `Advanced Options > Expand Filesystem > Yes`
     - Select Finish and allow the Raspberry Pi to reboot
 
-5) After that completes SSH in again and run the following to install the latest version of 240-MP
+5) After that completes SSH in again and, since this is a fresh install, first refresh the package lists:
+
+    ```bash
+    sudo apt update && sudo apt-get update
+    ```
+
+    Then run the following to install the latest version of 240-MP
 
     ```bash
     bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/install.sh)
@@ -211,6 +217,18 @@ bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/downl
 - The script grants your user access to the reader
 - for PC/SC readers like the `ACS ACR122U` it installs and configures the `pcscd` package and for `PN532 USB` based readers it adds a udev rule
 - If a group was added you'll need to log out and back in (or reboot) before the reader works
+
+**If you want to use the AirPlay module:**
+
+Run the AirPlay setup script once (builds and installs `shairport-sync` and `nqptp`, since distro packages are typically classic-AirPlay-only):
+
+```bash
+sudo bash <(curl -fsSL https://github.com/anthonycaccese/240-mp/releases/latest/download/setup-airplay.sh)
+```
+
+- Installs `nqptp` as an always-on systemd service (needs root for UDP ports 319/320)
+- Builds `shairport-sync` from source with AirPlay 2 + metadata support
+- shairport-sync itself is *not* a service — 240-MP starts/stops it automatically whenever you open the AirPlay module
 
 **If analog / composite audio is unusually quiet:** 
 - Run `amixer sset PCM 100%`
@@ -305,6 +323,11 @@ If you don't have a Raspberry Pi and would like to try 240-MP, I also provide a 
 4. Double click 240-MP and it should open full screen
 5. The Local Files module will be enabled by default and you can open settings to enable any other modules you would like to display.  Please see the [modules section](https://github.com/anthonycaccese/240-MP/wiki#modules) in the wiki for details on any additional set up that may be needed for the modules you'd like to use.
 
+**Note on AirPlay:** this module is audio only (no video/screen mirroring) and Raspberry Pi only. AirPlay 2 depends on
+`nqptp`, whose own documentation supports Linux and FreeBSD only — there's no macOS
+build path for it, so the module cannot work on a Mac regardless of how 240-MP itself
+is built or run there.
+
 ### Update
 
 **From within the app (recommended):** go to `Settings → Update`, check for updates, download, and choose Apply & Relaunch — the app will swap itself in `/Applications` and reopen on the new version. Your settings will be retained.
@@ -374,6 +397,10 @@ The AppImage carries its own copy of the Wayland client libraries and uses them 
     ```
 
     It writes a udev rule to `/etc/udev/rules.d/` and adds you to the serial device group, then skips the PC/SC setup automatically if it detects an immutable filesystem. Log out and back in afterwards so the group membership applies. SteamOS keeps `/etc` writable across updates so the rule should normally survive, but a major SteamOS release may reset it so if that happens just run the script again.
+
+    #### AirPlay
+
+    `scripts/setup-airplay.sh` builds `shairport-sync` and `nqptp` from source with `apt`/`build-essential`, the same impractical-on-a-read-only-rootfs problem as PC/SC above — it is not expected to work on SteamOS's immutable filesystem out of the box. Not verified on Steam Deck; if you get it working there (e.g. via a distrobox/toolbox with persistent `/opt`-style install paths), a PR documenting the steps would be welcome.
 
 ### Update
 

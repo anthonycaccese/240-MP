@@ -1,0 +1,39 @@
+{
+  "id": "com.240mp.airplay",
+  "name": "AirPlay",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "ON",
+      "description": "Audio only — no video/screen mirroring"
+    },
+    {
+      "key": "audio_output_device",
+      "label": "Audio Output",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "getAudioDevices",
+      "apply_slot": "applyAudioDeviceSetting",
+      "default": "Default",
+      "description": "Which ALSA output device shairport-sync plays to. Default auto-detects one."
+    },
+    {
+      "key": "album_art",
+      "label": "Album Art",
+      "type": "toggle",
+      "default": "ON",
+      "description": "OFF shows a generic placeholder instead"
+    },
+    {
+      "key": "allow_screen_saver",
+      "label": "Allow Screen Saver",
+      "type": "toggle",
+      "default": "OFF",
+      "description": "ON lets the screen saver activate while AirPlay keeps playing"
+    }
+  ]
+}

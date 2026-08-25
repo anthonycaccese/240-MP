@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# fake-shairport-sync — a stand-in for the real shairport-sync binary, for
+# testing the AirPlay module without building the real AirPlay-2 binary
+# (heavy: autoreconf + a dozen -dev packages, see scripts/setup-airplay.sh)
+# or having a phone in the room.
+#
+# It doesn't speak AirPlay at all. AirPlayBackend only ever does two things
+# with the real binary: launches it with --configfile=... and reads whatever
+# it writes to the metadata pipe named in that config. This script does
+# exactly the second part — it opens that same pipe and writes
+# shairport-sync's tagged-chunk protocol to it, looping through a simulated
+# "phone connects, three tracks play, phone disconnects" session forever
+# until killed. See scripts/dev/README.md for how to point the real app at
+# this instead of the real binary.
+#
+# IMPORTANT: this file must be named exactly `shairport-sync` and be first on
+# PATH — AirPlayBackend launches the program by that bare name and relies on
+# PATH resolution, same as the real binary would be.
+set -euo pipefail
+
+CONFIG_FILE=""
+for arg in "$@"; do
+    case "$arg" in
+        --configfile=*) CONFIG_FILE="${arg#--configfile=}" ;;
+    esac
+done
+
+if [[ -z "$CONFIG_FILE" || ! -f "$CONFIG_FILE" ]]; then
+    echo "fake-shairport-sync: no --configfile given or file missing" >&2
+    exit 1
+fi
+
+PIPE=$(grep -oE 'pipe_name = "[^"]+"' "$CONFIG_FILE" | sed -E 's/pipe_name = "(.*)"/\1/')
+if [[ -z "$PIPE" ]]; then
+    echo "fake-shairport-sync: could not find pipe_name in $CONFIG_FILE" >&2
+    exit 1
+fi
+
+echo "fake-shairport-sync: writing fake metadata to $PIPE"
+
+# Tag names hex-encoded, per shairport-sync's metadata protocol (see
+# docs/airplay-module-plan.md §6). Precomputed rather than shelling out to
+# `xxd`/`od` so this script has zero extra dependencies beyond bash+coreutils.
+T_CORE=636f7265; C_MINM=6d696e6d; C_ASAR=61736172; C_ASAL=6173616c
+T_SSNC=73736e63; C_PBEG=70626567; C_PEND=70656e64; C_PICT=50494354
+C_PRSM=7072736d; C_PAUS=70617573; C_SNAM=736e616d
+
+# A 1x1 red pixel PNG, so artworkPath/Image loading gets exercised too.
+PICT_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mO4o6HxHwAFPAIs0Zo91QAAAABJRU5ErkJggg=="
+
+# `<length>` is included for protocol shape but AirPlayBackend never reads
+# it — it decodes `data` directly and uses the decoded byte count — so it's
+# fine that the text items' length below is an approximation (character
+# count, not exact UTF-8 byte count) and the binary item's is omitted.
+item() {
+    local type="$1" code="$2" text="${3:-}"
+    if [[ -n "$text" ]]; then
+        local b64
+        b64=$(printf '%s' "$text" | base64 | tr -d '\n')
+        printf '<item><type>%s</type><code>%s</code><length>%s</length><data encoding="base64">\n%s\n</data></item>' \
+            "$type" "$code" "${#text}" "$b64" >&3
+    else
+        printf '<item><type>%s</type><code>%s</code><length>0</length></item>' "$type" "$code" >&3
+    fi
+}
+
+item_binary() {
+    local type="$1" code="$2" b64="$3"
+    printf '<item><type>%s</type><code>%s</code><length>0</length><data encoding="base64">\n%s\n</data></item>' \
+        "$type" "$code" "$b64" >&3
+}
+
+# Opening the pipe for writing is the moment AirPlayBackend's reader sees a
+# writer arrive — the same signal a real AirPlay client connecting produces.
+# It blocks until the reader (already opened by AirPlayBackend before this
+# process was even started) is present, so there's no race to worry about.
+exec 3>"$PIPE"
+trap 'exec 3>&-; exit 0' TERM INT
+
+TRACKS=(
+    "Bohemian Rhapsody|Queen|A Night at the Opera"
+    "Suzanne|Leonard Cohen|Songs of Leonard Cohen"
+    "Weird Fishes/Arpeggi|Radiohead|In Rainbows"
+)
+
+# A plain `sleep N` is a foreground command, and bash defers running a
+# trapped signal's handler until the foreground command it's waiting on
+# returns — so `sleep 8` would sit on SIGTERM for up to 8s. `terminate()`'s
+# 3s grace period would time out first, forcing a kill() that looks like a
+# crash to the reader (real shairport-sync, being an event-loop-driven C
+# daemon rather than a shell script blocked in sleep(1), doesn't have this
+# problem). Backgrounding the sleep and `wait`-ing on it keeps the script
+# just as idle, but makes it interruptible immediately.
+interruptible_sleep() { sleep "$1" & wait $!; }
+
+while true; do
+    echo "fake-shairport-sync: session begin"
+    item "$T_SSNC" "$C_PBEG"
+    item "$T_SSNC" "$C_SNAM" "Test iPhone"
+
+    for t in "${TRACKS[@]}"; do
+        IFS='|' read -r title artist album <<< "$t"
+        echo "fake-shairport-sync: now playing: $title / $artist / $album"
+        item "$T_CORE" "$C_MINM" "$title"
+        item "$T_CORE" "$C_ASAR" "$artist"
+        item "$T_CORE" "$C_ASAL" "$album"
+        item_binary "$T_SSNC" "$C_PICT" "$PICT_B64"
+        item "$T_SSNC" "$C_PRSM"
+        interruptible_sleep 3
+        echo "fake-shairport-sync: paused"
+        item "$T_SSNC" "$C_PAUS"
+        interruptible_sleep 2
+        echo "fake-shairport-sync: resumed"
+        item "$T_SSNC" "$C_PRSM"
+        interruptible_sleep 3
+    done
+
+    echo "fake-shairport-sync: session end"
+    item "$T_SSNC" "$C_PEND"
+    interruptible_sleep 5
+done

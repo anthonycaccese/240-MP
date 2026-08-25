@@ -60,6 +60,7 @@ add_executable(240mp
     src/modules/nfc_reader/Pn532SerialDriver.cpp
     src/modules/nfc_reader/SerialPort.cpp
     src/modules/weather/WeatherBackend.cpp
+    src/modules/airplay/AirPlayBackend.cpp
     src/modules/scripts/ScriptsBackend.cpp
     src/modules/scripts/ScriptLauncher.cpp
     src/player/MpvController.cpp
@@ -108,6 +109,23 @@ endif()
 target_include_directories(240mp PRIVATE
     src
 )
+
+# ── AirPlay smoke test (opt-in) ─────────────────────────────────────────────────
+# A standalone, QML-free executable that drives AirPlayBackend directly against
+# scripts/dev/fake-airplay/shairport-sync — see scripts/dev/README.md. Off by
+# default so it never affects a normal app build; enable with
+# -DAIRPLAY_BUILD_TESTS=ON, or just run scripts/dev/run-airplay-smoke-test.sh
+# which passes that flag for you.
+option(AIRPLAY_BUILD_TESTS "Build the standalone AirPlay module smoke test" OFF)
+if(AIRPLAY_BUILD_TESTS)
+    add_executable(airplay_smoke_test
+        tests/airplay/smoke_test.cpp
+        src/AppCore.cpp
+        src/modules/airplay/AirPlayBackend.cpp
+    )
+    target_link_libraries(airplay_smoke_test PRIVATE Qt6::Core Qt6::Network Qt6::Qml)
+    target_include_directories(airplay_smoke_test PRIVATE src)
+endif()
 
 # ── macOS bundle metadata ──────────────────────────────────────────────────────
 set_target_properties(240mp PROPERTIES
@@ -180,7 +198,8 @@ else()
         "${CMAKE_SOURCE_DIR}/assets"
         "${CMAKE_SOURCE_DIR}/scripts"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp"
-        COMPONENT Runtime)
+        COMPONENT Runtime
+        PATTERN "dev" EXCLUDE)
 endif()
 
 # ── CPack ──────────────────────────────────────────────────────────────────────
