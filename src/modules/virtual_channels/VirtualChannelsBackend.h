@@ -121,8 +121,14 @@ public:
     Q_INVOKABLE bool set_channel_source(int channelNumber, const QString &source);
     Q_INVOKABLE bool set_channel_list(int channelNumber, const QString &field,
                                       const QStringList &values);
+    // `seasonKey` says which season an episode belongs to, so that switching a
+    // season back on can put all of its episodes on with it. Ignored for
+    // seasons, which have no parent above the series.
     Q_INVOKABLE bool set_channel_excluded(int channelNumber, const QString &kind,
-                                          const QString &itemKey, bool excluded);
+                                          const QString &itemKey, bool excluded,
+                                          const QString &seasonKey = QString());
+    // Every episode of one season airs again.
+    Q_INVOKABLE bool clear_episode_exclusions(int channelNumber, const QString &seasonKey);
 
     Q_INVOKABLE QVariantList list_channels();
 
