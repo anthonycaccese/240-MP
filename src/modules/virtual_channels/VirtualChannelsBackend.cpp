@@ -55,6 +55,25 @@ bool isSafeLogoName(const QString &file) {
 
 qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
 
+// Episode exclusions are stored under the season they belong to, so that
+// switching a season on can clear its own and no one else's. An older file
+// holds a flat array instead; it is read as season-less rather than migrated on
+// sight, the way every other legacy shape here is.
+static QStringList excludedEpisodesIn(const QJsonObject &excl) {
+    QStringList out;
+    const QJsonValue eps = excl.value(QLatin1String("episodes"));
+    if (eps.isArray()) {
+        for (const QJsonValue &v : eps.toArray())
+            if (v.isString()) out << v.toString();
+        return out;
+    }
+    const QJsonObject bySeason = eps.toObject();
+    for (auto it = bySeason.constBegin(); it != bySeason.constEnd(); ++it)
+        for (const QJsonValue &v : it.value().toArray())
+            if (v.isString()) out << v.toString();
+    return out;
+}
+
 QStringList stringListOf(const QJsonObject &o, const char *key) {
     QStringList out;
     for (const QJsonValue &v : o.value(QLatin1String(key)).toArray())
@@ -982,8 +1001,8 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
             const QJsonObject excl = cfg.value(QLatin1String("exclude")).toObject();
             for (const QJsonValue &v : excl.value(QLatin1String("seasons")).toArray())
                 if (v.isString()) job.excludeSeasons.insert(v.toString());
-            for (const QJsonValue &v : excl.value(QLatin1String("episodes")).toArray())
-                if (v.isString()) job.excludeEpisodes.insert(v.toString());
+            for (const QString &ep : excludedEpisodesIn(excl))
+                job.excludeEpisodes.insert(ep);
             jobs.prepend(job);
             break;
         }
@@ -3531,7 +3550,7 @@ QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
 
     const QJsonObject excl = plex.value(QLatin1String("exclude")).toObject();
     out["excludedSeasons"]  = listOf(excl, "seasons");
-    out["excludedEpisodes"] = listOf(excl, "episodes");
+    out["excludedEpisodes"] = excludedEpisodesIn(excl);
     return out;
 }
 
@@ -3609,8 +3628,36 @@ bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &
     return true;
 }
 
+bool VirtualChannelsBackend::clear_episode_exclusions(int channelNumber,
+                                                     const QString &seasonKey) {
+    if (seasonKey.trimmed().isEmpty()) return false;
+    QJsonArray channels = readChannels();
+    for (int i = 0; i < channels.size(); ++i) {
+        QJsonObject o = channels[i].toObject();
+        if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
+
+        const QString block = sourceBlockName(channelSource(channelNumber));
+        if (block == QLatin1String("local")) return false;
+        QJsonObject plex = o.value(block).toObject();
+        QJsonObject excl = plex.value(QLatin1String("exclude")).toObject();
+        QJsonObject bySeason = excl.value(QLatin1String("episodes")).toObject();
+        if (!bySeason.contains(seasonKey)) return true;
+
+        bySeason.remove(seasonKey);
+        if (bySeason.isEmpty()) excl.remove(QLatin1String("episodes"));
+        else                    excl[QLatin1String("episodes")] = bySeason;
+        if (excl.isEmpty()) plex.remove(QLatin1String("exclude"));
+        else                plex[QLatin1String("exclude")] = excl;
+        o[block] = plex;
+        channels[i] = o;
+        return writeChannels(channels);
+    }
+    return false;
+}
+
 bool VirtualChannelsBackend::set_channel_excluded(int channelNumber, const QString &kind,
-                                                  const QString &itemKey, bool excluded) {
+                                                  const QString &itemKey, bool excluded,
+                                                  const QString &seasonKey) {
     if (kind != QLatin1String("seasons") && kind != QLatin1String("episodes")) {
         qWarning("[VirtualChannels] refused unknown exclusion kind '%s'", qPrintable(kind));
         return false;
@@ -3631,17 +3678,36 @@ bool VirtualChannelsBackend::set_channel_excluded(int channelNumber, const QStri
         QJsonObject plex = o.value(block).toObject();
         QJsonObject excl = plex.value(QLatin1String("exclude")).toObject();
 
-        QStringList keys;
-        for (const QJsonValue &v : excl.value(kind).toArray())
-            if (v.isString()) keys << v.toString();
+        if (kind == QLatin1String("episodes")) {
+            QJsonObject bySeason = excl.value(kind).toObject();
+            const QString under = seasonKey.trimmed().isEmpty() ? QStringLiteral("")
+                                                                : seasonKey;
+            QStringList keys;
+            for (const QJsonValue &v : bySeason.value(under).toArray())
+                if (v.isString()) keys << v.toString();
 
-        if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
-        else          { keys.removeAll(itemKey); }
+            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
+            else          { keys.removeAll(itemKey); }
 
-        QJsonArray arr;
-        for (const QString &k : keys) arr.append(k);
-        if (arr.isEmpty()) excl.remove(kind);
-        else               excl[kind] = arr;
+            QJsonArray arr;
+            for (const QString &k : keys) arr.append(k);
+            if (arr.isEmpty()) bySeason.remove(under);
+            else               bySeason[under] = arr;
+            if (bySeason.isEmpty()) excl.remove(kind);
+            else                    excl[kind] = bySeason;
+        } else {
+            QStringList keys;
+            for (const QJsonValue &v : excl.value(kind).toArray())
+                if (v.isString()) keys << v.toString();
+
+            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
+            else          { keys.removeAll(itemKey); }
+
+            QJsonArray arr;
+            for (const QString &k : keys) arr.append(k);
+            if (arr.isEmpty()) excl.remove(kind);
+            else               excl[kind] = arr;
+        }
 
         if (excl.isEmpty()) plex.remove(QLatin1String("exclude"));
         else                plex["exclude"] = excl;
