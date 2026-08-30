@@ -94,6 +94,7 @@ Loaded at startup by `AppCore` — the single source of truth for a module's ide
 | `toggle` | ON/OFF toggle | `default: "ON"` or `"OFF"` |
 | `list_single` | Single-select list | `options_source`, `options_slot`, `apply_slot` |
 | `multiselect_submenu` | Multi-select list via submenu | `options_source`, `options_slot` |
+| `submenu` | Opens a module-supplied sub-view | `view` (path relative to the app root) |
 | `directory_browser` | Keyboard-navigable directory picker | `default` (path string, may be empty) |
 | `action` | Button that calls a backend slot | `action_slot` |
 
@@ -106,6 +107,11 @@ Additional fields any setting may carry:
 ### Dynamic options and apply slots
 
 - For `list_single` / `multiselect_submenu` with `"options_source": "dynamic"`, the backend slot named by `options_slot` must emit `dynamicOptionsReady(key, [{id, label}])`. `AppCore` re-emits it to QML with the module ID prepended.
+- For `submenu`, `view` is a QML path relative to the app root (e.g.
+  `modules/<name>/views/Builder.qml`). The view is pushed onto the settings
+  navigation stack and receives `moduleId` and `settingLabel` as `navParams`.
+  Use this when a feature needs a guided flow rather than a row of values —
+  a multi-step builder does not read well as a flat list.
 - For `list_single` with `apply_slot`, that slot is called automatically (routed through `invoke_module_action`) when the user changes the value.
 
 A real example (Plex) — note `requires_auth`, dynamic options, and apply slots:
