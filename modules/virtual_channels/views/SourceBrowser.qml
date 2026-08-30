@@ -35,6 +35,10 @@ FocusScope {
     property var cfg: ({})
 
     readonly property bool isExclusionLevel: kind === "seasons" || kind === "episodes"
+    // A season only airs if the channel draws from the series it belongs to, so
+    // that is half of what its tick means. The other half is the exclusion list.
+    readonly property bool parentSelected:
+        kind === "seasons" && (cfg.match || []).indexOf(heading) >= 0
     readonly property string listField: kind === "collections" ? "collections"
                                       : kind === "playlists"   ? "playlists"
                                       : "match"
@@ -60,6 +64,7 @@ FocusScope {
         if (isExclusionLevel) {
             var excl = (kind === "seasons") ? (cfg.excludedSeasons || [])
                                             : (cfg.excludedEpisodes || [])
+            if (kind === "seasons" && !parentSelected) return false
             return excl.indexOf(item.id) < 0
         }
         var list = cfg[listField] || []
@@ -85,7 +90,9 @@ FocusScope {
             return
         }
 
-        if (isExclusionLevel) {
+        if (kind === "seasons") {
+            if (!toggleSeason(item)) return
+        } else if (isExclusionLevel) {
             var nowOn = isOn(item)
             if (!virtualChannelsBackend.set_channel_excluded(
                     channelNumber, kind, item.id, /*excluded*/ nowOn)) {
@@ -104,6 +111,49 @@ FocusScope {
         }
         cfg = virtualChannelsBackend.channel_source_config(channelNumber)
         status = ""
+    }
+
+    // Ticking a season is a statement about the series too, so it carries up.
+    //
+    // On a series the channel does not draw from, ticking one season starts
+    // drawing from that series and narrows it to that season alone. Turning off
+    // the last season still airing stops drawing from the series entirely, and
+    // takes the exclusions with it -- leaving a series in the list with every
+    // season switched off would be a channel drawing from nothing.
+    function toggleSeason(item) {
+        const wasAiring = isOn(item)
+        const seriesList = (cfg.match || []).slice()
+
+        if (!parentSelected) {
+            if (seriesList.indexOf(heading) < 0) seriesList.push(heading)
+            if (!virtualChannelsBackend.set_channel_list(channelNumber, "match", seriesList)) {
+                status = "Could not save"
+                return false
+            }
+            for (var i = 0; i < items.length; i++)
+                virtualChannelsBackend.set_channel_excluded(
+                    channelNumber, "seasons", items[i].id, items[i].id !== item.id)
+            return true
+        }
+
+        if (!virtualChannelsBackend.set_channel_excluded(
+                channelNumber, "seasons", item.id, /*excluded*/ wasAiring)) {
+            status = "Could not save"
+            return false
+        }
+        if (!wasAiring) return true
+
+        const excl = (virtualChannelsBackend.channel_source_config(channelNumber).excludedSeasons
+                      || [])
+        for (var j = 0; j < items.length; j++)
+            if (excl.indexOf(items[j].id) < 0) return true      // something still airs
+
+        const at = seriesList.indexOf(heading)
+        if (at >= 0) seriesList.splice(at, 1)
+        virtualChannelsBackend.set_channel_list(channelNumber, "match", seriesList)
+        for (var k = 0; k < items.length; k++)
+            virtualChannelsBackend.set_channel_excluded(channelNumber, "seasons", items[k].id, false)
+        return true
     }
 
     function initialOf(label) {
