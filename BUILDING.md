@@ -110,6 +110,16 @@ sudo apt-get install -y \
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
 
+Qt Multimedia is optional and only powers one thing: the moving preview of what
+is on a channel, shown in the guide while you are picking one. It is detected at
+configure time — CMake prints which way it went — and a build without it shows a
+still card there instead. Nothing else in the app uses it, and playback itself
+never does; that is always mpv.
+
+```bash
+sudo apt-get install -y qt6-multimedia-dev qml6-module-qtmultimedia
+```
+
 For the NFC Reader module, `libpcsclite-dev` is optional and only needed for PC/SC readers such as the ACR122U — it is detected automatically at configure time. A PN532 USB reader needs no build dependency at all.
 
 ```bash
