@@ -95,7 +95,7 @@ FocusScope {
         var e = entryAt(i)
         if (!e) return ""
         if (parseInt(row.substring(6)) === armedToRemove) return "Press again to remove it, or move away to keep it."
-        const idents = (pool === "programmes")
+        var idents = (pool === "programmes")
                        ? "  " + root.hints.change + " for its own idents." : ""
         if (e.kind === "folder")
             return (e.count === 0 ? e.name + " — empty. Press to remove."
@@ -107,12 +107,12 @@ FocusScope {
 
     function secondaryFor(i) {
         if (pool !== "programmes") return ""
-        const row = rows[i]
+        var row = rows[i]
         return (row !== undefined && row.indexOf("entry:") === 0) ? "IDENTS" : ""
     }
 
     function openIdents(i) {
-        const e = entryAt(i)
+        var e = entryAt(i)
         if (!e) return
         navigateTo("modules/virtual_channels/views/SourceIdents.qml", {
             moduleId:      poolRoot.moduleId,
