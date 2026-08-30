@@ -51,6 +51,10 @@ public:
     Q_INVOKABLE void sendKey(const QString &key);
     Q_INVOKABLE int  volume() const { return m_volume; }
     Q_INVOKABLE void setVolume(int percent);
+    // Whether the next launch will crop the picture to fill the screen. A filter
+    // that draws into the video frame has to know: panscan crops that frame
+    // afterwards, and takes anything drawn near its edge with it.
+    Q_INVOKABLE bool cropActive() const { return autoCropEnabled() && !cropUnavailable(); }
     Q_INVOKABLE void showOsdSkipPrompt();
     Q_INVOKABLE void showChannelOsd(const QVariantMap &options);
     Q_INVOKABLE void clearOsdPrompt();

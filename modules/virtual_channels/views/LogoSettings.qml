@@ -73,7 +73,7 @@ FocusScope {
     function helpFor(i) {
         switch (rows[i]) {
         case "logo":    return "Used by channels that have not chosen one. Drawing one costs about a third of decode speed."
-        case "size":    return "How wide the logo is, as a share of the picture."
+        case "size":    return "How much of the picture the logo covers, whatever its shape."
         case "opacity": return "Solid at 100%. A station bug is usually faint."
         case "offsetx": return "Nudge left or right. Increase if a CRT is cutting off the right edge."
         case "offsety": return "Nudge up or down. Increase if a CRT is cutting off the top."

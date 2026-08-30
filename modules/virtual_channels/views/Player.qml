@@ -128,7 +128,12 @@ FocusScope {
         beginTune()
     }
 
-    readonly property real logoInset: 0.08
+    // Title-safe: broadcast keeps text and logos inside the middle 80% of the
+    // picture, because a tube loses the rest to overscan. Eight per cent put the
+    // logo's own edge at 92% across and down -- outside that, in the band only
+    // non-essential graphics are allowed in -- and a set overscanning ten per
+    // cent simply cut it off.
+    readonly property real logoInset: 0.10
 
     property int masterVolume: 100
 
@@ -168,9 +173,37 @@ FocusScope {
         return args
     }
 
+    // How much of the frame survives the crop on each axis, written in whichever
+    // names the filter at hand gives the picture: overlay calls them W and H,
+    // scale2ref calls its reference iw and ih. Both are 1 when nothing is
+    // cropped, and every expression built on them collapses back to its simple
+    // form.
+    function cropFactors(pictureWidth, pictureHeight) {
+        if (!mpvController.cropActive()) return { width: "1", height: "1" }
+        var d = (root.sh > 0 ? root.sw / root.sh : 1.5).toFixed(6)
+        return {
+            width:  "min(1\\," + d + "*" + pictureHeight + "/" + pictureWidth + ")",
+            height: "min(1\\," + pictureWidth + "/(" + pictureHeight + "*" + d + "))"
+        }
+    }
+
+    // Where the logo sits, measured against what the viewer can actually see.
+    //
+    // The filter draws into the video frame, and mpv then scales that frame to
+    // fill the screen -- cropping the overflowing edges when Auto Crop is on.
+    // Anything inset from the frame is dragged toward the edge by that crop, by
+    // an amount that depends on the shape of whatever is playing: a 16:9 stream
+    // on this 3:2 output loses 7.8% of its width each side, which put a logo
+    // inset 10% at 97.4% across the screen, while 4:3 material sat correctly at
+    // 90%. Same setting, different place, which is what made it look arbitrary.
+    // Taking the inset from the visible rectangle instead holds every shape at
+    // the 90% the setting asks for.
     function overlayAt(ox, oy) {
-        return "W-w-(W*" + playerRoot.logoInset + ")+(W*" + ox.toFixed(4) + ")"
-             + ":H-h-(H*" + playerRoot.logoInset + ")+(H*" + oy.toFixed(4) + ")"
+        var visible = cropFactors("W", "H")
+        return "W*(0.5+0.5*" + visible.width + ")-w-(W*" + playerRoot.logoInset + "*" + visible.width + ")"
+             + "+(W*" + ox.toFixed(4) + "*" + visible.width + ")"
+             + ":H*(0.5+0.5*" + visible.height + ")-h-(H*" + playerRoot.logoInset + "*" + visible.height + ")"
+             + "+(H*" + oy.toFixed(4) + "*" + visible.height + ")"
     }
 
     function logoFile() {
@@ -192,11 +225,36 @@ FocusScope {
         return (isNaN(v) ? fallback : v) / 100.0
     }
 
+    // How much of the picture a logo is allowed to cover, whatever its shape.
+    //
+    // Sizing by width alone made the setting mean something different for every
+    // logo: at 12% a square mark stood 18% of the picture tall and a wordmark six
+    // times as wide as it is high stood 2.8% -- the same number producing a
+    // sixfold difference in what the viewer sees. Matching area instead makes the
+    // setting mean weight on screen: a square logo is exactly as before, and
+    // every other shape covers the same ground.
+    //
+    // w = W*size*sqrt(aspect) and h = W*size/sqrt(aspect) multiply to (W*size)^2
+    // for any aspect. The cap stops a very long wordmark from becoming a banner.
+    readonly property real logoMaxWidth: 0.22
+
     function sizedOverLogoGraph(source, opacity, size, offsetX, offsetY, endWithPicture) {
+        // Scaled by the same crop factor as the position, and for the same
+        // reason: the size is a share of the frame, and the crop then magnifies
+        // what is left of that frame to fill the screen. Uncorrected, one
+        // setting drew a logo covering 25.4% of the screen under a 16:9 episode
+        // and 21.4% under a 4:3 advert, so it grew at every break.
+        var width = "min(iw*" + size.toFixed(4) + "*sqrt(mdar)\\,iw*"
+                    + logoMaxWidth.toFixed(2) + ")*" + cropFactors("iw", "ih").width
         return source
              + ",format=rgba,colorchannelmixer=aa=" + opacity.toFixed(3) + "[logo];"
-             + "[logo][vid1]scale2ref=w=iw*" + size.toFixed(4) + ":h=ow/mdar[sized][picture];"
+             + "[logo][vid1]scale2ref=w=" + width + ":h=ow/mdar[sized][picture];"
              + "[picture][sized]overlay=" + overlayAt(offsetX, offsetY)
+             // eval=frame because a channel hands mpv a playlist and the items
+             // are not all the same shape: a 720p episode, then a 480p advert.
+             // Evaluated once at init, the position would be right for whichever
+             // item happened to open the run and wrong for the rest.
+             + ":eval=frame"
              + (endWithPicture ? ":shortest=1" : "") + "[vo]"
     }
 
