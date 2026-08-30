@@ -1,0 +1,150 @@
+{
+  "id": "com.240mp.virtual_channels",
+  "name": "CHANNELS",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF",
+      "description": "Show CHANNELS on the main menu."
+    },
+    {
+      "key": "manage",
+      "label": "Manage Channels",
+      "type": "submenu",
+      "view": "modules/virtual_channels/views/Manage.qml",
+      "description": "Add a channel, or rename, reorder and remove the ones you have."
+    },
+    {
+      "key": "media_directory",
+      "label": "Media Folder",
+      "type": "directory_browser",
+      "default": "",
+      "description": "Where local video lives. Folder channels only use files inside it."
+    },
+    {
+      "key": "channels.weather",
+      "label": "Weather Channel",
+      "type": "toggle",
+      "default": "OFF",
+      "description": "Put the weather station on the dial as a channel of its own."
+    },
+    {
+      "key": "guide.autoscroll",
+      "label": "Guide Auto-Scroll",
+      "type": "toggle",
+      "default": "ON",
+      "description": "Scroll the guide through the channel list on its own."
+    },
+    {
+      "key": "guide.resume_seconds",
+      "label": "Guide Resume After",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_resume_options",
+      "default": "30",
+      "description": "Idle seconds before the guide resumes scrolling by itself."
+    },
+    {
+      "key": "guide.music",
+      "label": "Guide Music",
+      "type": "toggle",
+      "default": "OFF",
+      "description": "Play the Weather module's music over the guide. Needs its Music setting on."
+    },
+    {
+      "key": "guide.preview",
+      "label": "Channel Preview",
+      "type": "list_single",
+      "options": [
+        "Video",
+        "Artwork",
+        "Off"
+      ],
+      "default": "Video",
+      "description": "What to show of a channel while you pick one on the guide: the program playing, a picture of it, or nothing."
+    },
+    {
+      "key": "volume",
+      "label": "Volume",
+      "type": "list_single",
+      "options": [
+        "0",
+        "5",
+        "10",
+        "15",
+        "20",
+        "25",
+        "30",
+        "35",
+        "40",
+        "45",
+        "50",
+        "55",
+        "60",
+        "65",
+        "70",
+        "75",
+        "80",
+        "85",
+        "90",
+        "95",
+        "100"
+      ],
+      "default": "100",
+      "description": "How loud everything on Channels plays — programs, the guide's music and its previews."
+    },
+    {
+      "key": "normalize_volume",
+      "label": "Even Out Volume",
+      "type": "toggle",
+      "default": false,
+      "description": "Keeps programs and adverts at a similar loudness. Costs a little processing on slower boards."
+    },
+    {
+      "key": "schedule.days",
+      "label": "Schedule Ahead",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_schedule_days_options",
+      "default": "2",
+      "description": "How far ahead every channel is built. Topped up nightly and at startup."
+    },
+    {
+      "key": "tuning_screen",
+      "label": "While Tuning",
+      "type": "list_single",
+      "options": [
+        "Card",
+        "Static",
+        "Black"
+      ],
+      "default": "Card",
+      "description": "What fills the screen while a channel loads."
+    },
+    {
+      "key": "banner",
+      "label": "Channel Banner",
+      "type": "submenu",
+      "view": "modules/virtual_channels/views/BannerSettings.qml",
+      "description": "What the on-screen channel card shows, for how long, and where."
+    },
+    {
+      "key": "logo",
+      "label": "Channel Logo",
+      "type": "submenu",
+      "view": "modules/virtual_channels/views/LogoSettings.qml",
+      "description": "A station mark flown in the corner while a channel is on air."
+    },
+    {
+      "key": "rebuild_all",
+      "label": "Rebuild Schedules",
+      "type": "action",
+      "action_slot": "rebuild_all",
+      "description": "Rebuild every channel's schedule. Do this after adding video."
+    }
+  ]
+}
