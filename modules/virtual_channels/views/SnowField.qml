@@ -11,13 +11,17 @@ Item {
 
     property bool running: true
 
-    readonly property int tileSize: 160
+    // Taken from the tile itself rather than written down here: the grain is
+    // drawn at its authored size, so the number is a fact about the asset and
+    // stays right if the tiles are ever regenerated larger.
+    readonly property int tileSize: tile.sourceSize.width
     readonly property int tileCount: 4
     property int tileIndex: 0
     property int shiftX: 0
     property int shiftY: 0
 
     Image {
+        id: tile
         x: -snowField.shiftX
         y: -snowField.shiftY
         // Oversized by one tile so a shift of up to a whole tile still covers
