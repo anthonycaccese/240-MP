@@ -23,6 +23,7 @@
 #include "modules/youtube/YouTubeBackend.h"
 #include "modules/weather/WeatherBackend.h"
 #include "modules/scripts/ScriptsBackend.h"
+#include "modules/virtual_channels/VirtualChannelsBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
 #include "input/IdleTracker.h"
@@ -159,6 +160,8 @@ int main(int argc, char *argv[]) {
     WeatherBackend      weatherBackend(appRoot, dataRoot);
     DisplayHandoff      displayHandoff;
     ScriptsBackend      scriptsBackend(appRoot, dataRoot, &displayHandoff);
+    VirtualChannelsBackend virtualChannels(appRoot, dataRoot,
+                                          &plexBackend, &jellyfinBackend, &embyBackend);
     MpvController       mpvController(appRoot, dataRoot, &appCore, &displayHandoff);
     InputManager        inputManager(dataRoot, &appCore);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
@@ -186,6 +189,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
     appCore.registerModule("com.240mp.weather",      "weatherBackend",     &weatherBackend, ctx);
     appCore.registerModule("com.240mp.scripts",      "scriptsBackend",     &scriptsBackend, ctx);
+    appCore.registerModule("com.240mp.virtual_channels", "virtualChannelsBackend", &virtualChannels, ctx);
 
     ctx->setContextProperty("idleTracker",   &idleTracker);
     ctx->setContextProperty("appCore",       &appCore);
@@ -214,7 +218,14 @@ int main(int argc, char *argv[]) {
 
     // Gamepad key events are posted straight to the root window so they reach
     // the QML focus item even when another window (mpv) holds OS focus.
-    inputManager.setTargetWindow(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
+    auto *rootWindow = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    inputManager.setTargetWindow(rootWindow);
+
+    //
+    if (rootWindow) {
+        QObject::connect(&displayHandoff, &DisplayHandoff::displayReturned,
+                         rootWindow, [rootWindow] { rootWindow->requestUpdate(); });
+    }
 
 #ifdef Q_OS_MAC
     if (QWindow *win = qobject_cast<QWindow *>(engine.rootObjects().first())) {

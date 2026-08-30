@@ -23,6 +23,8 @@ public:
     Q_INVOKABLE void     build_stream_url(const QString &ratingKey,
                                           const QString &partKey,
                                           const QString &sessionId);
+    Q_INVOKABLE QString  video_quality() const;
+    Q_INVOKABLE void     stop_transcode(const QString &sessionId);
 
     // Auth flow
     Q_INVOKABLE void start_pin_auth();
@@ -111,6 +113,8 @@ public:
     // Stops the live transcode for sessionId and forgets the tuned key, so the
     // server can release the tuner. Called on exit and before a channel change.
     Q_INVOKABLE void stop_live_session(const QString &sessionId);
+
+    Q_INVOKABLE QString image_url(const QString &thumb, int width, int height) const;
 
     // Settings dynamic options
     Q_INVOKABLE void getUsers();

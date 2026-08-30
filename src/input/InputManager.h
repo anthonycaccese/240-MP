@@ -89,7 +89,8 @@ private slots:
 #endif
 
 private:
-    enum class Action { None, Up, Down, Left, Right, Select, Back, PlayPause };
+    enum class Action { None, Up, Down, Left, Right, Select, Back, PlayPause,
+                        ChannelUp, ChannelDown };
 
     void initSdl();
     void openController(int deviceIndex);

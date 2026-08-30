@@ -719,7 +719,6 @@ QVariantMap EmbyBackend::formatItem(const QJsonObject &item) const {
     return map;
 }
 
-
 // ---------------------------------------------------------------------------
 // Browse
 // ---------------------------------------------------------------------------
@@ -1834,4 +1833,19 @@ void EmbyBackend::fetchSegments(const QString &itemId) {
 
         emit segmentsReady(itemId, segments);
     });
+}
+
+QString EmbyBackend::image_url(const QString &itemId, const QString &tag,
+                         int width, int height) const {
+    const QString id = itemId.trimmed();
+    if (id.isEmpty() || m_serverUrl.isEmpty()) return {};
+
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("maxWidth"),  QString::number(qBound(16, width,  1920)));
+    q.addQueryItem(QStringLiteral("maxHeight"), QString::number(qBound(16, height, 1080)));
+    if (!tag.trimmed().isEmpty()) q.addQueryItem(QStringLiteral("tag"), tag.trimmed());
+    if (!m_accessToken.isEmpty())  q.addQueryItem(QStringLiteral("api_key"), m_accessToken);
+
+    return m_serverUrl + QStringLiteral("/Items/") + id
+         + QStringLiteral("/Images/Primary?") + q.query(QUrl::FullyEncoded);
 }

@@ -800,6 +800,15 @@ QString PlexBackend::msToDisplay(int ms) {
     return QStringLiteral("%1MIN").arg(mins);
 }
 
+static QStringList plexTags(const QJsonObject &m, const char *key) {
+    QStringList out;
+    for (const QJsonValue &v : m[QLatin1String(key)].toArray()) {
+        const QString tag = v.toObject()["tag"].toString();
+        if (!tag.isEmpty()) out << tag;
+    }
+    return out;
+}
+
 QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
     return QVariantMap{
         {"ratingKey",              m["ratingKey"].toString()},
@@ -827,7 +836,29 @@ QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
         {"leafCount",              m["leafCount"].toInt()},
         {"viewedLeafCount",        m["viewedLeafCount"].toInt()},
         {"originallyAvailableAt",  m["originallyAvailableAt"].toString()},
+        {"genres",                 plexTags(m, "Genre")},
+        {"collections",            plexTags(m, "Collection")},
+        {"thumb",                  m["thumb"].toString()},
+        {"parentThumb",            m["parentThumb"].toString()},
+        {"grandparentThumb",       m["grandparentThumb"].toString()},
     };
+}
+
+QString PlexBackend::image_url(const QString &thumb, int width, int height) const {
+    const QString path = thumb.trimmed();
+    if (path.isEmpty()) return {};
+    const QString uri   = serverUrl();
+    const QString token = serverToken();
+    if (uri.isEmpty() || token.isEmpty()) return {};
+
+    QUrlQuery q;
+    q.addQueryItem("width",  QString::number(qBound(16, width,  1920)));
+    q.addQueryItem("height", QString::number(qBound(16, height, 1080)));
+    q.addQueryItem("minSize", QStringLiteral("1"));
+    q.addQueryItem("upscale", QStringLiteral("1"));
+    q.addQueryItem("url", path);
+    q.addQueryItem("X-Plex-Token", token);
+    return uri + QStringLiteral("/photo/:/transcode?") + q.query(QUrl::FullyEncoded);
 }
 
 void PlexBackend::flattenSeasons(const QVariantList &rawItems,
@@ -2751,6 +2782,22 @@ void PlexBackend::update_live_timeline(const QString &state) {
     // Releasing the tuner ends this session; forget the key so a stray timer tick
     // can't re-ping a dead session.
     if (state == "stopped") m_liveTimelineKey.clear();
+}
+
+QString PlexBackend::video_quality() const {
+    return videoQuality();
+}
+
+void PlexBackend::stop_transcode(const QString &sessionId) {
+    if (sessionId.isEmpty()) return;
+    QString uri = serverUrl(), token = serverToken();
+    QUrl url(uri + "/video/:/transcode/universal/stop");
+    QUrlQuery q;
+    q.addQueryItem("session", sessionId);
+    q.addQueryItem("X-Plex-Client-Identifier", clientId());
+    url.setQuery(q);
+    auto *reply = plexGet(url, token);
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
 void PlexBackend::stop_live_session(const QString &sessionId) {
