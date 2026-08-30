@@ -84,6 +84,7 @@ FocusScope {
         }
 
         navigateTo("modules/virtual_channels/views/PoolEditor.qml", {
+            moduleId:      interRoot.moduleId,
             channelNumber: interRoot.channelNumber,
             channelName:   interRoot.channelName,
             pool:          row,
