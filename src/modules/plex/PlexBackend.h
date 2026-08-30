@@ -82,6 +82,10 @@ public:
     // show/season. Emits nextEpisodeReady (the same signal autoplay already
     // consumes) or an empty map, so the Player advances identically either way.
     Q_INVOKABLE void load_random_episode(const QString &scopeRatingKey);
+    // Next item of a PLAY ALL / SHUFFLE queue over a playlist or collection.
+    // Emits nextEpisodeReady (the same signal autoplay and shuffle cards use), so
+    // the Player advances a queue with the machinery it already has.
+    Q_INVOKABLE void load_queue_item(const QString &ratingKey);
     Q_INVOKABLE void request_transcode(const QString &ratingKey, const QString &partKey,
                                        const QString &sessionId,
                                        const QString &audioId, const QString &subtitleId,

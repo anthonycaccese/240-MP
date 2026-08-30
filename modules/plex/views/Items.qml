@@ -27,6 +27,48 @@ FocusScope {
     property bool letterNavActive: false
     property var letterIndex: []
 
+    // ----------------------------------------------------------------
+    // PLAY ALL / SHUFFLE rows — curated sets can be played as a queue.
+    // They are prepended as virtual rows rather than mixed into `items`, so
+    // `items` stays exactly what the backend sent and every index into it has to
+    // go through actionRows.length. `rows` is what the ListView actually shows.
+    // ----------------------------------------------------------------
+    property bool canQueue: listType === "playlist_items" || listType === "collection_items"
+    // Only leaf playables can be queued. flattenSeasons has already expanded any
+    // seasons, but a collection of shows still yields `show` rows, which have no
+    // media of their own — such a collection simply gets no queue rows.
+    property var queueItems: canQueue
+        ? items.filter(function(i) { return i && i.type !== "show" })
+        : []
+    property var actionRows: queueItems.length > 1
+        ? [{ __action: "play_all", title: "PLAY ALL" },
+           { __action: "shuffle",  title: "SHUFFLE"  }]
+        : []
+    property var rows: actionRows.concat(items)
+
+    // Number of leading action rows for a given backend result. Used by the
+    // restore clamps, which run while `items` is mid-assignment and so cannot
+    // read the actionRows binding.
+    function actionRowCountFor(loadedItems) {
+        if (!canQueue) return 0
+        var playable = 0
+        for (var i = 0; i < loadedItems.length; i++) {
+            if (loadedItems[i] && loadedItems[i].type !== "show") playable++
+        }
+        return playable > 1 ? 2 : 0
+    }
+
+    function buildQueue(shuffle) {
+        var keys = queueItems.map(function(i) { return i.ratingKey })
+        if (shuffle) {
+            for (var i = keys.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1))
+                var tmp = keys[i]; keys[i] = keys[j]; keys[j] = tmp
+            }
+        }
+        return keys
+    }
+
     // Buckets by the server's sort title when one is set (Plex sorts the list by
     // titleSort), otherwise falls back to article-stripping the display title —
     // which is what Plex itself does for items without a custom sort title.
@@ -45,7 +87,7 @@ FocusScope {
 
     // Highlights the letter matching the currently selected item.
     function syncLetterToItem() {
-        var curLetter = sortKey(items[itemList.currentIndex])
+        var curLetter = sortKey(items[itemList.currentIndex - actionRows.length])
         for (var i = 0; i < letterIndex.length; i++) {
             if (letterIndex[i].letter === curLetter) { letterList.currentIndex = i; break }
         }
@@ -86,8 +128,11 @@ FocusScope {
                 if (itemListRoot.showLetterNav)
                     itemListRoot.letterIndex = itemListRoot.buildLetterIndex(loadedItems)
                 if (loadedItems.length > 0) {
+                    // The saved index is a *row* index, so the clamp has to account
+                    // for the PLAY ALL / SHUFFLE rows this list may have prepended.
+                    var rowCount = loadedItems.length + itemListRoot.actionRowCountFor(loadedItems)
                     var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
-                    itemList.currentIndex = Math.min(restore, loadedItems.length - 1)
+                    itemList.currentIndex = Math.min(restore, rowCount - 1)
                     itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
                 }
             }
@@ -171,8 +216,18 @@ FocusScope {
     // ----------------------------------------------------------------
 
     function selectItem() {
-        var item = items[itemList.currentIndex]
+        var item = rows[itemList.currentIndex]
         if (!item) return
+
+        // Virtual queue rows — play the whole set instead of drilling into one item.
+        if (item.__action) {
+            itemListRoot.navigateTo("QueuePlay.qml", {
+                queue: buildQueue(item.__action === "shuffle"),
+                title: listTitle,
+                libraryName: libraryName
+            }, { currentIndex: itemList.currentIndex })
+            return
+        }
 
         // Intermediate lists that navigate deeper
         if (listType === "hubs") {
@@ -333,7 +388,7 @@ FocusScope {
     // Body
     ListView {
         id: itemList
-        model: items
+        model: rows
         opacity: letterNavActive ? 0.3 : 1
         anchors.top: parent.top
         anchors.left: parent.left

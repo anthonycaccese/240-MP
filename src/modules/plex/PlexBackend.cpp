@@ -2264,6 +2264,14 @@ void PlexBackend::load_random_episode(const QString &scopeRatingKey) {
     });
 }
 
+// A queue's order is decided in QML from rows that are already loaded, so this
+// only has to resolve one ratingKey — which emitNextEpisode already does, through
+// the signal the Player's advance path consumes. An empty key (queue exhausted)
+// reports an empty map, which the Player treats as the end.
+void PlexBackend::load_queue_item(const QString &ratingKey) {
+    emitNextEpisode(ratingKey);
+}
+
 void PlexBackend::resolve_card(const QString &guid, const QString &mode) {
     if (guid.isEmpty()) { emit cardError(QStringLiteral("THIS CARD HAS NO PLEX ITEM")); return; }
     const QString uri = serverUrl(), token = serverToken();

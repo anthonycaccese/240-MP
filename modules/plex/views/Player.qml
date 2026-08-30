@@ -41,6 +41,13 @@ FocusScope {
     // Show/season ratingKey a shuffle card draws its episodes from; empty for
     // every other kind of playback, which advances sequentially.
     property string shuffleScope:       navParams.shuffleScope || ""
+    // PLAY ALL / SHUFFLE over a playlist or collection: the ordered ratingKeys of
+    // everything still to play, and where in them the current item sits. Empty for
+    // every other kind of playback. A queue advances unconditionally — the user
+    // asked for the whole set — so it is checked ahead of autoplayNext, and
+    // QueuePlay.qml passes allowAutoplay: false to keep the two from racing.
+    property var    queue:              navParams.queue || []
+    property int    queueIndex:         navParams.queueIndex || 0
 
     property bool stoppedReported:    false
     property bool playbackStarted:    false
@@ -267,12 +274,26 @@ FocusScope {
             // Empty detail → no next episode in the season (or a lookup failure).
             // Fall back to the standard behavior: return to the detail view.
             if (!detail || !detail.ratingKey) {
+                // Inside a queue an unplayable entry is skipped instead: one bad
+                // item must not end a playlist the user asked to play in full.
+                if (playerRoot.requestNextQueueItem()) return
                 pendingNextEpisode = false
                 goBack()
                 return
             }
             playerRoot.advanceToEpisode(detail)
         }
+    }
+
+    // Ask the backend for the next item of the queue, if there is one. Reports
+    // through nextEpisodeReady, so the advance is the same code path as autoplay.
+    // Returns false when there is no queue or it is exhausted.
+    function requestNextQueueItem() {
+        if (queue.length === 0 || queueIndex + 1 >= queue.length) return false
+        queueIndex++
+        pendingNextEpisode = true
+        plexBackend.load_queue_item(queue[queueIndex])
+        return true
     }
 
     // Swap the player's context to the next episode in place (no navigation) and
@@ -305,7 +326,9 @@ FocusScope {
         // Repoint the BACK target so exiting returns to THIS episode's detail
         // screen, not the one we auto-advanced from. Item.qml reloads from
         // item.ratingKey, so a minimal item carrying the new keys suffices.
-        updateBackItem({
+        // A queue was launched with replaceWith, so the stack top is the list the
+        // queue came from — leave it pointing at the list.
+        if (queue.length === 0) updateBackItem({
             ratingKey: detail.ratingKey,
             type: detail.type || "episode",
             title: detail.title || "",
@@ -382,6 +405,13 @@ FocusScope {
             // onNextEpisodeReady falls back to goBack(). Everything else returns to
             // the detail view here.
             reportStopped(finalPositionMs, finalDurationMs)
+            if (reason === "eof" && queue.length > 0) {
+                // A queue advances regardless of the autoplay setting: playing the
+                // whole set is what the user selected. Exhausted → back to the list.
+                if (requestNextQueueItem()) return
+                goBack()
+                return
+            }
             if (reason === "eof" && autoplayNext) {
                 pendingNextEpisode = true
                 // Same advance machinery either way — only the source of the next
