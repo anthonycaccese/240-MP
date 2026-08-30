@@ -6,7 +6,14 @@ FocusScope {
     property var navParams: ({})
     readonly property string moduleIcon:
         appCore ? (appCore.get_module_info(moduleId).icon || "") : ""
-    property var navListState: ({})
+    // Assigned directly by the app's router and nested in navParams by the
+    // module's; this view is reachable both ways, so it reads either.
+    property var navListState: navParams.navListState || ({})
+    // Where the viewer was before descending into a season list. The list
+    // arrives asynchronously, so it is put back when the items land rather
+    // than on completion, and only once.
+    property int restoreIndex: navListState.currentIndex !== undefined
+                               ? navListState.currentIndex : -1
     property int    channelNumber: navParams.channelNumber !== undefined ? navParams.channelNumber : -1
     property string kind:          navParams.kind      || "shows"
     property string parentKey:     navParams.parentKey || ""
@@ -163,6 +170,12 @@ FocusScope {
             browserRoot.loading = false
             browserRoot.items = list || []
             browserRoot.status = browserRoot.items.length === 0 ? "Nothing here" : ""
+            if (browserRoot.restoreIndex >= 0 && browserRoot.items.length > 0) {
+                itemList.currentIndex = Math.min(browserRoot.restoreIndex,
+                                                 browserRoot.items.length - 1)
+                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+                browserRoot.restoreIndex = -1
+            }
         }
         function onSourceBrowseFailed(kind, reason) {
             if (kind !== browserRoot.kind) return
