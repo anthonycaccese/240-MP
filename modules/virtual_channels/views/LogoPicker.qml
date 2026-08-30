@@ -33,7 +33,7 @@ FocusScope {
         chosen = perChannel ? (virtualChannelsBackend.channel_logo(channelNumber) || "")
                             : (appCore.get_setting(moduleId, settingKey) || "")
         if (perChannel) {
-            const def = String(appCore.get_setting(moduleId, settingKey) || "")
+            var def = String(appCore.get_setting(moduleId, settingKey) || "")
             defaultName = ""
             for (var i = 0; i < logos.length; ++i)
                 if (logos[i].file === def) { defaultName = String(logos[i].name); break }
@@ -49,8 +49,8 @@ FocusScope {
                    : "Follows the module's logo setting, currently "
                      + defaultName.toUpperCase() + "."
         if (current === 0) return "No logo. Nothing drawn over the picture, and nothing spent drawing it."
-        const f = logos[current - 1]
-        const name = f ? String(f.file) : ""
+        var f = logos[current - 1]
+        var name = f ? String(f.file) : ""
         if (name.toLowerCase().endsWith(".gif"))
             return "Moves, and costs most — about a third of decode speed, and more again joining part way in."
         return "A still logo, the cheaper of the two. Any logo costs roughly a third of decode speed."

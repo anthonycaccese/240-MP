@@ -140,20 +140,20 @@ FocusScope {
     }
 
     function dropSeries(list) {
-        const at = list.indexOf(seriesName)
+        var at = list.indexOf(seriesName)
         if (at >= 0) list.splice(at, 1)
         virtualChannelsBackend.set_channel_list(channelNumber, "match", list)
     }
 
     function toggleSeason(item) {
-        const wasAiring = isOn(item)
-        const seriesList = (cfg.match || []).slice()
+        var wasAiring = isOn(item)
+        var seriesList = (cfg.match || []).slice()
 
         if (!wasAiring) {
             // Starting from nothing narrows the series to this season. If the
             // series is already on, the other seasons are somebody's choice and
             // stay as they are.
-            const narrowing = !seriesSelected
+            var narrowing = !seriesSelected
             if (narrowing && !selectSeries(seriesList)) return false
             if (narrowing) {
                 for (var i = 0; i < items.length; i++)
@@ -175,7 +175,7 @@ FocusScope {
         }
         virtualChannelsBackend.clear_episode_exclusions(channelNumber, item.id)
 
-        const excl = (virtualChannelsBackend.channel_source_config(channelNumber).excludedSeasons
+        var excl = (virtualChannelsBackend.channel_source_config(channelNumber).excludedSeasons
                       || [])
         for (var j = 0; j < items.length; j++)
             if (excl.indexOf(items[j].id) < 0) return true      // something still airs
@@ -187,9 +187,9 @@ FocusScope {
     }
 
     function toggleEpisode(item) {
-        const wasAiring = isOn(item)
-        const seriesList = (cfg.match || []).slice()
-        const seasonOff = (cfg.excludedSeasons || []).indexOf(parentKey) >= 0
+        var wasAiring = isOn(item)
+        var seriesList = (cfg.match || []).slice()
+        var seasonOff = (cfg.excludedSeasons || []).indexOf(parentKey) >= 0
 
         if (!wasAiring) {
             // Off only because it was picked out of a season that is otherwise
@@ -202,7 +202,7 @@ FocusScope {
             // series to this episode; if the series is already on and only this
             // season was off, that season comes back on narrowed to it and the
             // rest of the series is left alone.
-            const narrowing = !seriesSelected
+            var narrowing = !seriesSelected
             if (narrowing && !selectSeries(seriesList)) return false
             if (narrowing) {
                 for (var i = 0; i < siblingSeasons.length; i++)
@@ -227,7 +227,7 @@ FocusScope {
             return false
         }
 
-        const epExcl = (virtualChannelsBackend.channel_source_config(channelNumber).excludedEpisodes
+        var epExcl = (virtualChannelsBackend.channel_source_config(channelNumber).excludedEpisodes
                         || [])
         for (var k = 0; k < items.length; k++)
             if (epExcl.indexOf(items[k].id) < 0) return true    // something still airs
@@ -236,7 +236,7 @@ FocusScope {
         virtualChannelsBackend.clear_episode_exclusions(channelNumber, parentKey)
         virtualChannelsBackend.set_channel_excluded(channelNumber, "seasons", parentKey, true)
 
-        const seasonExcl = (virtualChannelsBackend.channel_source_config(channelNumber)
+        var seasonExcl = (virtualChannelsBackend.channel_source_config(channelNumber)
                             .excludedSeasons || [])
         for (var m = 0; m < siblingSeasons.length; m++)
             if (seasonExcl.indexOf(siblingSeasons[m]) < 0) return true

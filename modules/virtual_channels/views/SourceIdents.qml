@@ -31,12 +31,12 @@ FocusScope {
     property bool armedToClear: false
 
     function reload() {
-        const list = virtualChannelsBackend.channel_pool(channelNumber, pool)
+        var list = virtualChannelsBackend.channel_pool(channelNumber, pool)
         entry = (entryIndex >= 0 && entryIndex < list.length) ? list[entryIndex] : ({})
     }
 
     function foldersOf(key) {
-        const v = entry ? entry[key] : undefined
+        var v = entry ? entry[key] : undefined
         return (v === undefined || v === null) ? [] : v
     }
 
@@ -50,20 +50,20 @@ FocusScope {
     }
 
     function countOf(key) {
-        const n = entry ? entry[key + "_count"] : undefined
+        var n = entry ? entry[key + "_count"] : undefined
         return (n === undefined || n === null) ? -1 : n
     }
 
     function valueFor(i) {
         if (rows[i] === "clear") return armedToClear ? "CLEAR?" : ""
-        const f = foldersOf(rows[i])
+        var f = foldersOf(rows[i])
         if (f.length === 0) return "CHANNEL'S"
-        const parts = String(f[0]).split("/").filter(function (p) { return p !== "" })
-        const leaf = parts.length ? parts[parts.length - 1] : ""
-        const generic = ["intro", "intros", "outro", "outros", "idents", "bumps"]
-        const useful = (generic.indexOf(leaf.toLowerCase()) >= 0 && parts.length > 1)
+        var parts = String(f[0]).split("/").filter(function (p) { return p !== "" })
+        var leaf = parts.length ? parts[parts.length - 1] : ""
+        var generic = ["intro", "intros", "outro", "outros", "idents", "bumps"]
+        var useful = (generic.indexOf(leaf.toLowerCase()) >= 0 && parts.length > 1)
                        ? parts[parts.length - 2] : leaf
-        const n = countOf(rows[i])
+        var n = countOf(rows[i])
         return useful.toUpperCase() + (n >= 0 ? " (" + n + ")" : "")
     }
 
@@ -83,7 +83,7 @@ FocusScope {
     }
 
     function shortName() {
-        const n = String(entryName)
+        var n = String(entryName)
         return n === "" ? "this source" : (n.length > 22 ? n.substring(0, 22) + "…" : n)
     }
 
@@ -96,7 +96,7 @@ FocusScope {
     }
 
     function save(next) {
-        const list = virtualChannelsBackend.channel_pool(channelNumber, pool)
+        var list = virtualChannelsBackend.channel_pool(channelNumber, pool)
         if (entryIndex < 0 || entryIndex >= list.length) {
             status = "That source is no longer there"
             return
@@ -112,12 +112,12 @@ FocusScope {
     }
 
     function open(i) {
-        const row = rows[i]
+        var row = rows[i]
         if (row === "clear") {
             if (!armedToClear) { armedToClear = true; return }
             armedToClear = false
-            const next = {}
-            for (const k in entry)
+            var next = {}
+            for (var k in entry)
                 if (k !== "intros" && k !== "outros"
                     && k !== "intros_count" && k !== "outros_count") next[k] = entry[k]
             save(next)
@@ -134,28 +134,28 @@ FocusScope {
     }
 
     function applyPending() {
-        const which = navListState.pickFor
+        var which = navListState.pickFor
         if (which === undefined) return
-        const picked = appCore.get_setting(moduleId, "pool_buffer")
-        const raw = (picked === undefined || picked === null) ? "" : String(picked)
+        var picked = appCore.get_setting(moduleId, "pool_buffer")
+        var raw = (picked === undefined || picked === null) ? "" : String(picked)
         appCore.save_setting(moduleId, "pool_buffer", "")
         navListState = {}
         if (raw === "") return
 
-        const at = raw.indexOf("|")
+        var at = raw.indexOf("|")
         if (at <= 0) return
-        const folder = raw.substring(at + 1)
+        var folder = raw.substring(at + 1)
         if (folder === "") return
 
-        const next = {}
-        for (const k in entry)
+        var next = {}
+        for (var k in entry)
             if (k !== "intros_count" && k !== "outros_count") next[k] = entry[k]
         next[which] = [folder]
         save(next)
     }
 
     Component.onCompleted: {
-        const restore = navListState.currentIndex
+        var restore = navListState.currentIndex
         reload()
         applyPending()
         if (restore !== undefined) current = Math.min(restore, rows.length - 1)
