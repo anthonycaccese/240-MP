@@ -16,10 +16,14 @@ FocusScope {
     signal replaceWith(string path, var params)
     signal goBack()
 
-    // Ordered ratingKeys — already shuffled by the caller for SHUFFLE.
-    property var    queue:     navParams.queue || []
-    property string queueTitle: navParams.title || ""
+    // The rows the user queued, straight from the list view: leaves and shows.
+    property var    queueItems: navParams.queueItems || []
+    property bool   shuffle:    navParams.shuffle    || false
+    property string queueTitle: navParams.title      || ""
 
+    // The ratingKeys that actually play, once the shows have been expanded into
+    // their episodes and the order has been settled.
+    property var    queue:        []
     property int    queueIndex:   0
     property string errorMessage: ""
     property string sessionId:    ""
@@ -44,11 +48,27 @@ FocusScope {
 
     function start() {
         errorMessage = ""
-        if (queue.length === 0) { fail("NOTHING TO PLAY"); return }
-        // A retry after "nothing resolved" starts the queue over from the top.
-        if (queueIndex >= queue.length) queueIndex = 0
+        if (queueItems.length === 0) { fail("NOTHING TO PLAY"); return }
         launching = true
-        plexBackend.load_queue_item(queue[queueIndex])
+        // Answers immediately when there is nothing to expand; a set containing
+        // shows costs one request per show plus one per season first, which is
+        // what the loading screen is covering.
+        plexBackend.expand_queue(queueItems)
+    }
+
+    // Play the expanded queue from its first entry, in order or shuffled. The
+    // shuffle happens here, after expansion, so it interleaves episodes across
+    // shows rather than merely reordering the shows themselves.
+    function startQueue(keys) {
+        if (shuffle) {
+            for (var i = keys.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1))
+                var tmp = keys[i]; keys[i] = keys[j]; keys[j] = tmp
+            }
+        }
+        queue = keys
+        queueIndex = 0
+        plexBackend.load_queue_item(queue[0])
     }
 
     Keys.onPressed: function(event) {
@@ -64,6 +84,12 @@ FocusScope {
 
     Connections {
         target: plexBackend
+
+        function onQueueReady(ratingKeys) {
+            if (!queueRoot.launching) return
+            if (ratingKeys.length === 0) { queueRoot.fail("NOTHING TO PLAY"); return }
+            queueRoot.startQueue(ratingKeys)
+        }
 
         function onNextEpisodeReady(detail) {
             if (!queueRoot.launching) return

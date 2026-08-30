@@ -2264,6 +2264,73 @@ void PlexBackend::load_random_episode(const QString &scopeRatingKey) {
     });
 }
 
+// A guard, not a policy: a queue is just a list of ratingKeys, but a very large
+// collection of shows would otherwise fan out into thousands of entries — and
+// every one of them was a request. Nothing real comes close.
+static constexpr int kMaxQueueItems = 2000;
+
+// Expands a PLAY ALL / SHUFFLE selection into what actually plays.
+//
+// Shows are the only rows that need expanding: seasons were already flattened
+// when the list was loaded, so everything else is a leaf. flattenSeasons itself
+// can't do this job — it builds the *displayed* list, and expanding shows there
+// would make a collection of shows browse as a wall of episodes.
+//
+// The shows fan out in parallel into ordered slots, so a collection's episodes
+// stay grouped by show, in season/episode order, however the replies land. A
+// show whose fetch fails contributes nothing and never stalls the queue:
+// fetchChildren reports an empty list on error rather than not reporting.
+void PlexBackend::expand_queue(const QVariantList &items) {
+    int showCount = 0;
+    for (const auto &v : items) {
+        if (v.toMap()["type"].toString() == QLatin1String("show")) showCount++;
+    }
+
+    // No shows: the selection is already the queue, so answer without a round trip.
+    if (showCount == 0) {
+        QStringList keys;
+        for (const auto &v : items) {
+            const QString key = v.toMap()["ratingKey"].toString();
+            if (!key.isEmpty()) keys.append(key);
+        }
+        emit queueReady(keys);
+        return;
+    }
+
+    auto *keySlots =  new QList<QStringList>(items.size());
+    auto *pending = new int(showCount);
+
+    for (int i = 0; i < items.size(); i++) {
+        const QVariantMap item = items[i].toMap();
+        const QString key = item["ratingKey"].toString();
+        if (item["type"].toString() != QLatin1String("show")) {
+            if (!key.isEmpty()) (*keySlots)[i] = QStringList{key};
+            continue;
+        }
+        const int idx = i;
+        fetchEpisodePool(key, [this, keySlots, pending, idx](const QVariantList &pool) {
+            QStringList episodes;
+            for (const auto &v : pool) {
+                const QString epKey = v.toMap()["ratingKey"].toString();
+                if (!epKey.isEmpty()) episodes.append(epKey);
+            }
+            (*keySlots)[idx] = episodes;
+            if (--(*pending) == 0) {
+                QStringList result;
+                for (const auto &bucket : *keySlots) result.append(bucket);
+                if (result.size() > kMaxQueueItems) {
+                    qWarning("[Plex] queue truncated from %lld to %d items",
+                             qlonglong(result.size()), kMaxQueueItems);
+                    result = result.mid(0, kMaxQueueItems);
+                }
+                emit queueReady(result);
+                delete keySlots;
+                delete pending;
+            }
+        });
+    }
+}
+
 // A queue's order is decided in QML from rows that are already loaded, so this
 // only has to resolve one ratingKey — which emitNextEpisode already does, through
 // the signal the Player's advance path consumes. An empty key (queue exhausted)

@@ -34,39 +34,34 @@ FocusScope {
     // go through actionRows.length. `rows` is what the ListView actually shows.
     // ----------------------------------------------------------------
     property bool canQueue: listType === "playlist_items" || listType === "collection_items"
-    // Only leaf playables can be queued. flattenSeasons has already expanded any
-    // seasons, but a collection of shows still yields `show` rows, which have no
-    // media of their own — such a collection simply gets no queue rows.
+    // Passed to the backend as-is: seasons were flattened when the list loaded,
+    // so a row is either a leaf or a show, and expand_queue fans the shows out
+    // into their episodes. The ordering (and any shuffle) happens after that
+    // expansion, in QueuePlay.qml — shuffling here would randomize shows, not
+    // episodes.
     property var queueItems: canQueue
-        ? items.filter(function(i) { return i && i.type !== "show" })
+        ? items.filter(function(i) { return i && i.ratingKey })
         : []
-    property var actionRows: queueItems.length > 1
-        ? [{ __action: "play_all", title: "PLAY ALL" },
-           { __action: "shuffle",  title: "SHUFFLE"  }]
-        : []
+    property var actionRows: queueRowsWarranted(queueItems) ? [
+            { __action: "play_all", title: "» PLAY ALL" },
+            { __action: "shuffle",  title: "~ SHUFFLE"  }
+        ] : []
     property var rows: actionRows.concat(items)
+
+    // One show is already a queue — all of its episodes — so it earns the rows on
+    // its own, where a lone movie does not.
+    function queueRowsWarranted(candidates) {
+        if (candidates.length > 1) return true
+        return candidates.length === 1 && candidates[0].type === "show"
+    }
 
     // Number of leading action rows for a given backend result. Used by the
     // restore clamps, which run while `items` is mid-assignment and so cannot
     // read the actionRows binding.
     function actionRowCountFor(loadedItems) {
         if (!canQueue) return 0
-        var playable = 0
-        for (var i = 0; i < loadedItems.length; i++) {
-            if (loadedItems[i] && loadedItems[i].type !== "show") playable++
-        }
-        return playable > 1 ? 2 : 0
-    }
-
-    function buildQueue(shuffle) {
-        var keys = queueItems.map(function(i) { return i.ratingKey })
-        if (shuffle) {
-            for (var i = keys.length - 1; i > 0; i--) {
-                var j = Math.floor(Math.random() * (i + 1))
-                var tmp = keys[i]; keys[i] = keys[j]; keys[j] = tmp
-            }
-        }
-        return keys
+        var candidates = loadedItems.filter(function(i) { return i && i.ratingKey })
+        return queueRowsWarranted(candidates) ? 2 : 0
     }
 
     // Buckets by the server's sort title when one is set (Plex sorts the list by
@@ -222,7 +217,8 @@ FocusScope {
         // Virtual queue rows — play the whole set instead of drilling into one item.
         if (item.__action) {
             itemListRoot.navigateTo("QueuePlay.qml", {
-                queue: buildQueue(item.__action === "shuffle"),
+                queueItems: queueItems,
+                shuffle: item.__action === "shuffle",
                 title: listTitle,
                 libraryName: libraryName
             }, { currentIndex: itemList.currentIndex })

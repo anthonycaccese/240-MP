@@ -82,6 +82,11 @@ public:
     // show/season. Emits nextEpisodeReady (the same signal autoplay already
     // consumes) or an empty map, so the Player advances identically either way.
     Q_INVOKABLE void load_random_episode(const QString &scopeRatingKey);
+    // Expands a PLAY ALL / SHUFFLE selection into the ratingKeys it actually
+    // plays: leaf items pass straight through, and every show fans out into all
+    // of its episodes in season/episode order. Takes the row maps the list view
+    // already holds (ratingKey + type) and emits queueReady with the flat list.
+    Q_INVOKABLE void expand_queue(const QVariantList &items);
     // Next item of a PLAY ALL / SHUFFLE queue over a playlist or collection.
     // Emits nextEpisodeReady (the same signal autoplay and shuffle cards use), so
     // the Player advances a queue with the machinery it already has.
@@ -145,6 +150,7 @@ signals:
     void extrasLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);
     void nextEpisodeReady(const QVariant &detail);
+    void queueReady(const QStringList &ratingKeys);
     void cardItemReady(const QVariant &detail);
     void cardError(const QString &message);
 
