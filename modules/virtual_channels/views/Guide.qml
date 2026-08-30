@@ -288,7 +288,7 @@ FocusScope {
 
     Timer { interval: 30000; running: true; repeat: true; onTriggered: guideRoot.refresh() }
     Timer { interval: 5000; running: true; repeat: true; onTriggered: guideRoot.reloadVolume() }
-    Timer { interval: 10000; running: true; repeat: true
+    Timer { interval: 5000; running: true; repeat: true
             onTriggered: {
                 guideRoot.nowMs = virtualChannelsBackend.now_ms()
                 if (guideRoot.showDetail) guideRoot.refreshNowPlaying()
@@ -323,6 +323,7 @@ FocusScope {
         var row = rows[i]
         if (row.isSpecial) { openSpecial(row); return }
         navigateTo("Player.qml", {
+            moduleId:      guideRoot.moduleId,
             channelNumber: row.number,
             channelName:   row.name
         }, { fromGuide: true })
@@ -371,6 +372,7 @@ FocusScope {
                     guideRoot.openSpecial(row)
                 } else {
                     navigateTo("Player.qml", {
+                        moduleId:      guideRoot.moduleId,
                         channelNumber: row.number,
                         channelName:   row.name
                     }, { fromGuide: true })
@@ -589,15 +591,25 @@ FocusScope {
         Rectangle { anchors.fill: parent; color: root.accentColor }
 
         Text {
+            id: guideDate
             text: Qt.formatDateTime(new Date(guideRoot.fromMs), "ddd d MMM")
             color: root.surfaceColor
             font.family: root.globalFont
             font.capitalization: Font.AllUppercase
             anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: root.sw * 0.0078125
-            width: guideRoot.channelColW
-            elide: Text.ElideRight
+            x: root.sw * 0.0078125
+            font.pixelSize: root.sh * 0.030
+        }
+
+        // Straight after the date. The date follows the window as it is
+        // scrolled forward; the clock stays on now.
+        Text {
+            text: guideRoot.nowMs > 0 ? guideRoot.timeLabel(guideRoot.nowMs) : ""
+            color: root.surfaceColor
+            font.family: root.globalFont
+            font.capitalization: Font.AllUppercase
+            anchors.verticalCenter: parent.verticalCenter
+            x: guideDate.x + guideDate.width + root.sw * 0.0156
             font.pixelSize: root.sh * 0.030
         }
 
