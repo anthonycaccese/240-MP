@@ -263,6 +263,7 @@ FocusScope {
         if (row === "source") { cycleSource(1); return }
         if (row === "logo") {
             navigateTo("modules/virtual_channels/views/LogoPicker.qml", {
+                moduleId:      sourcesRoot.moduleId,
                 channelNumber: sourcesRoot.channelNumber,
                 title: sourcesRoot.channelName
             }, { currentIndex: sourcesRoot.current })
@@ -270,6 +271,7 @@ FocusScope {
         }
         if (row === "folder") {
             navigateTo("modules/virtual_channels/views/PoolEditor.qml", {
+                moduleId:      sourcesRoot.moduleId,
                 channelNumber: sourcesRoot.channelNumber,
                 channelName:   sourcesRoot.channelName,
                 pool:          "programmes",
@@ -279,6 +281,7 @@ FocusScope {
         }
         if (row === "breaks") {
             navigateTo("modules/virtual_channels/views/Interstitials.qml", {
+                moduleId:      sourcesRoot.moduleId,
                 channelNumber: sourcesRoot.channelNumber,
                 channelName:   sourcesRoot.channelName
             }, { currentIndex: sourcesRoot.current })
@@ -286,6 +289,7 @@ FocusScope {
         }
         if (row === "slots") {
             navigateTo("modules/virtual_channels/views/Bookings.qml", {
+                moduleId:      sourcesRoot.moduleId,
                 channelNumber: sourcesRoot.channelNumber,
                 channelName:   sourcesRoot.channelName
             }, { currentIndex: sourcesRoot.current })
@@ -293,6 +297,7 @@ FocusScope {
         }
 
         navigateTo("modules/virtual_channels/views/SourceBrowser.qml", {
+            moduleId:      sourcesRoot.moduleId,
             channelNumber: sourcesRoot.channelNumber,
             kind: row === "series" ? "shows" : row,
             title: sourcesRoot.channelName

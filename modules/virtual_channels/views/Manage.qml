@@ -103,6 +103,7 @@ FocusScope {
                     status = "Built-in — use " + root.hints.change + " to move it"
                 } else {
                     navigateTo("modules/virtual_channels/views/ChannelSources.qml", {
+                        moduleId:      manageRoot.moduleId,
                         channelNumber: c.number,
                         channelName: c.name
                     }, { currentIndex: channelList.currentIndex })

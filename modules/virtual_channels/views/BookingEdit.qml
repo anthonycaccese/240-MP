@@ -216,6 +216,7 @@ FocusScope {
         }
         if (row === "days") {
             navigateTo("modules/virtual_channels/views/BookingDays.qml", {
+                moduleId:      editRoot.moduleId,
                 channelNumber: editRoot.channelNumber,
                 bookingIndex:  editRoot.bookingIndex,
                 title:         editRoot.bookingName
@@ -236,6 +237,7 @@ FocusScope {
         }
         if (row === "films" || row === "genres" || row === "collections" || row === "playlists") {
             navigateTo("modules/virtual_channels/views/SourceBrowser.qml", {
+                moduleId:      editRoot.moduleId,
                 channelNumber: editRoot.channelNumber,
                 kind: row === "films"   ? "movies"
                     : row === "genres"  ? "moviegenres"

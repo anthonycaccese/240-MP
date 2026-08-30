@@ -37,6 +37,7 @@ FocusScope {
             return
         } else {
             navigateTo("Player.qml", {
+                moduleId:      wxRoot.moduleId,
                 channelNumber: next.number,
                 channelName:   next.name
             }, { fromWeather: true })

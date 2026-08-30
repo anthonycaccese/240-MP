@@ -115,6 +115,7 @@ FocusScope {
 
     function openBooking(i) {
         navigateTo("modules/virtual_channels/views/BookingEdit.qml", {
+            moduleId:      bookingsRoot.moduleId,
             channelNumber: bookingsRoot.channelNumber,
             channelName:   bookingsRoot.channelName,
             bookingIndex:  i
