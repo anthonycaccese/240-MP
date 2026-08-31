@@ -41,6 +41,9 @@ FocusScope {
     readonly property int rowCount: rows.length
 
     function reload() {
+        // Reached from onVisibleChanged as well as on completion, and visibility
+        // changes on the way out too, when the backend is no longer there.
+        if (!virtualChannelsBackend) return
         // Only programmes can carry their own, so only they are listed. A show
         // with nothing of its own still appears: seeing that it falls back is
         // the point of the screen.
@@ -61,6 +64,10 @@ FocusScope {
     }
 
     function channelClips() {
+        // Guarded: this runs from the list's value binding, and the context
+        // property is already gone by the time the view's Loader tears down --
+        // which threw a TypeError on the way out and took the binding with it.
+        if (!virtualChannelsBackend) return { sources: 0, clips: 0 }
         var list = virtualChannelsBackend.channel_pool(channelNumber, kind) || []
         var n = 0
         for (var i = 0; i < list.length; i++) if (list[i].count >= 0) n += list[i].count
