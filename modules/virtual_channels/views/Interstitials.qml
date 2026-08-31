@@ -63,10 +63,10 @@ FocusScope {
         switch (rows[i]) {
         // Names the row that overrides these, so the two screens describe one
         // rule from both ends rather than each hinting at the other.
-        case "intros":      return "Leads into a program, ending on the mark on a clock channel. A show with its own, set in Show Idents, uses that instead."
+        case "intros":      return "Leads into a program, ending on the mark on a clock channel. Open to see which shows override it."
         case "bumps":       return "Short pieces between the commercials and the program either side of them."
         case "commercials": return "The commercials themselves. A clock channel packs as many as the gap allows."
-        case "outros":      return "Played as a program ends, before the break. A show with its own, set in Show Idents, uses that instead."
+        case "outros":      return "Played as a program ends, before the break. Open to see which shows override it."
         case "rebuild":     return "Rebuild the schedule so a change here actually airs."
         }
         return ""
@@ -82,6 +82,19 @@ FocusScope {
             building = true
             status = "Rebuilding…"
             virtualChannelsBackend.regenerate(channelNumber)
+            return
+        }
+
+        // Intros and outros are the two a single show can override, so they open
+        // the default-and-exceptions list. Bumps and commercials have no such
+        // thing and go straight to their pool.
+        if (row === "intros" || row === "outros") {
+            navigateTo("modules/virtual_channels/views/IdentLevels.qml", {
+                moduleId:      interRoot.moduleId,
+                channelNumber: interRoot.channelNumber,
+                channelName:   interRoot.channelName,
+                kind:          row
+            }, { currentIndex: interRoot.current })
             return
         }
 

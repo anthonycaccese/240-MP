@@ -15,6 +15,9 @@ FocusScope {
     property string pool:          navParams.pool          || "programmes"
     property int    entryIndex:    navParams.entryIndex !== undefined ? navParams.entryIndex : -1
     property string entryName:     navParams.entryName     || ""
+    // Empty means both. Set to "intros" or "outros" when reached from the list
+    // for that one, so a setting does not appear on two screens at once.
+    property string only:          navParams.only          || ""
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -24,7 +27,9 @@ FocusScope {
 
     readonly property bool hasOwnIdents: foldersOf("intros").length > 0
                                    || foldersOf("outros").length > 0
-    readonly property var rows: hasOwnIdents ? ["intros", "outros", "clear"]
+    readonly property var rows: only !== ""
+                                ? (hasOwnIdents ? [only, "clear"] : [only])
+                                : hasOwnIdents ? ["intros", "outros", "clear"]
                                        : ["intros", "outros"]
     property int current: 0
 

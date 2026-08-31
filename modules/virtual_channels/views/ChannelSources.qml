@@ -36,10 +36,6 @@ FocusScope {
             r.push("collections")
             if (cfg.supportsPlaylists) r.push("playlists")
         }
-        // Idents hang off the shows already picked, so this only appears once
-        // there is something to hang them on. It is not a second way to choose
-        // what airs -- that is Series, for every source, always.
-        if (sourcesRoot.programmeSources.length > 0) r.push("idents")
         r.push("slots")
         r.push("logo")
         r.push("order")
