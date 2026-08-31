@@ -76,6 +76,7 @@ add_executable(240mp
     src/modules/virtual_channels/ScheduleGenerator.cpp
     src/modules/virtual_channels/DurationProbe.cpp
     src/modules/virtual_channels/MediaServerSource.cpp
+    src/modules/virtual_channels/LocalLibrary.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
     src/util/MpvLocator.cpp
@@ -221,6 +222,7 @@ if(BUILD_VCHAN_TESTS)
         src/modules/virtual_channels/tests/ScheduleGeneratorTest.cpp
         src/modules/virtual_channels/tests/DurationProbeTest.cpp
         src/modules/virtual_channels/tests/MediaServerSourceTest.cpp
+        src/modules/virtual_channels/tests/LocalLibraryTest.cpp
         # Listed so AUTOMOC processes it: it declares a QObject but has no
         # same-named source file for AUTOMOC to pair it with.
         src/modules/virtual_channels/tests/FakeMediaServer.h
@@ -229,7 +231,8 @@ if(BUILD_VCHAN_TESTS)
         src/modules/virtual_channels/ChannelTuner.cpp
         src/modules/virtual_channels/ScheduleGenerator.cpp
         src/modules/virtual_channels/DurationProbe.cpp
-        src/modules/virtual_channels/MediaServerSource.cpp)
+        src/modules/virtual_channels/MediaServerSource.cpp
+        src/modules/virtual_channels/LocalLibrary.cpp)
     # MediaServerSource and the fake backend it is tested against are both
     # QObjects, so this target needs moc even though the rest of the suite is
     # plain C++.

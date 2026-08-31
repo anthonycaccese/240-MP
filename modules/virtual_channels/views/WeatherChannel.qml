@@ -5,6 +5,8 @@ FocusScope {
 
     property var navParams: ({})
 
+    property string moduleId: navParams.moduleId || ""
+
     signal navigateTo(string path, var params, var listState)
     signal goBack()
     signal exitModule()

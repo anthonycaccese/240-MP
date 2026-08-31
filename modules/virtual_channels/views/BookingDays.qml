@@ -4,6 +4,7 @@ import Components
 FocusScope {
     id: daysRoot
     property var navParams: ({})
+    property string moduleId: navParams.moduleId || ""
     readonly property string moduleIcon:
         appCore ? (appCore.get_module_info(moduleId).icon || "") : ""
     property var navListState: ({})

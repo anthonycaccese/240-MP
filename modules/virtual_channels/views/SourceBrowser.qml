@@ -4,6 +4,10 @@ import Components
 FocusScope {
     id: browserRoot
     property var navParams: ({})
+    // Declared, not assumed: reading an undeclared name throws a ReferenceError
+    // that kills the binding it sits in, which is how this view lost its header
+    // icon and would have taken any expression next to it down with it.
+    property string moduleId: navParams.moduleId || ""
     readonly property string moduleIcon:
         appCore ? (appCore.get_module_info(moduleId).icon || "") : ""
     // Assigned directly by the app's router and nested in navParams by the
@@ -478,7 +482,10 @@ FocusScope {
     Text {
         id: footer
         text: root.hints.back + ":BACK " + root.hints.navigate + ":MOVE "
-              + (browserRoot.canDescend ? root.hints.change + ":OPEN "
+              // A-Z jumping works on every list, and the show list is the one
+              // that can run to hundreds of rows, so it is the one that most
+              // needs telling. It used to say so only on the short lists.
+              + (browserRoot.canDescend ? root.hints.change + ":OPEN  A-Z:JUMP "
                                         : root.hints.change + ":LETTER  A-Z:JUMP ")
               + root.hints.select + ":TOGGLE"
         color: root.tertiaryColor
