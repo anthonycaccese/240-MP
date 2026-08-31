@@ -483,8 +483,7 @@ FocusScope {
         id: footer
         text: root.hints.back + ":BACK " + root.hints.navigate + ":MOVE "
               // A-Z jumping works on every list, and the show list is the one
-              // that can run to hundreds of rows, so it is the one that most
-              // needs telling. It used to say so only on the short lists.
+              // that can run to hundreds of rows, so it says so here too.
               + (browserRoot.canDescend ? root.hints.change + ":OPEN  A-Z:JUMP "
                                         : root.hints.change + ":LETTER  A-Z:JUMP ")
               + root.hints.select + ":TOGGLE"

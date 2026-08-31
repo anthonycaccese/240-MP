@@ -11,9 +11,8 @@ namespace vchan {
 
 namespace {
 
-// A library that has run away with itself -- a whole drive pointed at the media
-// root by accident -- should make the menus slow, not wedge them forever. These
-// are far above any real collection and exist only as a backstop.
+// Backstops for a media root pointed at something enormous by accident: far
+// above any real collection, so the menus go slow rather than never return.
 constexpr int kMaxShows      = 4000;
 constexpr int kMaxMovies     = 8000;
 constexpr int kMaxEpisodes   = 4000;   // per show
@@ -29,9 +28,8 @@ const QStringList &mediaExtensions() {
     return kExt;
 }
 
-// Trailing junk a release name leaves behind once the useful part is read:
-// resolution, source, codec and so on. Cut at the first of these rather than
-// trying to enumerate every variant, because the useful part is always in front.
+// Release-name noise. Cut at the first match rather than enumerating every
+// variant: the useful part of the name is always in front of it.
 const QRegularExpression &noiseTail() {
     static const QRegularExpression re(
         QStringLiteral("[ ._-]+(?:%1)\\b").arg(QStringLiteral(
@@ -44,11 +42,8 @@ const QRegularExpression &noiseTail() {
 
 QString tidy(QString s) {
     s.replace(QLatin1Char('_'), QLatin1Char(' '));
-    // Every dot becomes a space, because in the names these files actually
-    // carry a dot is nearly always a separator ("Dragon.Ball.Z"). The cost is
-    // that an initialism loses its dots too, so "S.H.I.E.L.D." is shown as
-    // "S H I E L D": wrong-looking, but it still matches and still airs, which
-    // is the trade this file makes everywhere.
+    // A dot is nearly always a separator here ("Dragon.Ball.Z"), at the cost of
+    // spacing out an initialism: "S.H.I.E.L.D." shows as "S H I E L D".
     s.replace(QRegularExpression(QStringLiteral("\\.{1,}")), QStringLiteral(" "));
     s.replace(QRegularExpression(QStringLiteral("\\s{2,}")), QStringLiteral(" "));
     return s.trimmed();
@@ -95,8 +90,7 @@ bool LocalLibrary::isMediaFile(const QString &fileName) {
 
 QString LocalLibrary::stripYear(const QString &name, int *year) {
     if (year) *year = 0;
-    // A year in brackets is the convention; a bare trailing year is common
-    // enough to accept too, but only when something precedes it, so that a
+    // A bare trailing year is accepted only when something precedes it, so a
     // folder legitimately called "1917" survives.
     static const QRegularExpression bracketed(
         QStringLiteral("[\\s._-]*[\\(\\[](19\\d{2}|20\\d{2})[\\)\\]]\\s*$"));
@@ -117,8 +111,7 @@ int LocalLibrary::seasonFromFolder(const QString &folderName) {
     const QString n = folderName.trimmed();
     if (n.isEmpty()) return -1;
 
-    // Extras and specials both mean season zero, which is where every server
-    // files material that sits outside the numbered run.
+    // Season zero is where every server files material outside the numbered run.
     static const QRegularExpression specials(
         QStringLiteral("^(specials?|extras?|bonus)$"), QRegularExpression::CaseInsensitiveOption);
     if (specials.match(n).hasMatch()) return 0;
@@ -129,7 +122,6 @@ int LocalLibrary::seasonFromFolder(const QString &folderName) {
     const auto m = seasonish.match(n);
     if (m.hasMatch()) return m.captured(1).toInt();
 
-    // A folder that is nothing but digits is a season in plenty of libraries.
     static const QRegularExpression digits(QStringLiteral("^(\\d{1,4})$"));
     const auto d = digits.match(n);
     if (d.hasMatch()) return d.captured(1).toInt();
@@ -144,11 +136,8 @@ bool LocalLibrary::episodeFromFile(const QString &fileName, int *season, int *nu
     if (number) *number = -1;
     if (title)  *title  = tidy(cutNoise(stem));
 
-    // Ordered most specific first. S01E02 is unambiguous; 1x02 nearly so; a
-    // bare E02 only says which episode, never which season.
-    // Compiled once, not once per file: this runs for every file in the
-    // library on every scan, and building four regexes each time is the
-    // difference between a menu that opens and one that thinks about it.
+    // Ordered most specific first: a bare E02 says which episode but never
+    // which season. Compiled once -- this runs for every file on every scan.
     struct Pattern { QRegularExpression re; bool hasSeason; };
     static const Pattern kPatterns[] = {
         { QRegularExpression(QStringLiteral("[Ss](\\d{1,4})[\\s._-]*[Ee](\\d{1,4})")),            true  },
@@ -169,9 +158,6 @@ bool LocalLibrary::episodeFromFile(const QString &fileName, int *season, int *nu
             if (number) *number = m.captured(1).toInt();
         }
         if (title) {
-            // Whatever follows the marker is the episode's own title, once the
-            // separator and any release noise are taken off. Nothing after it
-            // is not an error -- plenty of files are only ever numbered.
             QString rest = stem.mid(m.capturedEnd());
             rest.remove(QRegularExpression(QStringLiteral("^[\\s._-]+")));
             rest = tidy(cutNoise(rest));
@@ -197,14 +183,10 @@ bool LocalLibrary::splitSeasonKey(const QString &key, QString *showFolder, int *
     return true;
 }
 
-// Cheap enough to run on every access: a listing of two directories, no walk
-// into them.
-//
-// Timestamps alone are not enough. Their resolution is a millisecond at best,
-// and adding a folder then looking for it happens well inside that -- which is
-// exactly how the first version of this passed review and still needed a
-// restart to see a new show. The names of the immediate children settle it: they
-// change when a show is added, removed or renamed, whatever the clock says.
+// Cheap enough to run on every access: two directory listings, no walk into
+// them. Timestamps alone will not do -- their resolution is a millisecond at
+// best, and a folder can be added and looked for well inside that -- so the
+// names of the immediate children settle it.
 QString LocalLibrary::rootStamp() const {
     const QString absRoot = QFileInfo(m_root).canonicalFilePath();
     if (absRoot.isEmpty()) return {};
@@ -238,11 +220,6 @@ void LocalLibrary::scan() const {
     const QString absRoot = QFileInfo(m_root).canonicalFilePath();
     if (absRoot.isEmpty() || !QFileInfo(absRoot).isDir()) return;
 
-    // Only the documented folders are read. Guessing at an arbitrary tree is
-    // what the old behaviour did, and it is why the picker used to offer break
-    // folders as though they were programmes: without a convention there is no
-    // way to tell what a directory is for. A root missing these is reported by
-    // hasLibraryFolders() so the interface can say so plainly.
     for (const QString &name : seriesDirNames()) {
         const QString abs = absRoot + QLatin1Char('/') + name;
         if (QFileInfo(abs).isDir()) scanShowsUnder(abs, name);
@@ -276,9 +253,8 @@ void LocalLibrary::scanShowsUnder(const QString &absDir, const QString &relDir) 
         show.name   = stripYear(showFi.fileName(), &show.year);
         if (show.name.isEmpty()) show.name = showFi.fileName();
 
-        // Seasons are subdirectories that name themselves as such. Anything
-        // else that holds media is folded into an unnumbered season, so a show
-        // stored flat still airs.
+        // Media outside a named season folder is folded into an unnumbered one,
+        // so a show stored flat still airs.
         QVector<LocalSeason> seasons;
         LocalSeason loose;
         loose.number = -1;
@@ -312,9 +288,8 @@ void LocalLibrary::scanShowsUnder(const QString &absDir, const QString &relDir) 
                 LocalEpisode ep;
                 ep.ref    = seasonRel + QLatin1Char('/') + fi.fileName();
                 ep.parsed = episodeFromFile(fi.fileName(), &ep.season, &ep.number, &ep.title);
-                // The folder is the authority on which season this is: a file
-                // whose name disagrees is more often mislabelled than the
-                // folder it was deliberately filed into.
+                // The folder wins: a file whose name disagrees with the folder
+                // it was filed into is more often the mislabelled one.
                 if (num >= 0) ep.season = num;
                 season.episodes.append(ep);
             }
@@ -349,13 +324,11 @@ void LocalLibrary::scanShowsUnder(const QString &absDir, const QString &relDir) 
 }
 
 bool LocalLibrary::isExtraPath(const QString &relPath) {
-    // Directories a server treats as holding extras rather than films.
     static const QRegularExpression kDir(
         QStringLiteral("^(trailers?|extras?|specials?|shorts?|scenes?|samples?|featurettes?"
                        "|behind[ ._-]?the[ ._-]?scenes|deleted[ ._-]?scenes?|interviews?"
                        "|other|bonus)$"),
         QRegularExpression::CaseInsensitiveOption);
-    // The suffix form: "The Film (1999)-trailer.mkv".
     static const QRegularExpression kSuffix(
         QStringLiteral("[ ._-](trailer|sample|scene|clip|interview|featurette|short"
                        "|behind[ ._-]?the[ ._-]?scenes|deleted|other)[0-9]*$"),
@@ -367,7 +340,6 @@ bool LocalLibrary::isExtraPath(const QString &relPath) {
 
     if (parts.isEmpty()) return false;
     const QString stem = QFileInfo(parts.last()).completeBaseName();
-    // A file that is nothing but the word is the other way it is written.
     if (kDir.match(stem).hasMatch()) return true;
     return kSuffix.match(stem).hasMatch();
 }
@@ -387,8 +359,8 @@ void LocalLibrary::scanMoviesUnder(const QString &absDir, const QString &relDir)
         m_movies.append(mv);
     }
 
-    // One folder per film is the other common layout. The largest media file
-    // inside is the feature; the rest are trailers, samples and extras.
+    // One folder per film is the other common layout: the largest media file
+    // inside is the feature.
     for (const QFileInfo &sub : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
         if (m_movies.size() >= kMaxMovies) return;
         QDir sd(sub.absoluteFilePath());
@@ -418,10 +390,9 @@ bool LocalLibrary::hasLibraryFolders() const {
     return false;
 }
 
-// The interface stores what it displayed -- "Name (Year)" -- because that is
-// what it stores for every other source. Matching has to accept that form as
-// well as the bare name and the folder, or a pick made in the menus resolves to
-// nothing at schedule time and the channel quietly airs an empty list.
+// The interface stores what it displayed -- "Name (Year)" -- as it does for
+// every other source, so matching has to accept that form as well as the bare
+// name and the folder, or a pick resolves to nothing at schedule time.
 bool LocalLibrary::matchesName(const QString &name, int year, const QString &folder,
                                const QString &wanted) {
     if (wanted.isEmpty()) return false;
@@ -431,7 +402,6 @@ bool LocalLibrary::matchesName(const QString &name, int year, const QString &fol
         const QString display = QStringLiteral("%1 (%2)").arg(name).arg(year);
         if (display.compare(wanted, Qt::CaseInsensitive) == 0) return true;
     }
-    // A folder's leaf, for an entry stored before the library existed.
     const QString leaf = folder.section(QLatin1Char('/'), -1);
     return !leaf.isEmpty() && leaf.compare(wanted, Qt::CaseInsensitive) == 0;
 }
@@ -472,9 +442,8 @@ QVector<LocalEpisode> LocalLibrary::episodesFor(const QString &showName,
                                                 const QStringList &excludedEpisodeRefs) const {
     ensureScanned();
 
-    // Matched on the display name so that a channel keeps working when a folder
-    // is renamed from "Show (2003)" to "Show", and on the folder as a fallback
-    // so an exact path still resolves.
+    // On the display name, so a channel survives a folder being renamed from
+    // "Show (2003)" to "Show"; on the folder as a fallback for an exact path.
     const LocalShow *found = nullptr;
     for (const LocalShow &s : m_shows) {
         if (matchesName(s.name, s.year, s.folder, showName)) {

@@ -241,10 +241,9 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         qint64 freeFrom = startMs;
         for (const Anchor &a : anchors) {
             if (a.start < freeFrom) {
-                // Two slots wanting the same part of the day is a thing the
-                // viewer set up and can fix, so it is said plainly. Dropping
-                // the later one without a word left a slot that simply never
-                // aired and nothing anywhere to explain why.
+                // Two slots wanting the same part of the day is something the
+                // viewer set up and can fix, so it is said rather than dropped
+                // in silence.
                 qWarning("[VirtualChannels] slot \"%s\" at %s is dropped: the one before it "
                          "is still running then",
                          qPrintable(a.name),

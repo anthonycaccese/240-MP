@@ -151,9 +151,6 @@ FocusScope {
             var n = countOf("match")
             var ex = excludedCount()
             if (n === 0) return "NONE"
-            // Carrying its unit, like the rows around it: a bare "3" beside
-            // "1 SLOT" and "1872 CLIPS" left the viewer to guess what was
-            // being counted, and what the second number was counting.
             return n + (n === 1 ? " SHOW" : " SHOWS")
                    + (ex > 0 ? " · " + ex + " OFF" : "")
         }
@@ -192,10 +189,6 @@ FocusScope {
                    ? "Only local files are set up. Sign in to Plex, Jellyfin or Emby to add more."
                    // "Server" is wrong for local files, which are the one source
                    // that is not one.
-                   // Not "clears its picks": what was picked from the old
-                   // library is kept and comes back if you change back.
-                   // It simply stops counting, because a show picked on
-                   // one library is not a show on another.
                    : (cfg.source === "local"
                       ? "Left and right to choose where this channel's shows come from. Its picks are kept, and come back if you change back."
                       : "Left and right to change server. Its picks are kept, and come back if you change back.")

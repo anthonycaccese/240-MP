@@ -12,25 +12,17 @@ FocusScope {
     property string source:     navParams.source     || "local"
     property string settingKey: navParams.settingKey || "pool_buffer"
     property string title:      navParams.title      || ""
-    // What this picker is being used for. Programmes come from a library of
-    // shows and films; breaks come from a folder of clips. The two used to be
-    // the same list, which is how a folder of bumps ended up on offer as though
-    // it were something to air.
+    // What this picker is for: programmes come from a library of shows and
+    // films, breaks from a folder of clips.
     property string purpose:    navParams.purpose    || "programmes"
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
 
-    // Playlists only where the source actually serves them. Offering the row
-    // to every server meant Jellyfin and Emby showed a Playlists row that could
-    // do nothing but report that playlists were not available -- while the
-    // channel screen, which asks the same question of the backend, correctly
-    // did not show it at all.
+    // Only Plex serves playlists.
     readonly property var serverKinds: {
         var k = [{ kind: "collection", browse: "collections", label: "Collections" }]
-        // Guarded: this is a binding, and a context property is gone by the
-        // time the view's Loader tears down, which is where an unguarded one
-        // throws and takes the rest of the binding with it.
+        // The context property is gone once the Loader tears down.
         if (virtualChannelsBackend
             && virtualChannelsBackend.source_supports_playlists(pickRoot.source))
             k.push({ kind: "playlist", browse: "playlists", label: "Playlists" })
@@ -38,11 +30,9 @@ FocusScope {
         return k
     }
 
-    // Local files have no collections or playlists, so they offer the two things
-    // a directory can actually hold. Every route into this screen sends local
-    // files to the folder browser below, so this is a fallback rather than
-    // something reached today -- but it must stay right, because what it would
-    // offer instead is a server's collections for a channel that has none.
+    // Every route in today sends local files to the folder browser below, so
+    // this is a fallback -- but it has to stay right, or a local channel would
+    // be offered a server's collections.
     readonly property var localKinds: [
         { kind: "series", browse: "shows",  label: "Series" },
         { kind: "movie",  browse: "movies", label: "Movies" }

@@ -1013,9 +1013,6 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
 
                 // Seasons and episodes switched off are kept in the channel's
                 // own source block, not on the entry, so both are read here.
-                // Reading only the entry -- which is what this did -- means a
-                // season the viewer switched off airs anyway, silently, which
-                // is worse than failing outright.
                 for (const QJsonObject &lexcl :
                      { o.value(QLatin1String("exclude")).toObject(),
                        channel.value(sourceBlockName(SlotSource::Local)).toObject()
@@ -1188,10 +1185,6 @@ void VirtualChannelsBackend::parseBookings(const QJsonObject &o, int channelNumb
             }
         }
 
-        // Films picked from the local library, the way a server-sourced slot
-        // picks them. A local slot could only ever be given a whole folder,
-        // which was the last place the old "local means a directory" idea
-        // survived after the library was built.
         if (localTitles) {
             QStringList picks;
             for (const QJsonValue &tv :
@@ -1323,19 +1316,13 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                 m_genQueue.push_back({ QDir(absRoot).filePath(rel), rel, kind, apptIndex, pack });
     };
     m_localLibrary.setMediaRoot(m_mediaRoot);
-    // Read the library again from scratch for a build. Between builds the scan
-    // is kept and checked cheaply, by listing series/ and movies/ -- which
-    // notices a show appearing or going, but not an episode added inside one
-    // that is already there. A build is the one moment somebody is waiting for
-    // exactly that: it is what "rebuild after adding video" means.
+    // The between-build check lists series/ and movies/ only, so it cannot see
+    // an episode added inside a show it already knows.
     m_localLibrary.refresh();
     for (const auto &pool : std::as_const(localApptTitles)) {
         for (const QString &title : pool.second) {
             const QString rel = m_localLibrary.movieRefFor(title);
             if (rel.isEmpty()) {
-                // Named rather than counted: a film that has been renamed or
-                // moved should say which one it was, not leave a slot quietly
-                // one film shorter than the viewer picked.
                 qWarning("[VirtualChannels] channel %d: slot film \"%s\" is not in the library",
                          channelNumber, qPrintable(title));
                 continue;
@@ -1345,10 +1332,8 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
         }
     }
 
-    // A movie slot's folder holds films, so what a server would file as an
-    // extra is left out of it. Everything else that reads a folder -- break
-    // pools, a channel's own library folder -- takes what is there, because a
-    // bump named "trailer" is a bump.
+    // Films only here. Every other folder is taken as it is -- a bump named
+    // "trailer" is a bump.
     for (const auto &pool : std::as_const(folderPools)) {
         for (const QString &d : pool.second)
             for (const QString &rel : mediaFilesUnder(d)) {
@@ -2340,13 +2325,8 @@ void VirtualChannelsBackend::plexEnumFail(const QString &why) {
     m_pgApptAllSections.clear();
     m_pgApptSeen.clear();
 
-    // Only a generation can be failed, and only the one this enumeration was
-    // for. This used to end whatever happened to be building at the time --
-    // including when what actually timed out was a Plex browse the viewer had
-    // wandered away from, which left a local channel stopped halfway through a
-    // rebuild with no schedule written, and its screen saying "rebuilding" for
-    // ever because the failure was reported against the browse's channel
-    // number rather than the one being built.
+    // Only a generation can be failed, and only if one is running: a browse
+    // timing out must not end an unrelated build.
     if (!m_genActive) {
         qWarning("[VirtualChannels] Plex enumeration failed with nothing being built: %s",
                  qPrintable(why));
@@ -3003,10 +2983,7 @@ QVariantList VirtualChannelsBackend::channel_interstitials(int channelNumber) {
         QStringList folders;
         int fromServer = 0;
         // Both shapes: the bare strings older channel files hold, and the entry
-        // objects every pool is written as now. Reading only strings -- which is
-        // what this did -- meant a channel said it had no breaks at all the
-        // moment one was added or removed through the interface, while the
-        // breaks screen next to it counted them correctly.
+        // objects every pool is written as now.
         for (const QJsonValue &v : o.value(kind).toArray()) {
             if (v.isString()) { folders << v.toString(); continue; }
             if (!v.isObject()) continue;
@@ -3400,8 +3377,6 @@ bool VirtualChannelsBackend::set_booking_list(int channelNumber, int index,
     }
     const QString poolKey = bookingPoolKey(channelNumber);
     if (poolKey == QLatin1String("local") && field != QLatin1String("titles")) {
-        // Local files have no genres, collections or playlists to draw on; films
-        // they do have, and those are picked here exactly as a server's are.
         qWarning("[VirtualChannels] channel %d draws on local files, which have no %s",
                  channelNumber, qPrintable(field));
         return false;
@@ -3424,11 +3399,8 @@ bool VirtualChannelsBackend::set_booking_any_film(int channelNumber, int index, 
 
 bool VirtualChannelsBackend::set_booking_folder(int channelNumber, int index,
                                                 const QString &folder) {
-    // Stored relative to the media root, like every other folder in the file,
-    // and checked here rather than at generation time. The picker hands over an
-    // absolute path, which only ever worked on the box it was picked on; and a
-    // folder outside the library used to save happily, then be refused hours
-    // later when the schedule was built, with nothing on screen to say so.
+    // Checked now: an unresolvable folder is otherwise dropped in silence when
+    // the schedule is built, hours later.
     QString rel;
     if (!folder.trimmed().isEmpty()) {
         QString why;
@@ -3457,13 +3429,9 @@ QString VirtualChannelsBackend::sourceBlockName(SlotSource src) {
 }
 
 SlotSource VirtualChannelsBackend::sourceOf(const QJsonObject &o) {
-    // What the channel was last set to, when it says. The two rules below are
-    // guesses, and a guess cannot be corrected: a channel moved from a server
-    // to local files still holds that server's entries, and inferring from them
-    // put the channel straight back on the server it had just been moved off,
-    // so the change looked as though it had not happened and the next edit was
-    // written into the old block. Channels written before this key existed have
-    // none, and still fall through to the guesses.
+    // What the channel was last set to, when it says so. The two rules below
+    // are guesses -- a channel moved off a server still holds that server's
+    // entries -- and are kept only for channels written before this key.
     const QString stated = o.value(QLatin1String("source")).toString().trimmed().toLower();
     if (!stated.isEmpty()) {
         const SlotSource src = slotSourceFromString(stated);
@@ -3676,11 +3644,7 @@ QVariantList VirtualChannelsBackend::channel_pool(int channelNumber, const QStri
             const QJsonObject j = v.toObject();
             const SlotSource src = slotSourceFromString(j.value(QLatin1String("src")).toString());
             e["src"] = slotSourceToString(src);
-            // A local entry is a folder of clips OR a show from the library.
-            // Reading every local entry as a folder -- which is what this did --
-            // leaves a series entry with no name to show and a count taken from
-            // the whole media root, because the folder key it looked for is not
-            // there.
+            // A local entry is a folder of clips or a show from the library.
             const QString localFolder = j.value(QLatin1String("folder")).toString();
             if (src == SlotSource::Local && !localFolder.isEmpty()) {
                 e["kind"]  = QStringLiteral("folder");
@@ -3737,11 +3701,8 @@ bool VirtualChannelsBackend::set_channel_pool(int channelNumber, const QString &
             const QString raw = m.value(QStringLiteral("name")).toString();
             const QString rel = relativeMediaFolder(raw, &why);
             if (rel.isEmpty()) {
-                // A folder that has been moved or deleted since it was added.
-                // It is kept rather than refused: failing the whole list means
-                // one stale row stops anything else being added or removed, and
-                // the viewer is told only "could not save" with no way to learn
-                // which row is at fault or to get rid of it.
+                // Kept rather than refused: failing the list would stop every
+                // other row being edited, and say only "could not save".
                 qWarning("[VirtualChannels] channel %d keeps an unresolved pool "
                          "folder '%s': %s", channelNumber, qPrintable(raw), qPrintable(why));
                 if (raw.trimmed().isEmpty()) continue;
@@ -3750,14 +3711,7 @@ bool VirtualChannelsBackend::set_channel_pool(int channelNumber, const QString &
                 e["folder"] = rel;
             }
         } else {
-            // A local show is written the way a server's is, by kind and name.
-            // Writing every local entry as a folder meant a show's name was put
-            // through folder validation, failed it, and took the whole list down
-            // with it -- so giving one show its own intro refused to save
-            // because a different show in the same list was not a folder.
-            // "movie" belongs here: the picker offers films from the local
-            // library and the generator plays them, so leaving it out meant
-            // choosing one reported that it could not be saved.
+            // Must agree with what the picker offers and the generator plays.
             static const QStringList kKinds = { QStringLiteral("library"),
                                                 QStringLiteral("series"),
                                                 QStringLiteral("movie"),
@@ -3771,11 +3725,8 @@ bool VirtualChannelsBackend::set_channel_pool(int channelNumber, const QString &
                 continue;
             }
             if (!kKinds.contains(kind)) {
-                // Kept, not refused, and for the same reason an unresolved
-                // folder is: refusing the list means one row this version does
-                // not recognise stops every other row being added or removed,
-                // and the viewer is told only "could not save" with no way to
-                // find the row at fault or get rid of it.
+                // Kept, not refused, for the same reason as an unresolved
+                // folder above.
                 qWarning("[VirtualChannels] channel %d keeps a pool entry '%s' of "
                          "unknown kind '%s'", channelNumber, qPrintable(name), qPrintable(kind));
             }
@@ -3874,8 +3825,7 @@ void VirtualChannelsBackend::browse_plex_episodes(const QString &seasonRatingKey
 // ---------------------------------------------------------------------------
 
 bool VirtualChannelsBackend::source_supports_playlists(const QString &source) const {
-    // Only Plex serves playlists today; browse_from refuses them for the others.
-    // Stated once, so a screen cannot offer a row that can only fail.
+    // Only Plex serves playlists; browse_from refuses them for the others.
     return slotSourceFromString(source) == SlotSource::Plex;
 }
 
@@ -3953,9 +3903,8 @@ bool VirtualChannelsBackend::set_channel_source(int channelNumber, const QString
             o.remove(sourceBlockName(src));
         if (wanted != QLatin1String("local"))
             o[wanted] = QJsonObject{};
-        // Said outright, so that entries left behind by the previous source do
-        // not decide this for us. They are kept: moving a channel to local
-        // files and back should not throw away what it used to play.
+        // Stated, so entries left by the previous source do not decide it.
+        // They are kept: a round trip should not lose what the channel played.
         o[QStringLiteral("source")] = wanted;
 
         channels[i] = o;
@@ -3984,24 +3933,13 @@ bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &
         QJsonObject o = channels[i].toObject();
         if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
 
-        // Local files are a library like any other source now, so they keep
-        // their picks in their own block exactly as a server does. This used to
-        // refuse outright, from when "local" meant a single folder and a list of
-        // series had nowhere to live.
         const QString block = sourceBlockName(channelSource(channelNumber));
         QJsonObject plex = o.value(block).toObject();
 
         if (field == QLatin1String("match")) {
-            // One structure for every channel: an entry per show, so idents have
-            // somewhere to live whether or not they are used. Entries already
-            // present keep everything hung off them -- rewriting the list must
-            // not quietly discard a show's intros.
-            // Only this source's SERIES entries are ours to rewrite. Everything
-            // else in the array is carried across untouched: entries belonging
-            // to another source, collections and folders, and the bare strings
-            // an older channel file uses for a folder. Dropping any of them --
-            // which an earlier version of this did -- loses a channel's content
-            // the first time somebody edits its series list.
+            // Only this source's SERIES entries are ours to rewrite. Another
+            // source's entries, collections, folders and the bare strings an
+            // older channel file uses are carried across untouched.
             const SlotSource src = channelSource(channelNumber);
             QJsonArray kept;
             QHash<QString, QJsonObject> existing;

@@ -38,8 +38,6 @@ FocusScope {
     readonly property var rows: {
         var r = ["name", "hour", "minute", "days"]
         if (source === "local") {
-            // Either way of saying which films: pick them one by one from the
-            // library, or point the slot at a folder and let it choose.
             r.push("films")
             r.push("folder")
         } else {

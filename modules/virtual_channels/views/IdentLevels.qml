@@ -1,15 +1,8 @@
 import QtQuick
 import Components
 
-// Which intro (or outro) a program gets, shown as the thing it is: a default
-// with exceptions under it.
-//
-// This used to be two screens describing one rule from opposite ends -- Breaks
-// said "a show with its own uses that instead", Show Idents said "shows without
-// one use the channel's" -- and a viewer had to hold both in their head to know
-// what would actually air. Here the default is the first row and every show
-// that overrides it is listed beneath, so the rule is visible rather than
-// explained. Nothing decides what plays except what is on this screen.
+// Which intro (or outro) a program gets: the default first, and every show
+// that overrides it beneath. Nothing off this screen decides what plays.
 FocusScope {
     id: levelsRoot
 
@@ -41,8 +34,7 @@ FocusScope {
     readonly property int rowCount: rows.length
 
     function reload() {
-        // Reached from onVisibleChanged as well as on completion, and visibility
-        // changes on the way out too, when the backend is no longer there.
+        // Visibility changes on the way out too, when the backend is gone.
         if (!virtualChannelsBackend) return
         // Only programmes can carry their own, so only they are listed. A show
         // with nothing of its own still appears: seeing that it falls back is
@@ -64,9 +56,7 @@ FocusScope {
     }
 
     function channelClips() {
-        // Guarded: this runs from the list's value binding, and the context
-        // property is already gone by the time the view's Loader tears down --
-        // which threw a TypeError on the way out and took the binding with it.
+        // Runs from a value binding, which outlives the context property.
         if (!virtualChannelsBackend) return { sources: 0, clips: 0 }
         var list = virtualChannelsBackend.channel_pool(channelNumber, kind) || []
         var n = 0
@@ -116,9 +106,6 @@ FocusScope {
         var idx = parseInt(rows[i].substring(5))
         var e = shows[idx]
         if (!e) return
-        // A show with nothing of its own has only one thing to say here --
-        // which folder -- so it is asked directly. Stopping at a screen whose
-        // single row repeats the row just chosen tells the viewer nothing.
         if (ownFolders(e).length === 0) {
             appCore.save_setting(levelsRoot.moduleId, "pool_buffer", "")
             navigateTo("modules/virtual_channels/views/SourcePick.qml", {
@@ -145,9 +132,6 @@ FocusScope {
         }, { currentIndex: levelsRoot.current })
     }
 
-    // The folder chosen by the picker above, written onto the show it was
-    // chosen for. Once it has one, the fuller screen has something to show and
-    // is used instead.
     function applyPending() {
         var which = navListState.pickFor
         if (which === undefined) return

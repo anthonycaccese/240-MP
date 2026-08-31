@@ -51,11 +51,8 @@ FocusScope {
 
     function poolLabel(b) {
         if (b.source === "local") {
-            // Films and a folder can both be set, and a row that showed only
-            // the folder hid half of what the slot would actually draw on.
-            // A folder named "movies" beside a count of movies read as the
-            // same word twice meaning two things, so the folder is counted
-            // rather than named here; the slot names it one screen in.
+            // The folder is counted rather than named, so a folder called
+            // "movies" does not read as the same word twice.
             if (b.films > 0 && b.folder !== "")
                 return (b.films === 1 ? "1 MOVIE" : b.films + " MOVIES") + " + 1 FOLDER"
             if (b.films > 0) return b.films === 1 ? "1 MOVIE" : b.films + " MOVIES"
@@ -97,10 +94,8 @@ FocusScope {
             return "Rebuild the schedule so slot changes actually air."
         var b = bookings[i]
         if (!b.valid) return "This slot has no usable time and will not air. Open it to set one."
-        // A folder counts as having picked something. It is not in `criteria`,
-        // which counts named picks, so a local slot pointed at a folder full of
-        // films used to be described as empty and doomed while it sat there
-        // showing the folder's name in the very same row.
+        // A folder counts as having picked something, though it is not in
+        // `criteria`, which counts only named picks.
         if (!b.anyFilm && b.criteria === 0 && (b.folder || "") === "")
             return "Nothing picked yet, so this slot will not air. Open it to choose movies."
         return "Open to change its time, its days, or which movies it draws on."

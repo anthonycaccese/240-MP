@@ -53,7 +53,6 @@ void testYearStripping() {
     checkStr(LocalLibrary::stripYear(QStringLiteral("Justice League 2001"), &year),
              QStringLiteral("Justice League"), "bare trailing year removed");
 
-    // A title that IS a year must survive: stripping it would leave nothing.
     year = 0;
     checkStr(LocalLibrary::stripYear(QStringLiteral("1917"), &year),
              QStringLiteral("1917"), "a title that is only a year is kept");
@@ -93,7 +92,6 @@ void testEpisodeParsing() {
     checkEq(seasonOf(QStringLiteral("Show Season 2 Episode 5.mp4")), 2, "long form season");
     checkEq(numberOf(QStringLiteral("Show Season 2 Episode 5.mp4")), 5, "long form number");
 
-    // A bare episode marker says nothing about the season, and must not invent one.
     checkEq(seasonOf(QStringLiteral("Show E04.mkv")), -1, "bare E04 has no season");
     checkEq(numberOf(QStringLiteral("Show E04.mkv")),  4, "bare E04 number");
 
@@ -103,7 +101,6 @@ void testEpisodeParsing() {
     checkStr(titleOf(QStringLiteral("Just A Name.mkv")),
              QStringLiteral("Just A Name"), "unparseable name keeps its stem as title");
 
-    // Release noise is cut, but only after the useful part.
     checkStr(titleOf(QStringLiteral("Show S01E01 - Pilot 1080p BluRay x264.mkv")),
              QStringLiteral("Pilot"), "release noise trimmed from the title");
 
@@ -135,12 +132,9 @@ void testScanning() {
     touch(root + "/series/Batman Beyond (1999)/Season 1/Batman Beyond S01E02 - Golem.mkv");
     touch(root + "/series/Batman Beyond (1999)/Season 2/Batman Beyond S02E01 - Splicers.mkv");
     touch(root + "/series/Batman Beyond (1999)/Specials/Behind the Scenes.mkv");
-    // A show stored flat, with no season folders at all.
     touch(root + "/series/Samurai Jack/Samurai Jack S01E01.mp4");
     touch(root + "/series/Samurai Jack/Samurai Jack S01E02.mp4");
-    // A folder holding no media is not a show.
     QDir().mkpath(root + "/series/Empty Folder");
-    // Non-media must not become episodes.
     touch(root + "/series/Samurai Jack/notes.txt");
 
     touch(root + "/movies/The Iron Giant (1999).mkv");
@@ -151,7 +145,6 @@ void testScanning() {
     const auto shows = lib.shows();
     checkEq(shows.size(), 2, "two shows found, the empty folder ignored");
 
-    // Sorted by display name: Batman Beyond before Samurai Jack.
     checkStr(shows[0].name, QStringLiteral("Batman Beyond"), "year stripped from show name");
     checkEq(shows[0].year, 1999, "show year captured");
     checkEq(shows[0].seasons.size(), 3, "two numbered seasons plus specials");
@@ -170,7 +163,6 @@ void testScanning() {
     check(movies[0].ref.endsWith(QStringLiteral("Akira (1988).mkv")),
           "the feature is chosen over the trailer by size");
 
-    // Exclusions
     const QString s1 = LocalLibrary::seasonKey(shows[0].folder, 1);
     auto kept = lib.episodesFor(QStringLiteral("Batman Beyond"), { s1 }, {});
     checkEq(kept.size(), 2, "excluding season 1 removes its two episodes");
@@ -182,7 +174,6 @@ void testScanning() {
     checkEq(lib.episodesFor(QStringLiteral("No Such Show"), {}, {}).size(), 0,
             "an unknown show yields nothing rather than everything");
 
-    // What the browser actually stores, end to end.
     checkEq(lib.episodesFor(QStringLiteral("Batman Beyond (1999)"), {}, {}).size(), 4,
             "a pick stored as \"Name (Year)\" resolves to its episodes");
     checkStr(lib.movieRefFor(QStringLiteral("Akira (1988)")),
@@ -194,9 +185,6 @@ void testScanning() {
 
 void testNameMatching() {
     section("LocalLibrary: matching what the interface stored");
-    // The browser stores the label it displayed, which carries the year. A
-    // resolver that only knew the bare name would match nothing, and the
-    // channel would air an empty list with no error anywhere.
     check(LocalLibrary::matchesName(QStringLiteral("Batman Beyond"), 1999,
                                     QStringLiteral("series/Batman Beyond (1999)"),
                                     QStringLiteral("Batman Beyond (1999)")),
@@ -227,8 +215,6 @@ void testConventionIsTheContract() {
     section("LocalLibrary: only the documented folders are read");
     QTemporaryDir tmp;
     const QString root = tmp.path();
-    // Media outside series/ and movies/ is not a programme source. This is what
-    // stops a folder of bumps being offered as though it were a show.
     touch(root + "/Star Trek/Season 1/Star Trek S01E01.mkv");
     touch(root + "/breaks/action/bump/bump-01.mp4");
 
@@ -252,8 +238,6 @@ void testCacheInvalidation() {
     LocalLibrary lib(root);
     checkEq(lib.shows().size(), 1, "one show to begin with");
 
-    // The scan is cached, so this is the case that used to need a restart: a
-    // second show appearing after the first read.
     touch(root + "/series/Second Show/Second Show S01E01.mkv");
     checkEq(lib.shows().size(), 2, "the new show is seen without a restart");
 
@@ -280,7 +264,6 @@ void testEmptyAndMissing() {
 void testExtrasAreNotFilms() {
     section("LocalLibrary: extras are not films");
 
-    // The suffix form Jellyfin documents.
     check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)-trailer.mkv")),
           "a -trailer suffix is an extra");
     check(LocalLibrary::isExtraPath(QStringLiteral("The Film-sample.mp4")),
@@ -290,7 +273,6 @@ void testExtrasAreNotFilms() {
     check(LocalLibrary::isExtraPath(QStringLiteral("The Film-deleted2.mkv")),
           "a numbered extra suffix is an extra");
 
-    // The folder form.
     check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)/Trailers/teaser.mkv")),
           "anything under Trailers is an extra");
     check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)/Behind The Scenes/making of.mkv")),
@@ -298,12 +280,9 @@ void testExtrasAreNotFilms() {
     check(LocalLibrary::isExtraPath(QStringLiteral("movies/Film/Featurettes/one.mkv")),
           "anything under Featurettes is an extra");
 
-    // The bare form, which is what was actually on the box.
     check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)/trailer.mp4")),
           "a file called trailer is an extra");
 
-    // And the things that must not be caught. A film whose title contains one
-    // of these words is still a film.
     check(!LocalLibrary::isExtraPath(QStringLiteral("The Film (1999).mkv")),
           "an ordinary film is not an extra");
     check(!LocalLibrary::isExtraPath(QStringLiteral("Trailer Park Boys (2001).mkv")),
@@ -313,8 +292,6 @@ void testExtrasAreNotFilms() {
     check(!LocalLibrary::isExtraPath(QStringLiteral("movies/Interview With The Vampire (1994).mkv")),
           "a title beginning with Interview is not an extra");
 
-    // The scan agrees with the rule: a folder holding a feature and its trailer
-    // yields the feature only.
     QTemporaryDir dir;
     const QString movies = dir.path() + QStringLiteral("/movies");
     touch(movies + QStringLiteral("/Mask of the Phantasm (1993)/Mask of the Phantasm.mkv"), 5000);
@@ -328,8 +305,6 @@ void testExtrasAreNotFilms() {
     for (const LocalMovie &mv : films)
         check(!mv.ref.contains(QStringLiteral("trailer")),
               "no trailer was taken for a film");
-    // Deliberately the smaller file: size decides which is the feature, and the
-    // trailer here is the larger one, so only the name can settle it.
     bool gotFeature = false;
     for (const LocalMovie &mv : films)
         if (mv.ref.endsWith(QStringLiteral("Mask of the Phantasm.mkv"))) gotFeature = true;
@@ -348,8 +323,6 @@ void testEpisodeAddedInsideAShow() {
     checkEq(lib.shows().size(), 1, "the show is found");
     checkEq(lib.shows().at(0).episodeCount, 1, "with its one episode");
 
-    // The cheap stamp lists series/ and movies/, so a file appearing deeper
-    // than that cannot change it. This is the case a rebuild exists to catch.
     touch(season + QStringLiteral("/Batman Beyond S01E02 - Black Out.mkv"));
     checkEq(lib.shows().at(0).episodeCount, 1,
             "the cheap check does not see inside a show it already knows");
