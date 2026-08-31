@@ -95,6 +95,7 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
     const QString configured = resolveMediaRoot();
     if (!configured.isEmpty())
         m_mediaRoot = configured;
+    m_localLibrary.setMediaRoot(m_mediaRoot);
 
     if (m_plex) {
         const int sig = m_plex->metaObject()->indexOfSignal("streamUrlReady(QString,QString)");
@@ -165,19 +166,37 @@ QString VirtualChannelsBackend::resolveMediaRoot() const {
     QFile f(m_dataRoot + "/config.json");
     if (!f.open(QIODevice::ReadOnly))
         return {};
-    const QJsonObject cfg = QJsonDocument::fromJson(f.readAll()).object();
-    return cfg["modules"].toObject()[kModuleId].toObject()["media_directory"].toString();
+    const QJsonObject modules = QJsonDocument::fromJson(f.readAll()).object()
+                                    .value(QLatin1String("modules")).toObject();
+
+    // This module's own setting wins, so a viewer can point channels somewhere
+    // separate. Failing that, follow Local Files: it is the same question asked
+    // once, and someone who has moved their library to a connected drive should
+    // not have to say so twice for the channels to find it.
+    const QString own = modules.value(QLatin1String(kModuleId)).toObject()
+                            .value(QLatin1String("media_directory")).toString();
+    if (!own.trimmed().isEmpty())
+        return own;
+
+    return modules.value(QStringLiteral("com.240mp.local_files")).toObject()
+               .value(QLatin1String("media_directory")).toString();
 }
 
 void VirtualChannelsBackend::onSettingChanged(const QString &moduleId,
                                               const QString &key,
                                               const QVariant &value) {
-    if (moduleId != QLatin1String(kModuleId))
+    // Local Files' media directory matters here too, because this module falls
+    // back to it. Ignoring it would leave the channels pointed at the old place
+    // until the next restart.
+    const bool ours  = (moduleId == QLatin1String(kModuleId));
+    const bool local = (moduleId == QLatin1String("com.240mp.local_files"));
+    if (!ours && !local)
         return;
     if (key == QLatin1String("media_directory")) {
-        const QString dir = value.toString();
-        m_mediaRoot = dir.isEmpty() ? m_dataRoot + "/media" : dir;
-        qDebug("[VirtualChannels] mediaRoot = %s", qPrintable(m_mediaRoot));
+        const QString resolved = resolveMediaRoot();
+        m_mediaRoot = resolved.trimmed().isEmpty() ? m_dataRoot + "/media" : resolved;
+        m_localLibrary.setMediaRoot(m_mediaRoot);
+        qInfo("[VirtualChannels] mediaRoot = %s", qPrintable(m_mediaRoot));
     }
 }
 
@@ -953,8 +972,28 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
             }
             job.src = slotSourceFromString(o.value(QLatin1String("src")).toString());
             if (job.src == SlotSource::Local) {
-                job.library = o.value(QLatin1String("folder")).toString();
-                if (job.library.trimmed().isEmpty()) continue;
+                // A local entry is either a library item -- a series or a film
+                // chosen from series/ or movies/ -- or a bare folder, which is
+                // what break pools point at and what every entry written before
+                // the library existed looks like. Both keep working.
+                const QString localKind = o.value(QLatin1String("kind")).toString();
+                const QString localName = o.value(QLatin1String("name")).toString();
+
+                if (localKind == QLatin1String("series") && !localName.trimmed().isEmpty()) {
+                    job.match << localName;
+                } else if (localKind == QLatin1String("movie") && !localName.trimmed().isEmpty()) {
+                    job.titles << localName;
+                } else {
+                    job.library = o.value(QLatin1String("folder")).toString();
+                    if (job.library.trimmed().isEmpty()) continue;
+                }
+
+                const QJsonObject lexcl = o.value(QLatin1String("exclude")).toObject();
+                for (const QJsonValue &v : lexcl.value(QLatin1String("seasons")).toArray())
+                    if (v.isString()) job.excludeSeasons.insert(v.toString());
+                for (const QString &ep : excludedEpisodesIn(lexcl))
+                    job.excludeEpisodes.insert(ep);
+
                 jobs.append(job);
                 continue;
             }
@@ -973,6 +1012,21 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                 continue;
             }
             job.anyFilm = (kind == QLatin1String("library"));
+
+            // Seasons and episodes switched off live in the channel's own
+            // source block, keyed by ids only the server can explain, so they
+            // stay there rather than being copied onto each entry. An entry
+            // still has to honour them: without this, picking a show through
+            // the new entry list would quietly re-air every season the viewer
+            // had already switched off.
+            const QJsonObject entryExcl =
+                channel.value(sourceBlockName(job.src)).toObject()
+                       .value(QLatin1String("exclude")).toObject();
+            for (const QJsonValue &ev : entryExcl.value(QLatin1String("seasons")).toArray())
+                if (ev.isString()) job.excludeSeasons.insert(ev.toString());
+            for (const QString &ep : excludedEpisodesIn(entryExcl))
+                job.excludeEpisodes.insert(ep);
+
             jobs.append(job);
         }
     }
@@ -982,7 +1036,8 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
         if (j.pool == SlotKind::Programme) { haveProgrammes = true; break; }
 
     if (!haveProgrammes) {
-        for (const SlotSource src : { SlotSource::Plex, SlotSource::Jellyfin, SlotSource::Emby }) {
+        for (const SlotSource src : { SlotSource::Local, SlotSource::Plex,
+                                     SlotSource::Jellyfin, SlotSource::Emby }) {
             const QString block = sourceBlockName(src);
             if (!channel.contains(block)) continue;
             const QJsonObject cfg = channel.value(block).toObject();
@@ -1227,7 +1282,36 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
     for (const PoolJob &job : std::as_const(jobs)) {
         switch (job.src) {
         case SlotSource::Local:
-            enqueue({ job.library }, job.pool, job.apptIndex, job.pack);
+            if (!job.match.isEmpty() || !job.titles.isEmpty()) {
+                // Library items resolve through the same scan the picker
+                // browsed, so what was ticked is what airs.
+                m_localLibrary.setMediaRoot(m_mediaRoot);
+                QStringList refs;
+                for (const QString &showName : job.match) {
+                    const auto eps = m_localLibrary.episodesFor(
+                        showName,
+                        QStringList(job.excludeSeasons.cbegin(), job.excludeSeasons.cend()),
+                        QStringList(job.excludeEpisodes.cbegin(), job.excludeEpisodes.cend()));
+                    if (eps.isEmpty())
+                        qWarning("[VirtualChannels] channel %d: local series '%s' matched nothing",
+                                 channelNumber, qPrintable(showName));
+                    for (const vchan::LocalEpisode &ep : eps) refs << ep.ref;
+                }
+                for (const QString &film : job.titles) {
+                    if (job.excludeEpisodes.contains(film)) continue;
+                    const QString ref = m_localLibrary.movieRefFor(film);
+                    if (ref.isEmpty())
+                        qWarning("[VirtualChannels] channel %d: local film '%s' matched nothing",
+                                 channelNumber, qPrintable(film));
+                    else
+                        refs << ref;
+                }
+                for (const QString &rel : std::as_const(refs))
+                    m_genQueue.push_back({ QDir(absRoot).filePath(rel), rel,
+                                           job.pool, job.apptIndex, job.pack });
+            } else {
+                enqueue({ job.library }, job.pool, job.apptIndex, job.pack);
+            }
             break;
         case SlotSource::Plex:
             if (!m_plex) {
@@ -3326,7 +3410,82 @@ void VirtualChannelsBackend::browse_from(const QString &source, const QString &k
                 QStringLiteral("%1 unavailable").arg(MediaServerSource::providerName(src)));
         return;
     }
-    emit sourceBrowseFailed(kind, QStringLiteral("Local files are not browsed this way"));
+    browse_local(kind, parentKey);
+}
+
+// Local files, browsed exactly like a server's library.
+//
+// Synchronous, unlike the server paths: reading a directory is immediate, so
+// there is nothing to wait for and no busy state to hold. The rows carry the
+// same two fields the browser reads from every other source, which is what lets
+// one view drive all four.
+void VirtualChannelsBackend::browse_local(const QString &kind, const QString &parentKey) {
+    m_localLibrary.setMediaRoot(m_mediaRoot);
+
+    if (!m_localLibrary.hasLibraryFolders()) {
+        emit sourceBrowseFailed(kind,
+            QStringLiteral("No series or movies folder in %1").arg(m_mediaRoot));
+        return;
+    }
+
+    QVariantList rows;
+
+    if (kind == QLatin1String("shows")) {
+        for (const vchan::LocalShow &show : m_localLibrary.shows()) {
+            QVariantMap m;
+            m["id"]    = vchan::LocalLibrary::showKey(show);
+            m["label"] = show.year > 0
+                             ? QStringLiteral("%1 (%2)").arg(show.name).arg(show.year)
+                             : show.name;
+            rows.append(m);
+        }
+    } else if (kind.startsWith(QLatin1String("movie"))) {
+        // Local files have no genres, collections or playlists to group films
+        // by, so every movie kind resolves to the one flat list rather than
+        // failing and leaving the viewer at a dead end.
+        for (const vchan::LocalMovie &mv : m_localLibrary.movies()) {
+            QVariantMap m;
+            m["id"]    = mv.ref;
+            m["label"] = mv.year > 0
+                             ? QStringLiteral("%1 (%2)").arg(mv.name).arg(mv.year)
+                             : mv.name;
+            rows.append(m);
+        }
+    } else if (kind == QLatin1String("seasons")) {
+        const vchan::LocalShow show = m_localLibrary.showByKey(parentKey);
+        for (const vchan::LocalSeason &season : show.seasons) {
+            QVariantMap m;
+            m["id"]    = vchan::LocalLibrary::seasonKey(show.folder, season.number);
+            m["label"] = season.episodes.size() == 1
+                             ? QStringLiteral("%1 (1 episode)").arg(season.label)
+                             : QStringLiteral("%1 (%2 episodes)")
+                                   .arg(season.label).arg(season.episodes.size());
+            rows.append(m);
+        }
+    } else if (kind == QLatin1String("episodes")) {
+        QString showFolder;
+        int season = -1;
+        if (!vchan::LocalLibrary::splitSeasonKey(parentKey, &showFolder, &season)) {
+            emit sourceBrowseFailed(kind, QStringLiteral("Unreadable season"));
+            return;
+        }
+        for (const vchan::LocalEpisode &ep : m_localLibrary.episodesOf(showFolder, season)) {
+            QVariantMap m;
+            m["id"] = ep.ref;
+            // Numbered when the name said so, plain otherwise: inventing a
+            // number for a file that never carried one would misrepresent it.
+            m["label"] = ep.number >= 0
+                             ? QStringLiteral("%1. %2").arg(ep.number).arg(ep.title)
+                             : ep.title;
+            rows.append(m);
+        }
+    } else {
+        // collections and playlists have no local equivalent.
+        emit sourceBrowseFailed(kind, QStringLiteral("Not available for local files"));
+        return;
+    }
+
+    emit sourceBrowseReady(kind, rows);
 }
 
 // ---------------------------------------------------------------------------
@@ -3544,7 +3703,20 @@ QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
     out["folderCount"] = folderCount;
 
     out["library"]     = plex.value(QLatin1String("library")).toString();
-    out["match"]       = listOf(plex, "match");
+    // Picks live in the programmes array as entry objects, so each one can also
+    // carry its own idents. The legacy per-source "match" array is still read
+    // for channels written before that, and is retired the next time the list
+    // is saved.
+    QStringList picked;
+    for (const QJsonValue &v : o.value(QLatin1String("programmes")).toArray()) {
+        if (!v.isObject()) continue;
+        const QJsonObject e = v.toObject();
+        if (slotSourceFromString(e.value(QLatin1String("src")).toString()) != src) continue;
+        const QString name = e.value(QLatin1String("name")).toString();
+        if (!name.trimmed().isEmpty()) picked << name;
+    }
+    if (picked.isEmpty()) picked = listOf(plex, "match");
+    out["match"]       = picked;
     out["collections"] = listOf(plex, "collections");
     out["playlists"]   = listOf(plex, "playlists");
 
@@ -3603,17 +3775,56 @@ bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &
         QJsonObject o = channels[i].toObject();
         if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
 
+        // Local files are a library like any other source now, so they keep
+        // their picks in their own block exactly as a server does. This used to
+        // refuse outright, from when "local" meant a single folder and a list of
+        // series had nowhere to live.
         const QString block = sourceBlockName(channelSource(channelNumber));
-        if (block == QLatin1String("local")) {
-            qWarning("[VirtualChannels] channel %d has no library source to set '%s' on",
-                     channelNumber, qPrintable(field));
-            return false;
-        }
         QJsonObject plex = o.value(block).toObject();
-        QJsonArray arr;
-        for (const QString &v : values) if (!v.trimmed().isEmpty()) arr.append(v);
-        if (arr.isEmpty()) plex.remove(field);
-        else               plex[field] = arr;
+
+        if (field == QLatin1String("match")) {
+            // One structure for every channel: an entry per show, so idents have
+            // somewhere to live whether or not they are used. Entries already
+            // present keep everything hung off them -- rewriting the list must
+            // not quietly discard a show's intros.
+            // Only this source's SERIES entries are ours to rewrite. Everything
+            // else in the array is carried across untouched: entries belonging
+            // to another source, collections and folders, and the bare strings
+            // an older channel file uses for a folder. Dropping any of them --
+            // which an earlier version of this did -- loses a channel's content
+            // the first time somebody edits its series list.
+            const SlotSource src = channelSource(channelNumber);
+            QJsonArray kept;
+            QHash<QString, QJsonObject> existing;
+            for (const QJsonValue &v : o.value(QLatin1String("programmes")).toArray()) {
+                if (!v.isObject()) { kept.append(v); continue; }
+                const QJsonObject e = v.toObject();
+                const bool mine =
+                    slotSourceFromString(e.value(QLatin1String("src")).toString()) == src
+                    && e.value(QLatin1String("kind")).toString() == QLatin1String("series");
+                if (!mine) { kept.append(e); continue; }
+                existing.insert(e.value(QLatin1String("name")).toString(), e);
+            }
+
+            QJsonArray out;
+            for (const QJsonValue &v : kept) out.append(v);
+            for (const QString &name : values) {
+                if (name.trimmed().isEmpty()) continue;
+                QJsonObject e = existing.value(name);
+                e["name"] = name;
+                e["kind"] = QStringLiteral("series");
+                e["src"]  = slotSourceToString(src);
+                out.append(e);
+            }
+            o[QLatin1String("programmes")] = out;
+            // The legacy array is retired rather than left to disagree.
+            plex.remove(QLatin1String("match"));
+        } else {
+            QJsonArray arr;
+            for (const QString &v : values) if (!v.trimmed().isEmpty()) arr.append(v);
+            if (arr.isEmpty()) plex.remove(field);
+            else               plex[field] = arr;
+        }
 
         o[block] = plex;
 
@@ -3637,7 +3848,6 @@ bool VirtualChannelsBackend::clear_episode_exclusions(int channelNumber,
         if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
 
         const QString block = sourceBlockName(channelSource(channelNumber));
-        if (block == QLatin1String("local")) return false;
         QJsonObject plex = o.value(block).toObject();
         QJsonObject excl = plex.value(QLatin1String("exclude")).toObject();
         QJsonObject bySeason = excl.value(QLatin1String("episodes")).toObject();
@@ -3671,10 +3881,6 @@ bool VirtualChannelsBackend::set_channel_excluded(int channelNumber, const QStri
         if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
 
         const QString block = sourceBlockName(channelSource(channelNumber));
-        if (block == QLatin1String("local")) {
-            qWarning("[VirtualChannels] channel %d has no library source to exclude from", channelNumber);
-            return false;
-        }
         QJsonObject plex = o.value(block).toObject();
         QJsonObject excl = plex.value(QLatin1String("exclude")).toObject();
 

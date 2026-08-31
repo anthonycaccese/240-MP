@@ -14,6 +14,9 @@ FocusScope {
     property string channelName:   navParams.channelName   || ""
     property string pool:          navParams.pool          || "programmes"
     property string poolLabel:     navParams.poolLabel     || "Sources"
+    // Reached from Show Idents: the list is there to be given idents, not to be
+    // added to. Choosing what airs belongs on one screen only.
+    property bool   identsOnly:    navParams.identsOnly === true
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -27,8 +30,13 @@ FocusScope {
     readonly property var rows: {
         var r = []
         for (var i = 0; i < entries.length; i++) r.push("entry:" + i)
-        for (var s = 0; s < sources.length; s++) r.push("add:" + sources[s])
-        r.push("rebuild")
+        // Only offered when this screen is what chooses the pool. Reached from
+        // Show Idents it is not, and a second way to add shows there is exactly
+        // the confusion this change removes.
+        if (!identsOnly) {
+            for (var s = 0; s < sources.length; s++) r.push("add:" + sources[s])
+            r.push("rebuild")
+        }
         return r
     }
     property int current: 0
@@ -70,6 +78,16 @@ FocusScope {
         return e.name
     }
 
+    // What a show has hanging off it, in the two words a column can hold.
+    function identsOf(e) {
+        var hasIn  = e && e.intros && e.intros.length > 0
+        var hasOut = e && e.outros && e.outros.length > 0
+        if (hasIn && hasOut) return "IN + OUT"
+        if (hasIn)  return "INTRO"
+        if (hasOut) return "OUTRO"
+        return ""
+    }
+
     function valueFor(i) {
         var row = rows[i]
         if (row === undefined || row === "rebuild") return ""
@@ -78,6 +96,13 @@ FocusScope {
         var e = entryAt(i)
         if (!e) return ""
         if (parseInt(row.substring(6)) === armedToRemove) return "REMOVE?"
+        // On the idents screen the column answers the question the screen is
+        // asking. Repeating "PLEX · SERIES" on every row, as it used to, told
+        // the viewer nothing they could not already see in the title.
+        if (identsOnly) {
+            var has = identsOf(e)
+            return has === "" ? "NONE" : has
+        }
         var where = sourceLabel(e.src).toUpperCase()
         if (e.count >= 0) return where + " (" + e.count + ")"
         return where + " · " + String(e.kind).toUpperCase()
@@ -89,12 +114,23 @@ FocusScope {
         if (row === "rebuild") return "Rebuild the schedule so a change here actually airs."
         if (row.indexOf("add:") === 0)
             return row.substring(4) === "local"
-                   ? "Choose a folder under the media directory."
+                   ? "Choose a folder of clips under the media directory."
                    : "Choose a collection, playlist or series from " + sourceLabel(row.substring(4)) + "."
 
         var e = entryAt(i)
         if (!e) return ""
         if (parseInt(row.substring(6)) === armedToRemove) return "Press again to remove it, or move away to keep it."
+        if (identsOnly) {
+            var mine = identsOf(e)
+            if (mine === "")        return "Uses the channel's intro and outro. "
+                                           + root.hints.change + " to give it its own."
+            if (mine === "INTRO")   return "Own intro; the channel's outro. "
+                                           + root.hints.change + " to change either."
+            if (mine === "OUTRO")   return "Own outro; the channel's intro. "
+                                           + root.hints.change + " to change either."
+            return "Own intro and outro, so the channel's are not used for it. "
+                   + root.hints.change + " to change them."
+        }
         var idents = (pool === "programmes")
                        ? "  " + root.hints.change + " for its own idents." : ""
         if (e.kind === "folder")
@@ -159,6 +195,10 @@ FocusScope {
                 moduleId: poolRoot.moduleId,
                 source: row.substring(4),
                 settingKey: "pool_buffer",
+                // Programmes are chosen from a library; breaks are chosen from
+                // a folder of clips. Saying which stops the picker offering a
+                // folder of bumps as though it were a show.
+                purpose: poolRoot.pool === "programmes" ? "programmes" : "folders",
                 title: poolLabel + " — " + sourceLabel(row.substring(4))
             }, { currentIndex: poolRoot.current, addFrom: row.substring(4) })
             return

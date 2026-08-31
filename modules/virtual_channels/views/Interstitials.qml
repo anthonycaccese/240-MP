@@ -61,10 +61,12 @@ FocusScope {
 
     function helpFor(i) {
         switch (rows[i]) {
-        case "intros":      return "The ident that leads into a program. On a clock it ends exactly on the mark. A series can bring its own."
+        // Names the row that overrides these, so the two screens describe one
+        // rule from both ends rather than each hinting at the other.
+        case "intros":      return "Leads into a program, ending on the mark on a clock channel. A show with its own, set in Show Idents, uses that instead."
         case "bumps":       return "Short pieces between the commercials and the program either side of them."
         case "commercials": return "The commercials themselves. A clock channel packs as many as the gap allows."
-        case "outros":      return "Played when a program ends, before the break. A series can bring its own, under its entry in Sources."
+        case "outros":      return "Played as a program ends, before the break. A show with its own, set in Show Idents, uses that instead."
         case "rebuild":     return "Rebuild the schedule so a change here actually airs."
         }
         return ""

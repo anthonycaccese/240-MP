@@ -22,13 +22,24 @@ FocusScope {
 
     readonly property var rows: {
         var r = ["source"]
-        if (cfg.usesEntryPools === true || cfg.source === "local") {
-            r.push("folder")
+        if (cfg.source === "local") {
+            // Local files are a library like any other source: the two things a
+            // media folder can hold, straight off this screen. There is no
+            // intermediate list, and no offer to add from a server the channel
+            // is not sourced from.
+            // Films are not a pool: they are booked into Movie Slots, which is
+            // the row below. A flat list of films would air them as ordinary
+            // programmes and duplicate that mechanism.
+            r.push("series")
         } else if (cfg.source !== undefined) {
             r.push("series")
             r.push("collections")
             if (cfg.supportsPlaylists) r.push("playlists")
         }
+        // Idents hang off the shows already picked, so this only appears once
+        // there is something to hang them on. It is not a second way to choose
+        // what airs -- that is Series, for every source, always.
+        if (sourcesRoot.programmeSources.length > 0) r.push("idents")
         r.push("slots")
         r.push("logo")
         r.push("order")
@@ -100,7 +111,7 @@ FocusScope {
     function labelFor(i) {
         switch (rows[i]) {
         case "source":       return "Source"
-        case "folder":       return "Programs"
+        case "idents":       return "Show Idents"
         case "series":       return "Series"
         case "collections":  return "Collections"
         case "playlists":    return "Playlists"
@@ -120,18 +131,14 @@ FocusScope {
     function valueFor(i) {
         switch (rows[i]) {
         case "source": return (cfg.sourceName || "Local Files").toUpperCase()
-        case "folder": {
-            var n = sourcesRoot.programmeSources.length
-            if (n === 0) return "NONE"
-            if (n === 1) {
-                var e = sourcesRoot.programmeSources[0]
-                var label = e.kind === "folder"
-                            ? (String(e.name) === "." ? "MEDIA ROOT"
-                                                      : String(e.name).split("/").pop().toUpperCase())
-                            : String(e.name).toUpperCase()
-                return e.count >= 0 ? label + " (" + e.count + ")" : label
+        case "idents": {
+            var withIdents = 0
+            for (var q = 0; q < sourcesRoot.programmeSources.length; q++) {
+                var pe = sourcesRoot.programmeSources[q]
+                if ((pe.intros && pe.intros.length) || (pe.outros && pe.outros.length)) withIdents++
             }
-            return n + " SOURCES"
+            return withIdents === 0 ? "NONE"
+                                    : withIdents + " OF " + sourcesRoot.programmeSources.length
         }
         case "series": {
             var n = countOf("match")
@@ -169,10 +176,19 @@ FocusScope {
         case "source":
             return sources.length < 2
                    ? "Only local files are set up. Sign in to Plex, Jellyfin or Emby to add more."
-                   : "Left and right to change server. Changing it clears this channel's picks."
-        case "series":      return "Pick series for this channel. Open one to switch seasons or episodes off."
-        case "collections": return "Draw from " + server + " collections. Movies and whole series both work."
-        case "playlists":   return "Draw from " + server + " playlists, in whatever they contain."
+                   // "Server" is wrong for local files, which are the one source
+                   // that is not one.
+                   : (cfg.source === "local"
+                      ? "Left and right to choose where this channel's shows come from. Changing it clears its picks."
+                      : "Left and right to change server. Changing it clears this channel's picks.")
+        // These three overlap, and which to use is not obvious, so each says what
+        // it is FOR rather than only what it is. The distinction that matters:
+        // series are picked show by show and can be narrowed; a collection or
+        // playlist arrives whole and cannot.
+        case "series":      return "Shows picked one by one. Open one to switch off seasons or episodes you don't want."
+        case "collections": return "A group kept on " + server + ", added whole — everything in it airs, even shows not ticked in Series."
+        case "playlists":   return "A list kept on " + server + ", added whole. Change it there and this channel follows on its next rebuild."
+        case "idents":      return "A show can have its own intro or outro instead of the channel's. Anything not set here falls back to Breaks."
         case "slots":       return "Movies at fixed times, each drawing on its own set of movies."
         case "logo":        return "The mark this channel flies in the corner. Size and position are in Settings."
         case "order":       return sourcesRoot.order === "shuffle"
@@ -182,9 +198,6 @@ FocusScope {
                                    ? "Free run: each program starts when the last one ended."
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
         case "ads":         return "How many things play between programs. Free run only — on a clock the gap decides."
-        case "folder":      return cfg.usesEntryPools === true
-                                   ? "Everything this channel plays. Each source can bring its own idents."
-                                   : "The folders this channel's programs come from. Everything under them is used."
         case "breaks":      return "What plays between programs: station IDs, bumps, commercials and outros."
         case "rebuild":     return "Rebuild the schedule so source changes actually air."
         case "rename":      return "Change what this channel is called."
@@ -269,13 +282,16 @@ FocusScope {
             }, { currentIndex: sourcesRoot.current })
             return
         }
-        if (row === "folder") {
+        if (row === "idents") {
             navigateTo("modules/virtual_channels/views/PoolEditor.qml", {
                 moduleId:      sourcesRoot.moduleId,
                 channelNumber: sourcesRoot.channelNumber,
                 channelName:   sourcesRoot.channelName,
                 pool:          "programmes",
-                poolLabel:     "Programs"
+                poolLabel:     "Show Idents",
+                // Picking happens in Series now; this screen only attaches
+                // intros and outros to what is already there.
+                identsOnly:    true
             }, { currentIndex: sourcesRoot.current })
             return
         }

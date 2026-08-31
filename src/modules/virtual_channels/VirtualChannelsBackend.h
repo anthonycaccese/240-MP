@@ -10,6 +10,7 @@
 #include <QVariantMap>
 
 #include "ChannelSchedule.h"
+#include "LocalLibrary.h"
 #include "ChannelTuner.h"
 #include "DurationProbe.h"
 #include "MediaServerSource.h"
@@ -110,6 +111,7 @@ public:
     Q_INVOKABLE void browse_source(int channelNumber, const QString &kind,
                                    const QString &parentKey = QString());
     Q_INVOKABLE bool browse_busy() const;
+    void browse_local(const QString &kind, const QString &parentKey);
     Q_INVOKABLE void browse_from(const QString &source, const QString &kind,
                                  const QString &parentKey = QString());
 
@@ -175,6 +177,10 @@ private:
     QString m_appRoot;
     QString m_dataRoot;
     QString m_mediaRoot;
+    // Local files presented the way the servers present theirs, so one
+    // browser can drive all four sources.
+    mutable vchan::LocalLibrary m_localLibrary;
+
     QObject *m_plex = nullptr;
     QObject *m_jellyfin = nullptr;
     QObject *m_emby = nullptr;

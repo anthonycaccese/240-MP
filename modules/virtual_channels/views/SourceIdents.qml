@@ -129,6 +129,7 @@ FocusScope {
             moduleId:   identRoot.moduleId,
             source:     "local",
             settingKey: "pool_buffer",
+            purpose:    "folders",
             title:      labelFor(i) + " — " + shortName()
         }, { currentIndex: identRoot.current, pickFor: row })
     }
