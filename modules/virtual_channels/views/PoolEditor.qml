@@ -16,7 +16,6 @@ FocusScope {
     property string poolLabel:     navParams.poolLabel     || "Sources"
     // Reached from Show Idents: the list is there to be given idents, not to be
     // added to. Choosing what airs belongs on one screen only.
-    property bool   identsOnly:    navParams.identsOnly === true
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -30,13 +29,8 @@ FocusScope {
     readonly property var rows: {
         var r = []
         for (var i = 0; i < entries.length; i++) r.push("entry:" + i)
-        // Only offered when this screen is what chooses the pool. Reached from
-        // Show Idents it is not, and a second way to add shows there is exactly
-        // the confusion this change removes.
-        if (!identsOnly) {
-            for (var s = 0; s < sources.length; s++) r.push("add:" + sources[s])
-            r.push("rebuild")
-        }
+        for (var s = 0; s < sources.length; s++) r.push("add:" + sources[s])
+        r.push("rebuild")
         return r
     }
     property int current: 0
@@ -84,15 +78,6 @@ FocusScope {
     }
 
     // What a show has hanging off it, in the two words a column can hold.
-    function identsOf(e) {
-        var hasIn  = e && e.intros && e.intros.length > 0
-        var hasOut = e && e.outros && e.outros.length > 0
-        if (hasIn && hasOut) return "IN + OUT"
-        if (hasIn)  return "INTRO"
-        if (hasOut) return "OUTRO"
-        return ""
-    }
-
     function valueFor(i) {
         var row = rows[i]
         if (row === undefined || row === "rebuild") return ""
@@ -101,12 +86,6 @@ FocusScope {
         var e = entryAt(i)
         if (!e) return ""
         if (parseInt(row.substring(6)) === armedToRemove) return "REMOVE?"
-        // On the idents screen the column answers the question the screen is
-        // asking, rather than repeating what the title already says.
-        if (identsOnly) {
-            var has = identsOf(e)
-            return has === "" ? "NONE" : has
-        }
         var where = sourceLabel(e.src).toUpperCase()
         if (e.count >= 0) return where + " (" + e.count + ")"
         return where + " · " + String(e.kind).toUpperCase()
@@ -130,48 +109,16 @@ FocusScope {
         var e = entryAt(i)
         if (!e) return ""
         if (parseInt(row.substring(6)) === armedToRemove) return "Press again to remove it, or move away to keep it."
-        if (identsOnly) {
-            var mine = identsOf(e)
-            if (mine === "")        return "Uses the channel's intro and outro. "
-                                           + root.hints.change + " to give it its own."
-            if (mine === "INTRO")   return "Own intro; the channel's outro. "
-                                           + root.hints.change + " to change either."
-            if (mine === "OUTRO")   return "Own outro; the channel's intro. "
-                                           + root.hints.change + " to change either."
-            return "Own intro and outro, so the channel's are not used for it. "
-                   + root.hints.change + " to change them."
-        }
-        var idents = (pool === "programmes")
-                       ? "  " + root.hints.change + " for its own idents." : ""
         if (e.kind === "folder")
-            return (e.count === 0
-                    ? e.name + " — no clips in it. " + root.hints.select + " removes it."
-                    : e.name + " — " + e.count + " clip" + (e.count === 1 ? "" : "s")
-                      + ". " + root.hints.select + " removes it.") + idents
+            return e.count === 0
+                   ? e.name + " — no clips in it. " + root.hints.select + " removes it."
+                   : e.name + " — " + e.count + " clip" + (e.count === 1 ? "" : "s")
+                     + ". " + root.hints.select + " removes it."
         return String(e.kind) + " on " + sourceLabel(e.src) + ". "
-               + root.hints.select + " removes it." + idents
+               + root.hints.select + " removes it."
     }
 
     function cycles(i) { return false }
-
-    function secondaryFor(i) {
-        if (pool !== "programmes") return ""
-        var row = rows[i]
-        return (row !== undefined && row.indexOf("entry:") === 0) ? "IDENTS" : ""
-    }
-
-    function openIdents(i) {
-        var e = entryAt(i)
-        if (!e) return
-        navigateTo("modules/virtual_channels/views/SourceIdents.qml", {
-            moduleId:      poolRoot.moduleId,
-            channelNumber: poolRoot.channelNumber,
-            channelName:   poolRoot.channelName,
-            pool:          poolRoot.pool,
-            entryIndex:    parseInt(rows[i].substring(6)),
-            entryName:     e.name
-        }, { currentIndex: poolRoot.current })
-    }
 
     function actionFor(i) {
         var row = rows[i]
@@ -293,9 +240,7 @@ FocusScope {
         helpFor:  function(i) { return poolRoot.helpFor(i) }
         cycles:   function(i) { return poolRoot.cycles(i) }
         actionFor: function(i) { return poolRoot.actionFor(i) }
-        secondaryFor: function(i) { return poolRoot.secondaryFor(i) }
         onActivate:  function(i) { poolRoot.open(i) }
-        onSecondary: function(i) { poolRoot.openIdents(i) }
         onBack:      function() { poolRoot.goBack() }
     }
 }

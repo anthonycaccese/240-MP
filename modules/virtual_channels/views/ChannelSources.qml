@@ -55,7 +55,6 @@ FocusScope {
     property int slotCount: 0
     property var interstitials: []
     property bool armedToDelete: false
-    property var programmeSources: []
     property string channelLogo: ""
     property int gridMinutes: 0
     property int adsPerBreak: 0
@@ -67,7 +66,6 @@ FocusScope {
         cfg = virtualChannelsBackend.channel_source_config(channelNumber)
         slotCount = virtualChannelsBackend.channel_bookings(channelNumber).length
         interstitials = virtualChannelsBackend.channel_interstitials(channelNumber)
-        programmeSources = virtualChannelsBackend.channel_pool(channelNumber, "programmes")
         channelLogo = virtualChannelsBackend.channel_logo(channelNumber) || ""
         var timing = virtualChannelsBackend.channel_timing(channelNumber)
         gridMinutes = timing.gridMinutes
@@ -118,7 +116,6 @@ FocusScope {
     function labelFor(i) {
         switch (rows[i]) {
         case "source":       return "Source"
-        case "idents":       return "Show Idents"
         case "series":       return "Series"
         case "collections":  return "Collections"
         case "playlists":    return "Playlists"
@@ -138,15 +135,6 @@ FocusScope {
     function valueFor(i) {
         switch (rows[i]) {
         case "source": return (cfg.sourceName || "Local Files").toUpperCase()
-        case "idents": {
-            var withIdents = 0
-            for (var q = 0; q < sourcesRoot.programmeSources.length; q++) {
-                var pe = sourcesRoot.programmeSources[q]
-                if ((pe.intros && pe.intros.length) || (pe.outros && pe.outros.length)) withIdents++
-            }
-            return withIdents === 0 ? "NONE"
-                                    : withIdents + " OF " + sourcesRoot.programmeSources.length
-        }
         case "series": {
             var n = countOf("match")
             var ex = excludedCount()
@@ -199,9 +187,8 @@ FocusScope {
         case "series":      return "Shows picked one by one. Open one to switch off seasons or episodes you don't want."
         case "collections": return "A group kept on " + server + ", added whole — everything in it airs, even shows not ticked in Series."
         case "playlists":   return "A list kept on " + server + ", added whole. Change it there and this channel follows on its next rebuild."
-        case "idents":      return "A show can have its own intro or outro instead of the channel's. Anything not set here falls back to Breaks."
         case "slots":       return "Movies at fixed times, each drawing on its own set of movies."
-        case "logo":        return "The mark this channel flies in the corner. Size and position are in Settings."
+        case "logo":        return "The mark this channel flies in the corner. Its size and position are under Channel Logo in Channels settings."
         case "order":       return sourcesRoot.order === "shuffle"
                                    ? "Series take turns, and everything plays once before anything repeats."
                                    : "Episodes play in order, which is what a series wants."
@@ -290,19 +277,6 @@ FocusScope {
                 moduleId:      sourcesRoot.moduleId,
                 channelNumber: sourcesRoot.channelNumber,
                 title: sourcesRoot.channelName
-            }, { currentIndex: sourcesRoot.current })
-            return
-        }
-        if (row === "idents") {
-            navigateTo("modules/virtual_channels/views/PoolEditor.qml", {
-                moduleId:      sourcesRoot.moduleId,
-                channelNumber: sourcesRoot.channelNumber,
-                channelName:   sourcesRoot.channelName,
-                pool:          "programmes",
-                poolLabel:     "Show Idents",
-                // Picking happens in Series now; this screen only attaches
-                // intros and outros to what is already there.
-                identsOnly:    true
             }, { currentIndex: sourcesRoot.current })
             return
         }

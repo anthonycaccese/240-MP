@@ -86,6 +86,32 @@ FocusScope {
         return list.indexOf(item.label) >= 0
     }
 
+    // On, but with some of what is under it switched off. A season keeps its
+    // own excluded episodes under its key, so it is the one level that can say
+    // so without walking the library again.
+    function isPartial(item) {
+        if (kind !== "seasons" || !isOn(item)) return false
+        var by = cfg.excludedBySeason || ({})
+        var refs = by[item.id]
+        return refs !== undefined && refs !== null && refs.length > 0
+    }
+
+    // The count for the row under the cursor, so a half-filled box says how
+    // many rather than only that some are off.
+    function partialHint() {
+        var item = items[itemList.currentIndex]
+        if (item === undefined || !isPartial(item)) return ""
+        var total = item.count
+        if (total === undefined || total === null || total <= 0) return "SOME EPISODES ARE SWITCHED OFF"
+        return (total - partialCount(item)) + " OF " + total + " EPISODES AIR"
+    }
+
+    function partialCount(item) {
+        var by = cfg.excludedBySeason || ({})
+        var refs = by[item.id]
+        return (refs === undefined || refs === null) ? 0 : refs.length
+    }
+
     function toggle(item) {
         if (channelNumber < 0) return
 
@@ -413,6 +439,7 @@ FocusScope {
             required property var modelData
             readonly property bool selected: index === itemList.currentIndex
             readonly property bool on: browserRoot.isOn(modelData)
+            readonly property bool partial: browserRoot.isPartial(modelData)
 
             Rectangle {
                 anchors.fill: parent
@@ -426,10 +453,19 @@ FocusScope {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: parent.left
                 anchors.leftMargin: root.sw * 0.0125
-                color: parent.on ? (parent.selected ? root.surfaceColor : root.primaryColor)
-                                 : "transparent"
+                color: (parent.on && !parent.partial)
+                       ? (parent.selected ? root.surfaceColor : root.primaryColor)
+                       : "transparent"
                 border.color: parent.selected ? root.surfaceColor : root.tertiaryColor
                 border.width: 2
+
+                Rectangle {
+                    visible: parent.parent.partial
+                    anchors.centerIn: parent
+                    width: parent.width * 0.5
+                    height: width
+                    color: parent.parent.selected ? root.surfaceColor : root.primaryColor
+                }
             }
 
             Text {
@@ -471,9 +507,11 @@ FocusScope {
               ? (browserRoot.bookingTitles.length === 0
                  ? "NOTHING TICKED HERE"
                  : "TICKED CAN AIR IN THIS SLOT")
-              : browserRoot.isExclusionLevel
-                ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
-                : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
+              : browserRoot.partialHint() !== ""
+                ? browserRoot.partialHint()
+                : browserRoot.isExclusionLevel
+                  ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
+                  : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
         color: root.tertiaryColor
         font.family: root.globalFont
         font.pixelSize: root.sh * 0.0271

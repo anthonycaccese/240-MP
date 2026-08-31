@@ -15,10 +15,10 @@ FocusScope {
     property string pool:          navParams.pool          || "programmes"
     property int    entryIndex:    navParams.entryIndex !== undefined ? navParams.entryIndex : -1
     property string entryName:     navParams.entryName     || ""
-    // Empty means both. Set to "intros" or "outros" when reached from the list
-    // for that one, so a setting does not appear on two screens at once.
-    property string only:          navParams.only          || ""
-    readonly property string onlyWord: only === "outros" ? "outro" : "intro"
+    // Which pool this screen edits. Set by the list it was opened from, so a
+    // setting never appears on two screens at once.
+    property string kind:          navParams.kind          || "intros"
+    readonly property string kindWord: kind === "outros" ? "outro" : "intro"
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -26,15 +26,8 @@ FocusScope {
     property var entry: ({})
     property string status: ""
 
-    // Scoped to one kind, this screen must not offer to clear the other.
-    readonly property bool hasOwnIdents: only !== ""
-                                   ? foldersOf(only).length > 0
-                                   : (foldersOf("intros").length > 0
-                                      || foldersOf("outros").length > 0)
-    readonly property var rows: only !== ""
-                                ? (hasOwnIdents ? [only, "clear"] : [only])
-                                : hasOwnIdents ? ["intros", "outros", "clear"]
-                                       : ["intros", "outros"]
+    readonly property bool hasOwnIdents: foldersOf(kind).length > 0
+    readonly property var rows: hasOwnIdents ? [kind, "clear"] : [kind]
     property int current: 0
 
     property bool armedToClear: false
@@ -84,14 +77,10 @@ FocusScope {
                               + ", instead of the channel's."
         case "outros": return "A folder of idents to close " + shortName()
                               + ", instead of the channel's."
-        case "clear":  return identRoot.only !== ""
-                              ? (armedToClear
-                                 ? "Press again to forget it, or move away to keep it."
-                                 : "Forget it and let the channel's " + identRoot.onlyWord
-                                   + " announce " + identRoot.shortName() + " again.")
-                              : (armedToClear
-                                 ? "Press again to forget both, or move away to keep them."
-                                 : "Forget both and let the channel's own idents announce it again.")
+        case "clear":  return armedToClear
+                              ? "Press again to forget it, or move away to keep it."
+                              : "Forget it and let the channel's " + identRoot.kindWord
+                                + " announce " + identRoot.shortName() + " again."
         }
         return ""
     }
@@ -130,12 +119,9 @@ FocusScope {
         if (row === "clear") {
             if (!armedToClear) { armedToClear = true; return }
             armedToClear = false
-            var drop = identRoot.only !== ""
-                       ? [identRoot.only, identRoot.only + "_count"]
-                       : ["intros", "outros", "intros_count", "outros_count"]
             var next = {}
             for (var k in entry)
-                if (drop.indexOf(k) < 0 && k !== "intros_count" && k !== "outros_count")
+                if (k !== identRoot.kind && k !== "intros_count" && k !== "outros_count")
                     next[k] = entry[k]
             save(next)
             return
@@ -183,8 +169,7 @@ FocusScope {
         anchors.fill: parent
         focus: true
         iconSource: identRoot.moduleIcon
-        title: (identRoot.only === "" ? "Idents"
-                : identRoot.only === "outros" ? "Outro" : "Intro")
+        title: (identRoot.kind === "outros" ? "Outro" : "Intro")
                + " — " + identRoot.shortName()
         rows: identRoot.rows
         current: identRoot.current
