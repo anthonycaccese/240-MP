@@ -29,6 +29,9 @@ FocusScope {
 
     function poolSummary(kind) {
         var _ = poolsRevision
+        // Same reason as IdentLevels: a value binding outlives the backend by a
+        // moment when the view is torn down.
+        if (!virtualChannelsBackend) return ""
         var list = virtualChannelsBackend.channel_pool(channelNumber, kind)
         if (list.length === 0) return "NONE"
         var counted = 0, uncounted = 0
