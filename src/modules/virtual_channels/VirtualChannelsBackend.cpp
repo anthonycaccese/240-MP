@@ -988,11 +988,20 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                     if (job.library.trimmed().isEmpty()) continue;
                 }
 
-                const QJsonObject lexcl = o.value(QLatin1String("exclude")).toObject();
-                for (const QJsonValue &v : lexcl.value(QLatin1String("seasons")).toArray())
-                    if (v.isString()) job.excludeSeasons.insert(v.toString());
-                for (const QString &ep : excludedEpisodesIn(lexcl))
-                    job.excludeEpisodes.insert(ep);
+                // Seasons and episodes switched off are kept in the channel's
+                // own source block, not on the entry, so both are read here.
+                // Reading only the entry -- which is what this did -- means a
+                // season the viewer switched off airs anyway, silently, which
+                // is worse than failing outright.
+                for (const QJsonObject &lexcl :
+                     { o.value(QLatin1String("exclude")).toObject(),
+                       channel.value(sourceBlockName(SlotSource::Local)).toObject()
+                              .value(QLatin1String("exclude")).toObject() }) {
+                    for (const QJsonValue &v : lexcl.value(QLatin1String("seasons")).toArray())
+                        if (v.isString()) job.excludeSeasons.insert(v.toString());
+                    for (const QString &ep : excludedEpisodesIn(lexcl))
+                        job.excludeEpisodes.insert(ep);
+                }
 
                 jobs.append(job);
                 continue;
