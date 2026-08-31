@@ -44,8 +44,11 @@ const QRegularExpression &noiseTail() {
 
 QString tidy(QString s) {
     s.replace(QLatin1Char('_'), QLatin1Char(' '));
-    // Dots are separators in release names but belong inside initialisms, so
-    // only collapse a run of them, never a single one between letters.
+    // Every dot becomes a space, because in the names these files actually
+    // carry a dot is nearly always a separator ("Dragon.Ball.Z"). The cost is
+    // that an initialism loses its dots too, so "S.H.I.E.L.D." is shown as
+    // "S H I E L D": wrong-looking, but it still matches and still airs, which
+    // is the trade this file makes everywhere.
     s.replace(QRegularExpression(QStringLiteral("\\.{1,}")), QStringLiteral(" "));
     s.replace(QRegularExpression(QStringLiteral("\\s{2,}")), QStringLiteral(" "));
     return s.trimmed();
@@ -143,18 +146,20 @@ bool LocalLibrary::episodeFromFile(const QString &fileName, int *season, int *nu
 
     // Ordered most specific first. S01E02 is unambiguous; 1x02 nearly so; a
     // bare E02 only says which episode, never which season.
-    struct Pattern { const char *re; bool hasSeason; };
+    // Compiled once, not once per file: this runs for every file in the
+    // library on every scan, and building four regexes each time is the
+    // difference between a menu that opens and one that thinks about it.
+    struct Pattern { QRegularExpression re; bool hasSeason; };
     static const Pattern kPatterns[] = {
-        { "[Ss](\\d{1,4})[\\s._-]*[Ee](\\d{1,4})",            true  },
-        { "(?<![0-9])(\\d{1,4})[Xx](\\d{1,3})(?![0-9])",      true  },
-        { "[Ss]eason[\\s._-]*(\\d{1,4})[\\s._-]*"
-          "[Ee]pisode[\\s._-]*(\\d{1,4})",                    true  },
-        { "(?:^|[\\s._-])[Ee](?:p|pisode)?[\\s._-]*(\\d{1,4})(?![0-9])", false },
+        { QRegularExpression(QStringLiteral("[Ss](\\d{1,4})[\\s._-]*[Ee](\\d{1,4})")),            true  },
+        { QRegularExpression(QStringLiteral("(?<![0-9])(\\d{1,4})[Xx](\\d{1,3})(?![0-9])")),        true  },
+        { QRegularExpression(QStringLiteral("[Ss]eason[\\s._-]*(\\d{1,4})[\\s._-]*"
+                                            "[Ee]pisode[\\s._-]*(\\d{1,4})")),                     true  },
+        { QRegularExpression(QStringLiteral("(?:^|[\\s._-])[Ee](?:p|pisode)?[\\s._-]*(\\d{1,4})(?![0-9])")), false },
     };
 
     for (const Pattern &p : kPatterns) {
-        const QRegularExpression re(QString::fromLatin1(p.re));
-        const auto m = re.match(stem);
+        const auto m = p.re.match(stem);
         if (!m.hasMatch()) continue;
 
         if (p.hasSeason) {

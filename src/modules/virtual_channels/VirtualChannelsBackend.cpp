@@ -1323,6 +1323,12 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                 m_genQueue.push_back({ QDir(absRoot).filePath(rel), rel, kind, apptIndex, pack });
     };
     m_localLibrary.setMediaRoot(m_mediaRoot);
+    // Read the library again from scratch for a build. Between builds the scan
+    // is kept and checked cheaply, by listing series/ and movies/ -- which
+    // notices a show appearing or going, but not an episode added inside one
+    // that is already there. A build is the one moment somebody is waiting for
+    // exactly that: it is what "rebuild after adding video" means.
+    m_localLibrary.refresh();
     for (const auto &pool : std::as_const(localApptTitles)) {
         for (const QString &title : pool.second) {
             const QString rel = m_localLibrary.movieRefFor(title);
