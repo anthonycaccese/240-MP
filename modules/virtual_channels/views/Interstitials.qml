@@ -36,10 +36,11 @@ FocusScope {
             if (list[i].count >= 0) counted += list[i].count
             else uncounted++
         }
-        if (uncounted === 0) return list.length === 1
-                                    ? String(list[0].name).split("/").pop().toUpperCase()
-                                      + " (" + counted + ")"
-                                    : list.length + " SOURCES (" + counted + ")"
+        // How many clips, not what the folder is called. The folder under Intros
+        // is usually called "intro", so naming it here just said INTRO next to a
+        // row already labelled INTROS, and buried the number that matters.
+        if (uncounted === 0)
+            return counted + (counted === 1 ? " CLIP" : " CLIPS")
         return list.length + (list.length === 1 ? " SOURCE" : " SOURCES")
     }
 
@@ -49,7 +50,7 @@ FocusScope {
         case "bumps":       return "Bumps"
         case "commercials": return "Commercials"
         case "outros":      return "Outros"
-        case "rebuild":     return "Rebuild Now"
+        case "rebuild":     return "Rebuild This Channel"
         }
         return ""
     }
@@ -64,8 +65,8 @@ FocusScope {
         // Names the row that overrides these, so the two screens describe one
         // rule from both ends rather than each hinting at the other.
         case "intros":      return "Leads into a program, ending on the mark on a clock channel. Open to see which shows override it."
-        case "bumps":       return "Short pieces between the commercials and the program either side of them."
-        case "commercials": return "The commercials themselves. A clock channel packs as many as the gap allows."
+        case "bumps":       return "Short pieces between the commercials and the program either side of them. The same for every show."
+        case "commercials": return "The commercials themselves. A clock channel packs as many as the gap allows. The same for every show."
         case "outros":      return "Played as a program ends, before the break. Open to see which shows override it."
         case "rebuild":     return "Rebuild the schedule so a change here actually airs."
         }

@@ -63,6 +63,8 @@ FocusScope {
         return s
     }
 
+    // A folder row shows its path, not its last segment: under Bumps the segment
+    // is "bump", which said nothing the title had not already said.
     function labelFor(i) {
         var row = rows[i]
         if (row === undefined) return ""
@@ -73,7 +75,10 @@ FocusScope {
         if (!e) return ""
         if (e.kind === "folder") {
             var p = String(e.name)
-            return p === "." ? "Media Root" : p.split("/").pop()
+            // The whole path, because the last segment alone is usually the
+            // pool's own name -- "bump" under Bumps -- which distinguishes
+            // nothing when a channel draws bumps from several folders.
+            return p === "." ? "Media Root" : p
         }
         return e.name
     }
@@ -134,9 +139,12 @@ FocusScope {
         var idents = (pool === "programmes")
                        ? "  " + root.hints.change + " for its own idents." : ""
         if (e.kind === "folder")
-            return (e.count === 0 ? e.name + " — empty. Press to remove."
-                                  : e.name + " — press to remove.") + idents
-        return String(e.kind) + " on " + sourceLabel(e.src) + " — press to remove." + idents
+            return (e.count === 0
+                    ? e.name + " — no clips in it. " + root.hints.select + " removes it."
+                    : e.name + " — " + e.count + " clip" + (e.count === 1 ? "" : "s")
+                      + ". " + root.hints.select + " removes it.") + idents
+        return String(e.kind) + " on " + sourceLabel(e.src) + ". "
+               + root.hints.select + " removes it." + idents
     }
 
     function cycles(i) { return false }
