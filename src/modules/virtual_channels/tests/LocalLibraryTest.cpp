@@ -277,7 +277,67 @@ void testEmptyAndMissing() {
 
 }  // namespace
 
+void testExtrasAreNotFilms() {
+    section("LocalLibrary: extras are not films");
+
+    // The suffix form Jellyfin documents.
+    check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)-trailer.mkv")),
+          "a -trailer suffix is an extra");
+    check(LocalLibrary::isExtraPath(QStringLiteral("The Film-sample.mp4")),
+          "a -sample suffix is an extra");
+    check(LocalLibrary::isExtraPath(QStringLiteral("The Film-behindthescenes.mkv")),
+          "a -behindthescenes suffix is an extra");
+    check(LocalLibrary::isExtraPath(QStringLiteral("The Film-deleted2.mkv")),
+          "a numbered extra suffix is an extra");
+
+    // The folder form.
+    check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)/Trailers/teaser.mkv")),
+          "anything under Trailers is an extra");
+    check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)/Behind The Scenes/making of.mkv")),
+          "anything under Behind The Scenes is an extra");
+    check(LocalLibrary::isExtraPath(QStringLiteral("movies/Film/Featurettes/one.mkv")),
+          "anything under Featurettes is an extra");
+
+    // The bare form, which is what was actually on the box.
+    check(LocalLibrary::isExtraPath(QStringLiteral("The Film (1999)/trailer.mp4")),
+          "a file called trailer is an extra");
+
+    // And the things that must not be caught. A film whose title contains one
+    // of these words is still a film.
+    check(!LocalLibrary::isExtraPath(QStringLiteral("The Film (1999).mkv")),
+          "an ordinary film is not an extra");
+    check(!LocalLibrary::isExtraPath(QStringLiteral("Trailer Park Boys (2001).mkv")),
+          "a title beginning with the word is not an extra");
+    check(!LocalLibrary::isExtraPath(QStringLiteral("Scenes From A Marriage (1973).mkv")),
+          "a title beginning with Scenes is not an extra");
+    check(!LocalLibrary::isExtraPath(QStringLiteral("movies/Interview With The Vampire (1994).mkv")),
+          "a title beginning with Interview is not an extra");
+
+    // The scan agrees with the rule: a folder holding a feature and its trailer
+    // yields the feature only.
+    QTemporaryDir dir;
+    const QString movies = dir.path() + QStringLiteral("/movies");
+    touch(movies + QStringLiteral("/Mask of the Phantasm (1993)/Mask of the Phantasm.mkv"), 5000);
+    touch(movies + QStringLiteral("/Mask of the Phantasm (1993)/trailer.mp4"), 9000);
+    touch(movies + QStringLiteral("/Some Film (2001)-trailer.mkv"), 100);
+    touch(movies + QStringLiteral("/Some Film (2001).mkv"), 100);
+
+    LocalLibrary lib(dir.path());
+    const QVector<LocalMovie> films = lib.movies();
+    checkEq(films.size(), 2, "two films, not four files");
+    for (const LocalMovie &mv : films)
+        check(!mv.ref.contains(QStringLiteral("trailer")),
+              "no trailer was taken for a film");
+    // Deliberately the smaller file: size decides which is the feature, and the
+    // trailer here is the larger one, so only the name can settle it.
+    bool gotFeature = false;
+    for (const LocalMovie &mv : films)
+        if (mv.ref.endsWith(QStringLiteral("Mask of the Phantasm.mkv"))) gotFeature = true;
+    check(gotFeature, "the feature was taken even though the trailer was bigger");
+}
+
 int runLocalLibraryTests() {
+    testExtrasAreNotFilms();
     testYearStripping();
     testSeasonFolders();
     testEpisodeParsing();

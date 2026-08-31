@@ -359,6 +359,39 @@ Please review `PlexBackend` as a reference implementation.
 - To react to your own settings changing, add a slot `onSettingChanged(moduleId, key, value)` — auto-connected to `moduleSettingChanged`.
 - A backend resolves its own configured paths in its constructor — e.g. `LocalFilesBackend` / `AmbientModeBackend` read `media_directory` from `config.json` (defaulting to `dataRoot/media` / `dataRoot/ambient`). `main.cpp` does not touch module paths.
 
+### The local library layout (Virtual Channels)
+
+Virtual Channels reads local files as a library rather than as a directory, so
+that one picker can present local files, Plex, Jellyfin and Emby the same way.
+Two folder names under the media root are the contract, and `LocalLibrary` reads
+nothing else:
+
+```
+<media>/series/<Show Name (Year)>/Season 1/<Show> S01E01 - Title.mkv
+<media>/movies/<Film Name (Year)>.mkv
+<media>/movies/<Film Name (Year)>/<Film Name>.mkv     # folder-per-film also works
+```
+
+- Both folders are created on startup, but only inside a media root that already
+  exists — the module never invents the root itself.
+- Naming follows Jellyfin's conventions, then Plex's, and **loosely**: `S01E02`,
+  `1x02`, `Season 2 Episode 5` and a bare `E04` all parse, `Specials`/`Extras`
+  mean season 0, and anything unparseable keeps its filename as its title and
+  sorts last rather than disappearing.
+- Extras are not films. A `-trailer`/`-sample`/`-featurette` suffix, or a
+  `Trailers`/`Extras`/`Behind The Scenes` folder, is skipped when films are
+  enumerated (`LocalLibrary::isExtraPath`) — including by movie slots, so a
+  trailer sitting beside a feature cannot be what airs at eight.
+- Anything **outside** `series/` and `movies/` is not a programme source. That is
+  what lets a picker tell a show from a folder of bumps: break pools (intros,
+  outros, bumps, commercials) point at ordinary folders anywhere under the root,
+  and take what is in them.
+
+A channel states its source in its `source` key. It is inferred from a server
+block, and then from the entries in its pools, only for channels written before
+that key existed — inference cannot be corrected, and a channel moved from a
+server to local files still holds that server's entries.
+
 ## QML View Patterns
 
 ### Root.qml — module router

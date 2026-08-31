@@ -38,6 +38,9 @@ FocusScope {
     readonly property var rows: {
         var r = ["name", "hour", "minute", "days"]
         if (source === "local") {
+            // Either way of saying which films: pick them one by one from the
+            // library, or point the slot at a folder and let it choose.
+            r.push("films")
             r.push("folder")
         } else {
             r.push("anyfilm")
@@ -172,12 +175,17 @@ FocusScope {
         case "hour":   return "Left and right to change the hour."
         case "minute": return "Left and right in five-minute steps."
         case "days":   return "Which days it airs. None chosen means every day."
-        case "folder": return "The folder this slot draws its movies from."
+        case "folder": return editRoot.films > 0
+                              ? "A folder of movies, on top of the ones picked above. Anything in it can air."
+                              : "A folder this slot draws its movies from. Leave it empty to pick by name instead."
         case "anyfilm": return editRoot.anyFilm
                                ? "The whole movie library. Turn this off to pick what airs."
                                : "Off, so only what you pick below can air. Turn on for any movie."
-        case "films":  return "Draws on: " + editRoot.poolSummary()
-                              + ". Pick movies by name; anything ticked anywhere can air."
+        case "films":  return editRoot.source === "local"
+                              ? ("Draws on: " + editRoot.poolSummary()
+                                 + ". Movies picked by name, plus anything in the folder below.")
+                              : ("Draws on: " + editRoot.poolSummary()
+                                 + ". Pick movies by name; anything ticked anywhere can air.")
         case "genres": return "Draw on a whole " + (editRoot.source === "plex" ? "category" : "genre")
                               + " — every horror movie, say — rather than named titles."
         case "collections": return "Draw on a collection. Smart collections work too — everything in it becomes eligible."
@@ -233,6 +241,16 @@ FocusScope {
                                                         : virtualChannelsBackend.media_root()
                 }, { currentIndex: editRoot.current, pickedFolder: true })
             }
+            return
+        }
+        if (row === "films" && source === "local") {
+            navigateTo("modules/virtual_channels/views/SourceBrowser.qml", {
+                moduleId:      editRoot.moduleId,
+                channelNumber: editRoot.channelNumber,
+                kind:          "movies",
+                bookingIndex:  editRoot.bookingIndex,
+                title:         editRoot.bookingName
+            }, { currentIndex: editRoot.current })
             return
         }
         if (row === "films" || row === "genres" || row === "collections" || row === "playlists") {

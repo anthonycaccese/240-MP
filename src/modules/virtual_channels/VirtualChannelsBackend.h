@@ -279,7 +279,8 @@ private:
                        vchan::ChannelDef &def,
                        QVector<PoolJob> &plexJobs,
                        QVector<PoolJob> &serverJobs,
-                       QVector<QPair<int, QStringList>> *folderPools);
+                       QVector<QPair<int, QStringList>> *folderPools,
+                       QVector<QPair<int, QStringList>> *localTitles = nullptr);
 
     QJsonArray bookingsOf(int channelNumber);
     bool       editBooking(int channelNumber, int index,
