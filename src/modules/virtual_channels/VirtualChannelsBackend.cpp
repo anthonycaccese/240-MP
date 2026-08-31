@@ -3575,6 +3575,7 @@ void VirtualChannelsBackend::browse_local(const QString &kind, const QString &pa
         for (const vchan::LocalSeason &season : show.seasons) {
             QVariantMap m;
             m["id"]    = vchan::LocalLibrary::seasonKey(show.folder, season.number);
+            m["count"] = season.episodes.size();
             m["label"] = season.episodes.size() == 1
                              ? QStringLiteral("%1 (1 episode)").arg(season.label)
                              : QStringLiteral("%1 (%2 episodes)")
@@ -3878,6 +3879,16 @@ QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
     const QJsonObject excl = plex.value(QLatin1String("exclude")).toObject();
     out["excludedSeasons"]  = listOf(excl, "seasons");
     out["excludedEpisodes"] = excludedEpisodesIn(excl);
+
+    QVariantMap bySeason;
+    const QJsonObject epsBySeason = excl.value(QLatin1String("episodes")).toObject();
+    for (auto it = epsBySeason.constBegin(); it != epsBySeason.constEnd(); ++it) {
+        QStringList refs;
+        for (const QJsonValue &v : it.value().toArray())
+            if (v.isString()) refs << v.toString();
+        if (!refs.isEmpty()) bySeason.insert(it.key(), refs);
+    }
+    out["excludedBySeason"] = bySeason;
     return out;
 }
 

@@ -76,8 +76,11 @@ FocusScope {
             if (c.sources === 0) return "NONE"
             return c.clips + (c.clips === 1 ? " CLIP" : " CLIPS")
         }
-        var own = ownFolders(showAt(i))
-        return own.length === 0 ? "USES DEFAULT" : "OWN"
+        var e = showAt(i)
+        if (ownFolders(e).length === 0) return "USES DEFAULT"
+        var n = e[levelsRoot.kind + "_count"]
+        if (n === undefined || n === null || n < 0) return "OWN"
+        return n + (n === 1 ? " CLIP" : " CLIPS")
     }
 
     function helpFor(i) {
@@ -125,10 +128,7 @@ FocusScope {
             pool:          "programmes",
             entryIndex:    idx,
             entryName:     String(e.name),
-            // Opened from the intro list, this edits intros; from the outro
-            // list, outros. Showing both would put the same setting on two
-            // screens again.
-            only:          levelsRoot.kind
+            kind:          levelsRoot.kind
         }, { currentIndex: levelsRoot.current })
     }
 

@@ -41,7 +41,7 @@ FocusScope {
 
     function applyVolume() {
         if (previewLoader.item) previewLoader.item.volume = masterVolume
-        if (typeof weatherBackend !== "undefined")
+        if (weatherBackend)
             weatherBackend.set_music_volume(masterVolume)
     }
 
@@ -161,7 +161,9 @@ FocusScope {
         dwellChannel = -1
         previewSlot = -1
         previewStarted = false
-        virtualChannelsBackend.cancel_preview_stream()
+        // Also runs from Component.onDestruction, by which point the context
+        // property is gone.
+        if (virtualChannelsBackend) virtualChannelsBackend.cancel_preview_stream()
         previewImage = ""
         if (previewLoader.item) previewLoader.item.clear()
     }
@@ -266,7 +268,7 @@ FocusScope {
 
         if (idleTracker) idleTracker.mpvActive = true
 
-        if (toggleOn("guide.music", false) && typeof weatherBackend !== "undefined") {
+        if (toggleOn("guide.music", false) && weatherBackend) {
             var wasPlaying = weatherBackend.musicPlaying
             weatherBackend.startMusic()
             musicStartedHere = !wasPlaying && weatherBackend.musicPlaying
@@ -277,12 +279,12 @@ FocusScope {
 
     Component.onDestruction: {
         stopPreview()
-        if (typeof weatherBackend !== "undefined") weatherBackend.duck_music(false, 250)
+        if (weatherBackend) weatherBackend.duck_music(false, 250)
         if (idleTracker) {
             idleTracker.mpvActive = false
             idleTracker.resetActivity()
         }
-        if (musicStartedHere && typeof weatherBackend !== "undefined")
+        if (musicStartedHere && weatherBackend)
             weatherBackend.stopMusic()
     }
 
