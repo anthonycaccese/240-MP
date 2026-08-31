@@ -41,7 +41,12 @@ FocusScope {
         // row already labelled INTROS, and buried the number that matters.
         if (uncounted === 0)
             return counted + (counted === 1 ? " CLIP" : " CLIPS")
-        return list.length + (list.length === 1 ? " SOURCE" : " SOURCES")
+        var sources = uncounted + (uncounted === 1 ? " SOURCE" : " SOURCES")
+        // A server's clips cannot be counted without asking it, but the ones on
+        // disk can, and saying only "3 SOURCES" hid seven hundred of them and
+        // read as a different unit from every other row on the screen.
+        if (counted === 0) return sources
+        return counted + " CLIPS + " + sources
     }
 
     function labelFor(i) {

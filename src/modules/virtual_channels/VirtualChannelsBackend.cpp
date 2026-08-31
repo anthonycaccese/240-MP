@@ -3867,6 +3867,12 @@ void VirtualChannelsBackend::browse_plex_episodes(const QString &seasonRatingKey
 // Reading and editing a channel's Plex sources
 // ---------------------------------------------------------------------------
 
+bool VirtualChannelsBackend::source_supports_playlists(const QString &source) const {
+    // Only Plex serves playlists today; browse_from refuses them for the others.
+    // Stated once, so a screen cannot offer a row that can only fail.
+    return slotSourceFromString(source) == SlotSource::Plex;
+}
+
 QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
     QVariantMap out;
     const QJsonObject o = QJsonObject::fromVariantMap(channelObject(channelNumber));
@@ -3887,7 +3893,7 @@ QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
     const QString here = slotSourceToString(src);
     if (!choices.contains(here)) choices << here;
     out["available"]   = choices;
-    out["supportsPlaylists"] = (src == SlotSource::Plex);
+    out["supportsPlaylists"] = source_supports_playlists(slotSourceToString(src));
     out["usesEntryPools"] = usesEntryPools(o);
     const QStringList programmes = listOf(o, "programmes");
     out["folder"] = programmes.isEmpty() ? QString() : programmes.first();
