@@ -151,7 +151,11 @@ FocusScope {
             var n = countOf("match")
             var ex = excludedCount()
             if (n === 0) return "NONE"
-            return n + (ex > 0 ? " · " + ex + " OFF" : "")
+            // Carrying its unit, like the rows around it: a bare "3" beside
+            // "1 SLOT" and "1872 CLIPS" left the viewer to guess what was
+            // being counted, and what the second number was counting.
+            return n + (n === 1 ? " SHOW" : " SHOWS")
+                   + (ex > 0 ? " · " + ex + " OFF" : "")
         }
         case "collections": return countOf("collections") === 0 ? "NONE" : String(countOf("collections"))
         case "playlists":   return countOf("playlists")   === 0 ? "NONE" : String(countOf("playlists"))
@@ -188,9 +192,13 @@ FocusScope {
                    ? "Only local files are set up. Sign in to Plex, Jellyfin or Emby to add more."
                    // "Server" is wrong for local files, which are the one source
                    // that is not one.
+                   // Not "clears its picks": what was picked from the old
+                   // library is kept and comes back if you change back.
+                   // It simply stops counting, because a show picked on
+                   // one library is not a show on another.
                    : (cfg.source === "local"
-                      ? "Left and right to choose where this channel's shows come from. Changing it clears its picks."
-                      : "Left and right to change server. Changing it clears this channel's picks.")
+                      ? "Left and right to choose where this channel's shows come from. Its picks are kept, and come back if you change back."
+                      : "Left and right to change server. Its picks are kept, and come back if you change back.")
         // These three overlap, and which to use is not obvious, so each says what
         // it is FOR rather than only what it is. The distinction that matters:
         // series are picked show by show and can be narrowed; a collection or
@@ -208,7 +216,7 @@ FocusScope {
                                    ? "Free run: each program starts when the last one ended."
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
         case "ads":         return "How many things play between programs. Free run only — on a clock the gap decides."
-        case "breaks":      return "What plays between programs: station IDs, bumps, commercials and outros."
+        case "breaks":      return "What plays between programs: intros, bumps, commercials and outros."
         case "rebuild":     return "Rebuild the schedule so source changes actually air."
         case "rename":      return "Change what this channel is called."
         case "delete":      return sourcesRoot.armedToDelete

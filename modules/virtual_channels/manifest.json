@@ -23,7 +23,7 @@
       "label": "Media Folder",
       "type": "directory_browser",
       "default": "",
-      "description": "Where local video lives. Folder channels only use files inside it."
+      "description": "Where local video lives. Its series and movies folders are the local library; breaks can come from any folder inside it."
     },
     {
       "key": "channels.weather",

@@ -18,6 +18,7 @@ FocusScope {
     // Empty means both. Set to "intros" or "outros" when reached from the list
     // for that one, so a setting does not appear on two screens at once.
     property string only:          navParams.only          || ""
+    readonly property string onlyWord: only === "outros" ? "outro" : "intro"
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -25,8 +26,13 @@ FocusScope {
     property var entry: ({})
     property string status: ""
 
-    readonly property bool hasOwnIdents: foldersOf("intros").length > 0
-                                   || foldersOf("outros").length > 0
+    // What clearing would actually forget. Scoped to one kind, that is only
+    // that kind: offering to clear from the Intros screen a show whose only
+    // override is an outro would take away something this screen never showed.
+    readonly property bool hasOwnIdents: only !== ""
+                                   ? foldersOf(only).length > 0
+                                   : (foldersOf("intros").length > 0
+                                      || foldersOf("outros").length > 0)
     readonly property var rows: only !== ""
                                 ? (hasOwnIdents ? [only, "clear"] : [only])
                                 : hasOwnIdents ? ["intros", "outros", "clear"]
@@ -80,9 +86,14 @@ FocusScope {
                               + ", instead of the channel's."
         case "outros": return "A folder of idents to close " + shortName()
                               + ", instead of the channel's."
-        case "clear":  return armedToClear
-                              ? "Press again to forget both, or move away to keep them."
-                              : "Forget both and let the channel's own idents announce it again."
+        case "clear":  return identRoot.only !== ""
+                              ? (armedToClear
+                                 ? "Press again to forget it, or move away to keep it."
+                                 : "Forget it and let the channel's " + identRoot.onlyWord
+                                   + " announce " + identRoot.shortName() + " again.")
+                              : (armedToClear
+                                 ? "Press again to forget both, or move away to keep them."
+                                 : "Forget both and let the channel's own idents announce it again.")
         }
         return ""
     }
@@ -121,10 +132,16 @@ FocusScope {
         if (row === "clear") {
             if (!armedToClear) { armedToClear = true; return }
             armedToClear = false
+            // Only what this screen showed. Reached from the Intros list it
+            // used to drop the show's outro as well -- a setting made on a
+            // different screen, gone with no mention of it anywhere here.
+            var drop = identRoot.only !== ""
+                       ? [identRoot.only, identRoot.only + "_count"]
+                       : ["intros", "outros", "intros_count", "outros_count"]
             var next = {}
             for (var k in entry)
-                if (k !== "intros" && k !== "outros"
-                    && k !== "intros_count" && k !== "outros_count") next[k] = entry[k]
+                if (drop.indexOf(k) < 0 && k !== "intros_count" && k !== "outros_count")
+                    next[k] = entry[k]
             save(next)
             return
         }
@@ -171,7 +188,12 @@ FocusScope {
         anchors.fill: parent
         focus: true
         iconSource: identRoot.moduleIcon
-        title: "Idents — " + identRoot.shortName()
+        // Named for what it edits. Reached from the Intros list it shows
+        // only the intro, and calling that screen "Idents" made the same
+        // job go by two names depending on how it was opened.
+        title: (identRoot.only === "" ? "Idents"
+                : identRoot.only === "outros" ? "Outro" : "Intro")
+               + " — " + identRoot.shortName()
         rows: identRoot.rows
         current: identRoot.current
         onCurrentChanged: { identRoot.current = current; identRoot.armedToClear = false }

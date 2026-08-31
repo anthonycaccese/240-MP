@@ -120,7 +120,14 @@ FocusScope {
         if (row.indexOf("add:") === 0)
             return row.substring(4) === "local"
                    ? "Choose a folder of clips under the media directory."
-                   : "Choose a collection, playlist or series from " + sourceLabel(row.substring(4)) + "."
+                   // Named to match what the picker will actually offer:
+                   // only Plex serves playlists, and promising one to
+                   // Jellyfin or Emby describes a row that is not there.
+                   : "Choose a " + (virtualChannelsBackend
+                                    && virtualChannelsBackend.source_supports_playlists(row.substring(4))
+                                    ? "collection, playlist or series"
+                                    : "collection or series")
+                     + " from " + sourceLabel(row.substring(4)) + "."
 
         var e = entryAt(i)
         if (!e) return ""
