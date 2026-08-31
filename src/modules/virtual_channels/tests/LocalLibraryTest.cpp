@@ -336,7 +336,31 @@ void testExtrasAreNotFilms() {
     check(gotFeature, "the feature was taken even though the trailer was bigger");
 }
 
+void testEpisodeAddedInsideAShow() {
+    section("LocalLibrary: an episode added inside a show");
+
+    QTemporaryDir dir;
+    const QString season = dir.path()
+        + QStringLiteral("/series/Batman Beyond (1999)/Season 1");
+    touch(season + QStringLiteral("/Batman Beyond S01E01 - Rebirth.mkv"));
+
+    LocalLibrary lib(dir.path());
+    checkEq(lib.shows().size(), 1, "the show is found");
+    checkEq(lib.shows().at(0).episodeCount, 1, "with its one episode");
+
+    // The cheap stamp lists series/ and movies/, so a file appearing deeper
+    // than that cannot change it. This is the case a rebuild exists to catch.
+    touch(season + QStringLiteral("/Batman Beyond S01E02 - Black Out.mkv"));
+    checkEq(lib.shows().at(0).episodeCount, 1,
+            "the cheap check does not see inside a show it already knows");
+
+    lib.refresh();
+    checkEq(lib.shows().at(0).episodeCount, 2,
+            "a refresh sees it, which is what a rebuild asks for");
+}
+
 int runLocalLibraryTests() {
+    testEpisodeAddedInsideAShow();
     testExtrasAreNotFilms();
     testYearStripping();
     testSeasonFolders();
