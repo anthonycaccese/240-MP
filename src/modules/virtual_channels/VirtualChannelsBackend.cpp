@@ -3560,11 +3560,16 @@ QVariantList VirtualChannelsBackend::channel_pool(int channelNumber, const QStri
             const QJsonObject j = v.toObject();
             const SlotSource src = slotSourceFromString(j.value(QLatin1String("src")).toString());
             e["src"] = slotSourceToString(src);
-            if (src == SlotSource::Local) {
-                const QString folder = j.value(QLatin1String("folder")).toString();
+            // A local entry is a folder of clips OR a show from the library.
+            // Reading every local entry as a folder -- which is what this did --
+            // leaves a series entry with no name to show and a count taken from
+            // the whole media root, because the folder key it looked for is not
+            // there.
+            const QString localFolder = j.value(QLatin1String("folder")).toString();
+            if (src == SlotSource::Local && !localFolder.isEmpty()) {
                 e["kind"]  = QStringLiteral("folder");
-                e["name"]  = folder;
-                e["count"] = mediaFilesUnder(folder).size();
+                e["name"]  = localFolder;
+                e["count"] = mediaFilesUnder(localFolder).size();
             } else {
                 e["kind"] = j.value(QLatin1String("kind")).toString();
                 e["name"] = j.value(QLatin1String("name")).toString();
