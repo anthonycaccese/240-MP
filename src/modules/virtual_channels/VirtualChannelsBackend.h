@@ -337,6 +337,8 @@ private:
     QString channelsFilePath() const;
     QString scheduleFilePath(int channelNumber) const;
     QString resolveMediaRoot() const;
+    // Creates series/ and movies/ inside an existing media root.
+    void ensureLibraryFolders() const;
 
     const vchan::ChannelSchedule &scheduleFor(int channelNumber);
     void invalidateCache(int channelNumber) { m_cache.remove(channelNumber); }

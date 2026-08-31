@@ -96,6 +96,7 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
     if (!configured.isEmpty())
         m_mediaRoot = configured;
     m_localLibrary.setMediaRoot(m_mediaRoot);
+    ensureLibraryFolders();
 
     if (m_plex) {
         const int sig = m_plex->metaObject()->indexOfSignal("streamUrlReady(QString,QString)");
@@ -162,6 +163,27 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
            m_emby     ? "available" : "unavailable");
 }
 
+// The two folders the local library reads, made so a fresh install has
+// somewhere obvious to put things. Every other module that owns a directory
+// does this on construction; this one did it for channels/ and logos/ but not
+// for the media it tells people to use.
+//
+// Only ever inside a media root that already exists. Creating the root itself
+// would be worse than useless when it is a drive that has not mounted yet: the
+// empty directories would sit on top of the mount point and hide the media the
+// moment it appeared.
+void VirtualChannelsBackend::ensureLibraryFolders() const {
+    const QString absRoot = QFileInfo(m_mediaRoot).canonicalFilePath();
+    if (absRoot.isEmpty() || !QFileInfo(absRoot).isDir())
+        return;
+    for (const QString &name : vchan::LocalLibrary::seriesDirNames()
+                                   + vchan::LocalLibrary::moviesDirNames()) {
+        const QString path = absRoot + QLatin1Char('/') + name;
+        if (!QFileInfo::exists(path) && !QDir().mkpath(path))
+            qWarning("[VirtualChannels] could not create %s", qPrintable(path));
+    }
+}
+
 QString VirtualChannelsBackend::resolveMediaRoot() const {
     QFile f(m_dataRoot + "/config.json");
     if (!f.open(QIODevice::ReadOnly))
@@ -196,6 +218,7 @@ void VirtualChannelsBackend::onSettingChanged(const QString &moduleId,
         const QString resolved = resolveMediaRoot();
         m_mediaRoot = resolved.trimmed().isEmpty() ? m_dataRoot + "/media" : resolved;
         m_localLibrary.setMediaRoot(m_mediaRoot);
+        ensureLibraryFolders();
         qInfo("[VirtualChannels] mediaRoot = %s", qPrintable(m_mediaRoot));
     }
 }
@@ -3432,6 +3455,9 @@ void VirtualChannelsBackend::browse_local(const QString &kind, const QString &pa
     m_localLibrary.setMediaRoot(m_mediaRoot);
 
     if (!m_localLibrary.hasLibraryFolders()) {
+        // Normally impossible -- the folders are made at startup -- but a media
+        // root on a drive that has not mounted lands here, and saying which
+        // folder is missing beats an empty list.
         emit sourceBrowseFailed(kind,
             QStringLiteral("No series or movies folder in %1").arg(m_mediaRoot));
         return;
@@ -3491,6 +3517,18 @@ void VirtualChannelsBackend::browse_local(const QString &kind, const QString &pa
     } else {
         // collections and playlists have no local equivalent.
         emit sourceBrowseFailed(kind, QStringLiteral("Not available for local files"));
+        return;
+    }
+
+    if (rows.isEmpty()) {
+        // The folder exists and is empty, which is what a fresh install looks
+        // like. Name the layout rather than leaving someone to guess it.
+        emit sourceBrowseFailed(kind,
+            kind.startsWith(QLatin1String("movie"))
+                ? QStringLiteral("Nothing in %1/movies yet — add films as "
+                                 "movies/Film Name (Year).mp4").arg(m_mediaRoot)
+                : QStringLiteral("Nothing in %1/series yet — add shows as "
+                                 "series/Show Name/Season 1/Show S01E01.mp4").arg(m_mediaRoot));
         return;
     }
 
