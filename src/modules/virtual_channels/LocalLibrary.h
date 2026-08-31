@@ -99,6 +99,14 @@ public:
                                    QString *title);
     static bool    isMediaFile(const QString &fileName);
 
+    // True for the files a media server files under a film rather than as one:
+    // trailers, samples, featurettes, deleted scenes and the like, named by the
+    // conventions Jellyfin documents -- a "-trailer" suffix, or a subfolder
+    // called Trailers, Extras, Featurettes and so on. A movie slot pointed at a
+    // folder used to treat every file in it as a film, so a trailer sitting
+    // beside the feature had an even chance of being what aired at eight.
+    static bool    isExtraPath(const QString &relPath);
+
     // True when `wanted` names this item in any form the interface might have
     // stored: the bare name, "Name (Year)", the folder, or the folder's leaf.
     static bool    matchesName(const QString &name, int year, const QString &folder,

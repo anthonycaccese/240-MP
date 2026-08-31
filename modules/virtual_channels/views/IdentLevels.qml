@@ -109,6 +109,21 @@ FocusScope {
         var idx = parseInt(rows[i].substring(5))
         var e = shows[idx]
         if (!e) return
+        // A show with nothing of its own has only one thing to say here --
+        // which folder -- so it is asked directly. Stopping at a screen whose
+        // single row repeats the row just chosen tells the viewer nothing.
+        if (ownFolders(e).length === 0) {
+            appCore.save_setting(levelsRoot.moduleId, "pool_buffer", "")
+            navigateTo("modules/virtual_channels/views/SourcePick.qml", {
+                moduleId:   levelsRoot.moduleId,
+                source:     "local",
+                settingKey: "pool_buffer",
+                purpose:    "folders",
+                title:      (levelsRoot.kind === "outros" ? "Outro" : "Intro")
+                            + " — " + String(e.name)
+            }, { currentIndex: levelsRoot.current, pickFor: idx })
+            return
+        }
         navigateTo("modules/virtual_channels/views/SourceIdents.qml", {
             moduleId:      levelsRoot.moduleId,
             channelNumber: levelsRoot.channelNumber,
@@ -123,9 +138,47 @@ FocusScope {
         }, { currentIndex: levelsRoot.current })
     }
 
+    // The folder chosen by the picker above, written onto the show it was
+    // chosen for. Once it has one, the fuller screen has something to show and
+    // is used instead.
+    function applyPending() {
+        var which = navListState.pickFor
+        if (which === undefined) return
+        var picked = appCore.get_setting(moduleId, "pool_buffer")
+        var raw = (picked === undefined || picked === null) ? "" : String(picked)
+        appCore.save_setting(moduleId, "pool_buffer", "")
+        navListState = {}
+        if (raw === "") return
+
+        var at = raw.indexOf("|")
+        if (at <= 0) return
+        var folder = raw.substring(at + 1)
+        if (folder === "") return
+
+        var list = virtualChannelsBackend.channel_pool(channelNumber, "programmes")
+        if (which < 0 || which >= list.length) {
+            status = "That show is no longer there"
+            return
+        }
+        var next = {}
+        for (var k in list[which])
+            if (k !== "intros_count" && k !== "outros_count") next[k] = list[which][k]
+        next[levelsRoot.kind] = [folder]
+        list[which] = next
+        if (!virtualChannelsBackend.set_channel_pool(channelNumber, "programmes", list)) {
+            status = "Could not save that change"
+            return
+        }
+        status = "Saved — rebuild to air the change"
+    }
+
     Component.onCompleted: {
+        // Read before applyPending, which clears the state it came in on.
+        var restore = navListState.currentIndex
         reload()
-        if (navListState.currentIndex !== undefined) current = navListState.currentIndex
+        applyPending()
+        reload()
+        if (restore !== undefined) current = Math.min(restore, rows.length - 1)
     }
 
     onVisibleChanged: if (visible) reload()

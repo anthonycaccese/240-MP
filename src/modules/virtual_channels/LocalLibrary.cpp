@@ -343,12 +343,37 @@ void LocalLibrary::scanShowsUnder(const QString &absDir, const QString &relDir) 
     }
 }
 
+bool LocalLibrary::isExtraPath(const QString &relPath) {
+    // Directories a server treats as holding extras rather than films.
+    static const QRegularExpression kDir(
+        QStringLiteral("^(trailers?|extras?|specials?|shorts?|scenes?|samples?|featurettes?"
+                       "|behind[ ._-]?the[ ._-]?scenes|deleted[ ._-]?scenes?|interviews?"
+                       "|other|bonus)$"),
+        QRegularExpression::CaseInsensitiveOption);
+    // The suffix form: "The Film (1999)-trailer.mkv".
+    static const QRegularExpression kSuffix(
+        QStringLiteral("[ ._-](trailer|sample|scene|clip|interview|featurette|short"
+                       "|behind[ ._-]?the[ ._-]?scenes|deleted|other)[0-9]*$"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    const QStringList parts = relPath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    for (int i = 0; i < parts.size() - 1; ++i)
+        if (kDir.match(parts[i]).hasMatch()) return true;
+
+    if (parts.isEmpty()) return false;
+    const QString stem = QFileInfo(parts.last()).completeBaseName();
+    // A file that is nothing but the word is the other way it is written.
+    if (kDir.match(stem).hasMatch()) return true;
+    return kSuffix.match(stem).hasMatch();
+}
+
 void LocalLibrary::scanMoviesUnder(const QString &absDir, const QString &relDir) const {
     QDir dir(absDir);
 
     for (const QFileInfo &fi : dir.entryInfoList(QDir::Files, QDir::Name)) {
         if (m_movies.size() >= kMaxMovies) return;
         if (!isMediaFile(fi.fileName())) continue;
+        if (isExtraPath(fi.fileName())) continue;
         LocalMovie mv;
         mv.ref  = relDir.isEmpty() ? fi.fileName()
                                    : relDir + QLatin1Char('/') + fi.fileName();
@@ -365,6 +390,7 @@ void LocalLibrary::scanMoviesUnder(const QString &absDir, const QString &relDir)
         QFileInfo biggest;
         for (const QFileInfo &fi : sd.entryInfoList(QDir::Files, QDir::Name)) {
             if (!isMediaFile(fi.fileName())) continue;
+            if (isExtraPath(fi.fileName())) continue;
             if (!biggest.exists() || fi.size() > biggest.size()) biggest = fi;
         }
         if (!biggest.exists()) continue;

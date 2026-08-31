@@ -214,7 +214,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         return d(rng);
     };
 
-    struct Anchor { qint64 start; MediaItem item; };
+    struct Anchor { qint64 start; MediaItem item; QString name; };
     QVector<Anchor> anchors;
 
     for (const Appointment &appt : def.appointments) {
@@ -229,7 +229,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             const QDateTime when(day, QTime(appt.minuteOfDay / 60, appt.minuteOfDay % 60));
             const qint64 at = when.toMSecsSinceEpoch();
             if (at < startMs || at >= horizonEnd) continue;
-            anchors.push_back({ at, pool[pick(pool.size())] });
+            anchors.push_back({ at, pool[pick(pool.size())], appt.name });
         }
     }
 
@@ -240,7 +240,18 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         QVector<Anchor> kept;
         qint64 freeFrom = startMs;
         for (const Anchor &a : anchors) {
-            if (a.start < freeFrom) continue;
+            if (a.start < freeFrom) {
+                // Two slots wanting the same part of the day is a thing the
+                // viewer set up and can fix, so it is said plainly. Dropping
+                // the later one without a word left a slot that simply never
+                // aired and nothing anywhere to explain why.
+                qWarning("[VirtualChannels] slot \"%s\" at %s is dropped: the one before it "
+                         "is still running then",
+                         qPrintable(a.name),
+                         qPrintable(QDateTime::fromMSecsSinceEpoch(a.start)
+                                        .toString(QStringLiteral("ddd HH:mm"))));
+                continue;
+            }
             kept.push_back(a);
             freeFrom = a.start + a.item.durMs;
         }

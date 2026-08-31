@@ -100,6 +100,17 @@ FocusScope {
         return total
     }
 
+    // Clips on disk can be counted; a server's cannot until it is asked, so
+    // those are reported as the sources they are rather than counted as none.
+    function interstitialSources() {
+        var total = 0
+        for (var i = 0; i < interstitials.length; i++) {
+            var n = interstitials[i].sources
+            total += (n === undefined ? 0 : n)
+        }
+        return total
+    }
+
     function excludedCount() {
         return (cfg.excludedSeasons || []).length + (cfg.excludedEpisodes || []).length
     }
@@ -153,7 +164,10 @@ FocusScope {
                  : sourcesRoot.channelLogo.replace(/\.[^.]+$/, "").toUpperCase()
         case "breaks": {
             var n = sourcesRoot.interstitialCount()
-            return n === 0 ? "NONE" : n + " CLIPS"
+            if (n > 0) return n + " CLIPS"
+            var src = sourcesRoot.interstitialSources()
+            return src === 0 ? "NONE"
+                             : src + (src === 1 ? " SOURCE" : " SOURCES")
         }
         case "order":
             return sourcesRoot.order === "shuffle" ? "SHUFFLE" : "IN ORDER"
