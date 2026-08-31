@@ -21,14 +21,28 @@ FocusScope {
     signal navigateTo(string path, var params, var listState)
     signal goBack()
 
-    readonly property var serverKinds: [
-        { kind: "collection", browse: "collections", label: "Collections" },
-        { kind: "playlist",   browse: "playlists",   label: "Playlists" },
-        { kind: "series",     browse: "shows",       label: "Series" }
-    ]
+    // Playlists only where the source actually serves them. Offering the row
+    // to every server meant Jellyfin and Emby showed a Playlists row that could
+    // do nothing but report that playlists were not available -- while the
+    // channel screen, which asks the same question of the backend, correctly
+    // did not show it at all.
+    readonly property var serverKinds: {
+        var k = [{ kind: "collection", browse: "collections", label: "Collections" }]
+        // Guarded: this is a binding, and a context property is gone by the
+        // time the view's Loader tears down, which is where an unguarded one
+        // throws and takes the rest of the binding with it.
+        if (virtualChannelsBackend
+            && virtualChannelsBackend.source_supports_playlists(pickRoot.source))
+            k.push({ kind: "playlist", browse: "playlists", label: "Playlists" })
+        k.push({ kind: "series", browse: "shows", label: "Series" })
+        return k
+    }
 
     // Local files have no collections or playlists, so they offer the two things
-    // a directory can actually hold.
+    // a directory can actually hold. Every route into this screen sends local
+    // files to the folder browser below, so this is a fallback rather than
+    // something reached today -- but it must stay right, because what it would
+    // offer instead is a server's collections for a channel that has none.
     readonly property var localKinds: [
         { kind: "series", browse: "shows",  label: "Series" },
         { kind: "movie",  browse: "movies", label: "Movies" }

@@ -107,6 +107,9 @@ public:
     Q_INVOKABLE bool set_booking_folder(int channelNumber, int index, const QString &folder);
 
     Q_INVOKABLE QStringList available_sources() const { return availableSources(); }
+    // Asked per source rather than per channel: a break pool can draw on any
+    // server that is connected, not only the one the channel is sourced from.
+    Q_INVOKABLE bool source_supports_playlists(const QString &source) const;
 
     Q_INVOKABLE void browse_source(int channelNumber, const QString &kind,
                                    const QString &parentKey = QString());
