@@ -102,8 +102,7 @@ FocusScope {
         if (!e) return ""
         if (parseInt(row.substring(6)) === armedToRemove) return "REMOVE?"
         // On the idents screen the column answers the question the screen is
-        // asking. Repeating "PLEX · SERIES" on every row, as it used to, told
-        // the viewer nothing they could not already see in the title.
+        // asking, rather than repeating what the title already says.
         if (identsOnly) {
             var has = identsOf(e)
             return has === "" ? "NONE" : has
@@ -120,9 +119,8 @@ FocusScope {
         if (row.indexOf("add:") === 0)
             return row.substring(4) === "local"
                    ? "Choose a folder of clips under the media directory."
-                   // Named to match what the picker will actually offer:
-                   // only Plex serves playlists, and promising one to
-                   // Jellyfin or Emby describes a row that is not there.
+                   // Named to match what the picker will offer: playlists are
+                   // Plex only.
                    : "Choose a " + (virtualChannelsBackend
                                     && virtualChannelsBackend.source_supports_playlists(row.substring(4))
                                     ? "collection, playlist or series"

@@ -29,8 +29,7 @@ FocusScope {
 
     function poolSummary(kind) {
         var _ = poolsRevision
-        // Same reason as IdentLevels: a value binding outlives the backend by a
-        // moment when the view is torn down.
+        // A value binding outlives the context property on teardown.
         if (!virtualChannelsBackend) return ""
         var list = virtualChannelsBackend.channel_pool(channelNumber, kind)
         if (list.length === 0) return "NONE"
@@ -45,9 +44,8 @@ FocusScope {
         if (uncounted === 0)
             return counted + (counted === 1 ? " CLIP" : " CLIPS")
         var sources = uncounted + (uncounted === 1 ? " SOURCE" : " SOURCES")
-        // A server's clips cannot be counted without asking it, but the ones on
-        // disk can, and saying only "3 SOURCES" hid seven hundred of them and
-        // read as a different unit from every other row on the screen.
+        // A server's clips cannot be counted without asking it; those on disk
+        // can, so both are said.
         if (counted === 0) return sources
         return counted + " CLIPS + " + sources
     }

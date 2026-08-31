@@ -10,22 +10,6 @@
 #include <QVariantList>
 #include <QVariantMap>
 
-// The write paths, exercised as the interface drives them.
-//
-// Every other test here reads: it builds a channel and asks what would air.
-// That is how a whole class of fault reached a running box unnoticed -- a pool
-// that generated a correct schedule but could not be edited, because the code
-// that saves a list is not the code that reads one. These tests change things:
-// they add, they remove, and they read the file back to see what was actually
-// written. Several of them are here because the corresponding bug shipped.
-//
-// The other half of the class is all-or-nothing validation. A channel file on a
-// real box accumulates rows that no longer resolve -- a folder that was
-// deleted, an entry written by an older version -- and a save that refuses the
-// whole list because of one of them locks the viewer out of the screen with no
-// way to find or remove the offending row. So each pool test deliberately
-// includes a row that cannot be resolved and asserts the save still lands.
-
 using vtest::check;
 using vtest::checkEq;
 using vtest::checkStr;
@@ -41,8 +25,6 @@ bool touch(const QString &path) {
     return true;
 }
 
-// A data root shaped the way the app's is: a media library using the series/
-// and movies/ layout, some break folders, and a channels.json.
 class Fixture {
 public:
     Fixture() {
@@ -84,8 +66,6 @@ private:
     QTemporaryDir m_dir;
 };
 
-// A channel with no server block is a local one: the source is inferred, not
-// stored, so this is all it takes.
 QJsonObject localChannel(int number) {
     QJsonObject o;
     o["number"] = number;
@@ -121,8 +101,6 @@ QStringList kindsIn(const QJsonObject &channel, const char *pool) {
     return out;
 }
 
-// ---------------------------------------------------------------------------
-
 void testLocalFilmInProgrammePool() {
     section("Backend: a local film is a programme like any other");
 
@@ -130,9 +108,6 @@ void testLocalFilmInProgrammePool() {
     fx.write(localChannel(3));
     VirtualChannelsBackend b(fx.data(), fx.data());
 
-    // The picker offers Movies for a local channel and the generator plays what
-    // it returns, but the save refused the kind outright, so choosing a film
-    // reported "could not save that change" and nothing was written.
     QVariantList entries;
     entries.append(entry(QStringLiteral("series"), QStringLiteral("Batman Beyond")));
     entries.append(entry(QStringLiteral("movie"),  QStringLiteral("Mask of the Phantasm")));
@@ -144,8 +119,6 @@ void testLocalFilmInProgrammePool() {
     check(kinds.contains(QStringLiteral("movie")), "the film kept its kind");
     check(kinds.contains(QStringLiteral("series")), "the series is still there");
 
-    // And the pool stays editable afterwards: re-saving a pool that holds a
-    // film must not fail, or the film poisons every later edit of that screen.
     check(b.set_channel_pool(3, QStringLiteral("programmes"), entries),
           "a pool holding a film can be saved again");
 }
@@ -157,8 +130,6 @@ void testOneBadRowDoesNotBlockThePool() {
     fx.write(localChannel(3));
     VirtualChannelsBackend b(fx.data(), fx.data());
 
-    // A folder that was deleted, and an entry of a kind this version does not
-    // know. Neither is a reason to refuse the viewer's actual edit.
     QVariantList entries;
     entries.append(folderEntry(QStringLiteral("breaks/bumps")));
     entries.append(folderEntry(QStringLiteral("breaks/gone")));
@@ -169,8 +140,6 @@ void testOneBadRowDoesNotBlockThePool() {
     const QStringList kinds = kindsIn(fx.read(3), "bumps");
     checkEq(kinds.size(), 3, "nothing was silently dropped");
 
-    // Removing a row is the operation a viewer reaches for when a pool has gone
-    // wrong, so it has to work while the pool is still wrong.
     QVariantList fewer;
     fewer.append(folderEntry(QStringLiteral("breaks/bumps")));
     check(b.set_channel_pool(3, QStringLiteral("bumps"), fewer),
@@ -193,8 +162,6 @@ void testPoolReadBack() {
     const QVariantList back = b.channel_pool(3, QStringLiteral("programmes"));
     checkEq(back.size(), 2, "both rows read back");
 
-    // A series entry read as a folder has no name to show, which is what left
-    // the per-show rows blank on screen.
     const QVariantMap series = back.at(0).toMap();
     checkStr(series.value(QStringLiteral("name")).toString(),
              QStringLiteral("Batman Beyond"), "a series row keeps its name");
@@ -231,9 +198,6 @@ void testIdentsSurviveASeriesRewrite() {
     programmes.append(foreign);
     programmes.append(QStringLiteral("breaks/bumps"));   // an older file's bare string
     ch["programmes"] = programmes;
-    // Stated, because a channel holding entries from two sources cannot be
-    // worked out from its entries -- and which source is rewritten here turns
-    // on the answer.
     ch["source"] = QStringLiteral("local");
     fx.write(ch);
 
@@ -277,11 +241,6 @@ void testSourceSwitchSticks() {
     VirtualChannelsBackend b(fx.data(), fx.data());
     check(b.set_channel_source(3, QStringLiteral("local")), "the source can be set to local");
 
-    // Removing the server block is not enough on its own: the source is also
-    // inferred from the entries in the pool, and a channel that was on Plex
-    // still has Plex entries in it. Inference alone put the channel straight
-    // back on Plex, so the switch appeared to do nothing and the next edit was
-    // written to the server's block.
     checkStr(b.channel_source_config(3).value(QStringLiteral("source")).toString(),
              QStringLiteral("local"), "the channel is on local afterwards");
 }
@@ -297,8 +256,6 @@ void testExclusionsOnALocalChannel() {
     entries.append(entry(QStringLiteral("series"), QStringLiteral("Batman Beyond")));
     b.set_channel_pool(3, QStringLiteral("programmes"), entries);
 
-    // These refused local outright for as long as "local" meant a bare folder,
-    // so every tick on the screen reported success and saved nothing.
     const QString ep = QStringLiteral("series/Batman Beyond (1999)/Season 1/Batman Beyond S01E02 - Golem.mkv");
     check(b.set_channel_excluded(3, QStringLiteral("episodes"), ep, true,
                                  QStringLiteral("series/Batman Beyond (1999)|1")),
@@ -327,24 +284,15 @@ void testBookingWrites() {
     check(b.set_booking_time(3, idx, QStringLiteral("20:00")), "a slot can be timed");
     check(b.set_booking_days(3, idx, { QStringLiteral("sat") }), "a slot can be given days");
 
-    // A folder is stored relative to the media root, like every other folder in
-    // the file. Storing what the picker handed over meant an absolute path that
-    // only works on the box it was picked on.
     check(b.set_booking_folder(3, idx, fx.media() + QStringLiteral("/movies")),
           "a slot takes a folder");
     checkStr(fx.read(3).value(QLatin1String("appointments")).toArray().at(idx)
                  .toObject().value(QLatin1String("folder")).toString(),
              QStringLiteral("movies"), "the folder was stored relative to the media root");
 
-    // And a folder outside the library is refused at the point the viewer picks
-    // it, not silently ignored hours later when the schedule is built.
     check(!b.set_booking_folder(3, idx, QStringLiteral("/etc")),
           "a folder outside the media root is refused");
 
-    // Films picked by name, which a local slot refused outright until the
-    // library existed to pick them from. Genres and the rest stay refused:
-    // local files have none, and silently accepting them would leave a slot
-    // looking as though it had been given something to draw on.
     check(b.set_booking_list(3, idx, QStringLiteral("titles"),
                              { QStringLiteral("Mask of the Phantasm (1993)") }),
           "a local slot takes films picked by name");
@@ -388,9 +336,6 @@ void testInterstitialsAreCounted() {
         if (v.toMap().value(QStringLiteral("kind")).toString() == QLatin1String("bumps"))
             row = v.toMap();
 
-    // Reading only the string form reported a channel as having no breaks at
-    // all the moment one was added through the interface, which is what put
-    // "NONE" on the channel screen beside a breaks screen counting hundreds.
     checkEq(row.value(QStringLiteral("count")).toInt(), 3,
             "clips under both folder shapes are counted");
     checkEq(row.value(QStringLiteral("sources")).toInt(), 3,
@@ -416,9 +361,6 @@ void testSourceSwitchAndPicks() {
     checkEq(b.channel_source_config(3).value(QStringLiteral("match")).toStringList().size(), 1,
             "the channel starts with one pick");
 
-    // The screen says changing the source "clears this channel's Picks".
-    // Only local is available in a test, so this asks the narrower question
-    // the wording depends on: are the entries destroyed, or kept?
     const QJsonArray before = fx.read(3).value(QLatin1String("programmes")).toArray();
     b.set_channel_source(3, QStringLiteral("local"));
     const QJsonArray after = fx.read(3).value(QLatin1String("programmes")).toArray();

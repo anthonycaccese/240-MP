@@ -26,9 +26,7 @@ FocusScope {
     property var entry: ({})
     property string status: ""
 
-    // What clearing would actually forget. Scoped to one kind, that is only
-    // that kind: offering to clear from the Intros screen a show whose only
-    // override is an outro would take away something this screen never showed.
+    // Scoped to one kind, this screen must not offer to clear the other.
     readonly property bool hasOwnIdents: only !== ""
                                    ? foldersOf(only).length > 0
                                    : (foldersOf("intros").length > 0
@@ -132,9 +130,6 @@ FocusScope {
         if (row === "clear") {
             if (!armedToClear) { armedToClear = true; return }
             armedToClear = false
-            // Only what this screen showed. Reached from the Intros list it
-            // used to drop the show's outro as well -- a setting made on a
-            // different screen, gone with no mention of it anywhere here.
             var drop = identRoot.only !== ""
                        ? [identRoot.only, identRoot.only + "_count"]
                        : ["intros", "outros", "intros_count", "outros_count"]
@@ -188,9 +183,6 @@ FocusScope {
         anchors.fill: parent
         focus: true
         iconSource: identRoot.moduleIcon
-        // Named for what it edits. Reached from the Intros list it shows
-        // only the intro, and calling that screen "Idents" made the same
-        // job go by two names depending on how it was opened.
         title: (identRoot.only === "" ? "Idents"
                 : identRoot.only === "outros" ? "Outro" : "Intro")
                + " — " + identRoot.shortName()
