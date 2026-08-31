@@ -448,8 +448,12 @@ FocusScope {
 
             Rectangle {
                 id: box
-                width: root.sh * 0.030
-                height: width
+                // Whole, even pixels: at this size the nominal 0.030 lands on
+                // 14.4, and a box with fractional edges cannot hold a centred
+                // square -- the halves round apart and it sits a pixel high.
+                readonly property int side: 2 * Math.max(4, Math.round(root.sh * 0.015))
+                width: side
+                height: side
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: parent.left
                 anchors.leftMargin: root.sw * 0.0125
@@ -462,7 +466,7 @@ FocusScope {
                 Rectangle {
                     visible: parent.parent.partial
                     anchors.centerIn: parent
-                    width: parent.width * 0.5
+                    width: 2 * Math.round(box.side * 0.45 / 2)
                     height: width
                     color: parent.parent.selected ? root.surfaceColor : root.primaryColor
                 }
