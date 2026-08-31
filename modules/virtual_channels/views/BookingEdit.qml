@@ -176,8 +176,8 @@ FocusScope {
         case "minute": return "Left and right in five-minute steps."
         case "days":   return "Which days it airs. None chosen means every day."
         case "folder": return editRoot.films > 0
-                              ? "A folder of movies, on top of the ones picked above. Anything in it can air."
-                              : "A folder this slot draws its movies from. Leave it empty to pick by name instead."
+                              ? "A folder of movies, on top of the ones picked above. Trailers and extras in it are skipped."
+                              : "A folder this slot draws its movies from. Trailers and extras in it are skipped."
         case "anyfilm": return editRoot.anyFilm
                                ? "The whole movie library. Turn this off to pick what airs."
                                : "Off, so only what you pick below can air. Turn on for any movie."

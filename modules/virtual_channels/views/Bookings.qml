@@ -53,10 +53,14 @@ FocusScope {
         if (b.source === "local") {
             // Films and a folder can both be set, and a row that showed only
             // the folder hid half of what the slot would actually draw on.
-            var local = []
-            if (b.films > 0) local.push(b.films === 1 ? "1 MOVIE" : b.films + " MOVIES")
-            if (b.folder !== "") local.push(b.folder.split("/").pop().toUpperCase())
-            return local.length === 0 ? "NOTHING YET" : local.join(" · ")
+            // A folder named "movies" beside a count of movies read as the
+            // same word twice meaning two things, so the folder is counted
+            // rather than named here; the slot names it one screen in.
+            if (b.films > 0 && b.folder !== "")
+                return (b.films === 1 ? "1 MOVIE" : b.films + " MOVIES") + " + 1 FOLDER"
+            if (b.films > 0) return b.films === 1 ? "1 MOVIE" : b.films + " MOVIES"
+            if (b.folder !== "") return b.folder.split("/").pop().toUpperCase()
+            return "NOTHING YET"
         }
         if (b.criteria === 0) return b.anyFilm ? "ANY MOVIE" : "NOTHING YET"
 

@@ -397,6 +397,36 @@ void testInterstitialsAreCounted() {
             "a server's collection counts as a source even with nothing to count");
 }
 
+void testSourceSwitchAndPicks() {
+    section("Backend: what a source change does to the picks");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["source"] = QStringLiteral("local");
+    QJsonObject mine;
+    mine["src"]  = QStringLiteral("local");
+    mine["kind"] = QStringLiteral("series");
+    mine["name"] = QStringLiteral("Batman Beyond");
+    QJsonArray programmes;
+    programmes.append(mine);
+    ch["programmes"] = programmes;
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+    checkEq(b.channel_source_config(3).value(QStringLiteral("match")).toStringList().size(), 1,
+            "the channel starts with one pick");
+
+    // The screen says changing the source "clears this channel's Picks".
+    // Only local is available in a test, so this asks the narrower question
+    // the wording depends on: are the entries destroyed, or kept?
+    const QJsonArray before = fx.read(3).value(QLatin1String("programmes")).toArray();
+    b.set_channel_source(3, QStringLiteral("local"));
+    const QJsonArray after = fx.read(3).value(QLatin1String("programmes")).toArray();
+    checkEq(after.size(), before.size(), "a source change leaves the entries in place");
+    checkStr(after.at(0).toObject().value(QLatin1String("name")).toString(),
+             QStringLiteral("Batman Beyond"), "and leaves them intact");
+}
+
 void testChannelLifecycle() {
     section("Backend: channels can be made, renamed and removed");
 
@@ -426,6 +456,7 @@ int runVirtualChannelsBackendTests() {
     testExclusionsOnALocalChannel();
     testBookingWrites();
     testInterstitialsAreCounted();
+    testSourceSwitchAndPicks();
     testChannelLifecycle();
     return 0;
 }
