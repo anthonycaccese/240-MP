@@ -49,7 +49,7 @@ The guiding idea: **browse structured content, then hand off to the right tool f
   CMakeLists.txt
 ```
 
-There are three modules today: `local_files`, `plex`, and `ambient_mode`. `plex` is a helpful reference when building something new as it covers a more complex use case (connecting to a 3rd party API with auth)
+The modules today are `ambient_mode`, `emby`, `jellyfin`, `local_files`, `nfc_reader`, `plex`, `scripts`, `virtual_channels`, `weather` and `youtube`. `plex` is a helpful reference when building something new as it covers a more complex use case (connecting to a 3rd party API with auth); `virtual_channels` is the largest, and the one to read for scheduling, multi-source browsing and a C++ test suite (see [Virtual Channels](#virtual-channels-scheduled-tv)).
 
 ## Anatomy of a Module
 
@@ -319,6 +319,99 @@ An NFC card's tag file can point at content another module owns, rather than at 
 - A **shuffle** card sets `trackProgress: false` on the Player, suppressing both `update_timeline` calls. Progress reporting is entirely client-side, so that is sufficient to leave watched state, Continue Watching and on-deck untouched.
 - Shuffle keeps rolling via a **shuffle bag** in `PlexBackend` (`m_shuffleBag`): a shuffled permutation played to exhaustion then reshuffled, rather than independent random draws, which clump badly over the hours a jukebox card runs. `resolve_card` reports the show/season as `cardScope`; the Player's EOF branch calls `load_random_episode(scope)` instead of `load_next_episode(ratingKey)`. Both emit `nextEpisodeReady`, so the advance itself is shared. Continuation respects the module's `autoplay_next_episode` setting.
 
+## Virtual Channels (scheduled TV)
+
+The largest module. A channel is a **timeline**, not a playlist: tuning in lands
+you wherever that channel should be at this wall-clock moment, part way through
+a programme if that is where the schedule is.
+
+**Where the state lives**, all under the data directory:
+
+| File | What it holds |
+|---|---|
+| `channels/channels.json` | every channel: its number, name, source, pools, exclusions and movie slots |
+| `channels/schedule/<n>.json` | the generated timeline for one channel — what airs, when |
+| `channels/duration-cache.json` | probed durations, so a rebuild does not re-measure every file |
+| `logos/` | channel logo images |
+
+**A channel is built, not played live.** Editing a pool changes `channels.json`
+only; nothing airs differently until the channel is rebuilt, which is why every
+editing screen carries a REBUILD row and says "rebuild to air the change". A
+build probes durations (ffprobe, falling back to mpv), asks each source what it
+holds, lays out the timeline to the configured horizon, and writes the schedule
+file. `SCHEDULE AHEAD` sets that horizon; schedules are topped up nightly and at
+startup.
+
+**Four sources, one shape.** Local files, Plex, Jellyfin and Emby are all
+browsed as shows → seasons → episodes, and picks are stored the same way for
+each. Only what a source really has differs: local files have no collections or
+playlists, servers have no folders, and playlists are Plex-only — ask
+`source_supports_playlists()` rather than hardcoding that anywhere.
+
+**A channel states its source** in its `source` key. It is inferred from a
+server block, and then from the entries in its pools, only for channels written
+before that key existed — inference cannot be corrected, and a channel moved
+from a server to local files still holds that server's entries.
+
+**Pools.** `programmes` is what the channel plays; `intros`, `bumps`,
+`commercials` and `outros` are the break material. Every pool is an array of
+entry objects (`{src, kind, name}` for a library item, `{src, folder}` for a
+folder of clips); older channel files hold bare strings for folders and are
+still read. A programme entry can carry its own `intros`/`outros`, which
+override the channel's for that show.
+
+**Exclusions** live in the channel's own source block, not on the entry:
+`exclude.seasons` is a list of season keys, `exclude.episodes` is a map of
+season key → episode refs. Both must be read when generating, or a season
+switched off in the interface airs anyway.
+
+**Movie slots** (`appointments`) are films at fixed times. A slot draws on
+picked films, or a folder, or both.
+
+**Rotation is per show, not per episode**: each programme in the pool takes its
+turn equally, so a three-episode entry comes round as often as a five-hundred
+episode one.
+
+**Tests.** `vchan-tests` covers the schedule, tuner, generator, path guard,
+duration probe, media-server source, local library and the backend's write
+paths — see [CONTRIBUTING.md](CONTRIBUTING.md#testing-your-change) to build and run it.
+Anything that saves to `channels.json` should be tested against a deliberately
+broken channel: a real box accumulates rows that no longer resolve, and a save
+that refuses the whole list because of one of them locks the viewer out.
+
+### The local library layout (Virtual Channels)
+
+Virtual Channels reads local files as a library rather than as a directory, so
+that one picker can present local files, Plex, Jellyfin and Emby the same way.
+Two folder names under the media root are the contract, and `LocalLibrary` reads
+nothing else:
+
+```
+<media>/series/<Show Name (Year)>/Season 1/<Show> S01E01 - Title.mkv
+<media>/movies/<Film Name (Year)>.mkv
+<media>/movies/<Film Name (Year)>/<Film Name>.mkv     # folder-per-film also works
+```
+
+- Both folders are created on startup, but only inside a media root that already
+  exists — the module never invents the root itself.
+- Naming follows Jellyfin's conventions, then Plex's, and **loosely**: `S01E02`,
+  `1x02`, `Season 2 Episode 5` and a bare `E04` all parse, `Specials`/`Extras`
+  mean season 0, and anything unparseable keeps its filename as its title and
+  sorts last rather than disappearing.
+- Extras are not films. A `-trailer`/`-sample`/`-featurette` suffix, or a
+  `Trailers`/`Extras`/`Behind The Scenes` folder, is skipped when films are
+  enumerated (`LocalLibrary::isExtraPath`) — including by movie slots, so a
+  trailer sitting beside a feature cannot be what airs at eight.
+- Anything **outside** `series/` and `movies/` is not a programme source. That is
+  what lets a picker tell a show from a folder of bumps: break pools (intros,
+  outros, bumps, commercials) point at ordinary folders anywhere under the root,
+  and take what is in them.
+
+A channel states its source in its `source` key. It is inferred from a server
+block, and then from the entries in its pools, only for channels written before
+that key existed — inference cannot be corrected, and a channel moved from a
+server to local files still holds that server's entries.
+
 ## Input (InputManager)
 
 All input arrives in QML as **ordinary key events** — views bind `Keys.onPressed` / `Keys.onUpPressed` / etc. and never know which physical device produced the event. Keyboards and keyboard-emulating USB remotes deliver real key events natively; **USB game controllers** are translated by `InputManager` (`src/input/InputManager.h/.cpp`, exposed to QML as the context property **`inputManager`**).
@@ -358,39 +451,6 @@ Please review `PlexBackend` as a reference implementation.
 - For auth-gated modules, emit `authStateChanged()` on sign-in/out — auto-connected and re-emitted as `moduleAuthStateChanged(moduleId)`.
 - To react to your own settings changing, add a slot `onSettingChanged(moduleId, key, value)` — auto-connected to `moduleSettingChanged`.
 - A backend resolves its own configured paths in its constructor — e.g. `LocalFilesBackend` / `AmbientModeBackend` read `media_directory` from `config.json` (defaulting to `dataRoot/media` / `dataRoot/ambient`). `main.cpp` does not touch module paths.
-
-### The local library layout (Virtual Channels)
-
-Virtual Channels reads local files as a library rather than as a directory, so
-that one picker can present local files, Plex, Jellyfin and Emby the same way.
-Two folder names under the media root are the contract, and `LocalLibrary` reads
-nothing else:
-
-```
-<media>/series/<Show Name (Year)>/Season 1/<Show> S01E01 - Title.mkv
-<media>/movies/<Film Name (Year)>.mkv
-<media>/movies/<Film Name (Year)>/<Film Name>.mkv     # folder-per-film also works
-```
-
-- Both folders are created on startup, but only inside a media root that already
-  exists — the module never invents the root itself.
-- Naming follows Jellyfin's conventions, then Plex's, and **loosely**: `S01E02`,
-  `1x02`, `Season 2 Episode 5` and a bare `E04` all parse, `Specials`/`Extras`
-  mean season 0, and anything unparseable keeps its filename as its title and
-  sorts last rather than disappearing.
-- Extras are not films. A `-trailer`/`-sample`/`-featurette` suffix, or a
-  `Trailers`/`Extras`/`Behind The Scenes` folder, is skipped when films are
-  enumerated (`LocalLibrary::isExtraPath`) — including by movie slots, so a
-  trailer sitting beside a feature cannot be what airs at eight.
-- Anything **outside** `series/` and `movies/` is not a programme source. That is
-  what lets a picker tell a show from a folder of bumps: break pools (intros,
-  outros, bumps, commercials) point at ordinary folders anywhere under the root,
-  and take what is in them.
-
-A channel states its source in its `source` key. It is inferred from a server
-block, and then from the entries in its pools, only for channels written before
-that key existed — inference cannot be corrected, and a channel moved from a
-server to local files still holds that server's entries.
 
 ## QML View Patterns
 

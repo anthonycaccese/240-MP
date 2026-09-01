@@ -25,6 +25,14 @@ brew install mpv
 
 Note: 240-MP uses mpv as an external subprocess for video playback. It does not link against libmpv at build time, so mpv only needs to be on your `PATH` when running the app.
 
+**Install ffmpeg (optional, recommended for the Channels module):**
+
+```bash
+brew install ffmpeg
+```
+
+Channels measures how long each file runs when it builds a schedule. It uses `ffprobe` (part of ffmpeg) when it is on the `PATH` and falls back to mpv when it is not — mpv works, ffprobe is faster, which shows on a large library.
+
 **Install yt-dlp and Deno (optional, required only for the YouTube module):**
 
 ```bash
@@ -105,10 +113,12 @@ sudo apt-get install -y \
   libqt6svg6 qt6-svg-dev qt6-svg-plugins qt6-wayland \
   libdrm-dev libxkbcommon-dev libssl-dev \
   libsdl2-dev \
-  mpv
+  mpv ffmpeg
 ```
 
 `mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
+
+`ffmpeg` is optional and supplies `ffprobe`, which the Channels module uses to measure file durations when it builds a schedule. Without it the module falls back to mpv for the same job, which works but is slower over a large library.
 
 Qt Multimedia is optional and only powers one thing: the moving preview of what
 is on a channel, shown in the guide while you are picking one. It is detected at
