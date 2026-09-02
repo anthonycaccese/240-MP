@@ -83,6 +83,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Autoplay next episode in a season (optional, off by default)
 - Write an NFC card for any movie, episode, season or show from its detail screen to use with the NFC Reader module
 - Hub, Playlist, Collection and Category support
+- Folder browsing — walk a library by its on-disk folder structure
 - Movie editions
 - Select preferred audio/subtitle track before playback and switch tracks during playback
 - Full library browsing by letter

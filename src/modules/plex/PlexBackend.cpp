@@ -1736,6 +1736,56 @@ void PlexBackend::load_category_items(const QString &sectionId, const QString &f
     }
 }
 
+// Folder browsing — Plex's "by folder" library view, which walks the library's
+// on-disk directory tree instead of its metadata. A section's top level is
+// /library/sections/{id}/folder; every level below it is reached by following the
+// key the server put on the folder row (…/folder?parent=<n>), passed back here
+// verbatim rather than rebuilt, so the parent ids stay the server's business.
+//
+// The response mixes two shapes: folder rows arrive under Directory on some PMS
+// versions and under Metadata (type "folder") on others, while leaf media always
+// arrives under Metadata. Both arrays are read, and a Metadata entry only counts
+// as media when it carries a ratingKey.
+void PlexBackend::load_folder(const QString &sectionId, const QString &folderKey) {
+    QString uri = serverUrl(), token = serverToken();
+    QUrl url(uri + (folderKey.isEmpty() ? "/library/sections/" + sectionId + "/folder"
+                                        : folderKey));
+    auto *reply = plexGet(url, token);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, sectionId, folderKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this, sectionId, folderKey]{ load_folder(sectionId, folderKey); }); return;
+            }
+            emit errorOccurred("LOAD FOLDERS FAILED: " + reply->errorString()); return;
+        }
+        QJsonObject mc = QJsonDocument::fromJson(reply->readAll())
+                         .object()["MediaContainer"].toObject();
+        QVariantList items;
+        // A folder row with no key is not openable, so it is dropped rather than
+        // listed as a dead end.
+        auto appendFolder = [&items, &sectionId](const QJsonObject &d) {
+            QString key = d["key"].toString();
+            if (key.isEmpty()) return;
+            items.append(QVariantMap{
+                {"title",     d["title"].toString().toUpper()},
+                {"type",      "folder"},
+                {"folderKey", key},
+                {"sectionId", sectionId},
+            });
+        };
+        for (const auto &dv : mc["Directory"].toArray()) appendFolder(dv.toObject());
+        for (const auto &mv : mc["Metadata"].toArray()) {
+            QJsonObject m = mv.toObject();
+            if (m["ratingKey"].toString().isEmpty() || m["type"].toString() == "folder")
+                appendFolder(m);
+            else
+                items.append(formatItem(m));
+        }
+        emit folderLoaded(items);
+    });
+}
+
 void PlexBackend::check_section_capabilities(const QString &sectionId) {
     QString uri = serverUrl(), token = serverToken();
 

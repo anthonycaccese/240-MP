@@ -18,12 +18,17 @@ FocusScope {
     property string ratingKey: navParams.ratingKey || ""
     property string categoryKey: navParams.categoryKey || ""
     property string libraryName: navParams.libraryName || ""
+    // Folder browsing: the key of the folder being listed (empty at a section's
+    // top level) and its name, which stands in for the library name in the header
+    // so a deep folder still says where it is.
+    property string folderKey: navParams.folderKey || ""
+    property string folderName: navParams.folderName || ""
 
     property var items: []
     property bool isLoading: false
     property string errorMessage: ""
 
-    property bool showLetterNav: listType === "library_all"
+    property bool showLetterNav: listType === "library_all" || listType === "folders"
     property bool letterNavActive: false
     property var letterIndex: []
 
@@ -185,6 +190,20 @@ FocusScope {
             }
         }
 
+        function onFolderLoaded(loadedItems) {
+            if (itemListRoot.listType === "folders") {
+                itemListRoot.isLoading = false
+                itemListRoot.items = loadedItems
+                if (itemListRoot.showLetterNav)
+                    itemListRoot.letterIndex = itemListRoot.buildLetterIndex(loadedItems)
+                if (loadedItems.length > 0) {
+                    var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
+                    itemList.currentIndex = Math.min(restore, loadedItems.length - 1)
+                    itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+                }
+            }
+        }
+
         function onCategoriesLoaded(loadedItems) {
             if (itemListRoot.listType === "categories") {
                 itemListRoot.isLoading = false
@@ -220,6 +239,20 @@ FocusScope {
                 queueItems: queueItems,
                 shuffle: item.__action === "shuffle",
                 title: listTitle,
+                libraryName: libraryName
+            }, { currentIndex: itemList.currentIndex })
+            return
+        }
+
+        // A folder row opens the next level down. The server's own key is passed
+        // back untouched, so the section id only matters at the top level.
+        if (item.type === "folder") {
+            itemListRoot.navigateTo("Items.qml", {
+                listType: "folders",
+                title: item.title,
+                sectionId: sectionId,
+                folderKey: item.folderKey,
+                folderName: item.title,
                 libraryName: libraryName
             }, { currentIndex: itemList.currentIndex })
             return
@@ -326,6 +359,8 @@ FocusScope {
             plexBackend.load_categories(sectionId)
         else if (listType === "category_items")
             plexBackend.load_category_items(sectionId, categoryKey)
+        else if (listType === "folders")
+            plexBackend.load_folder(sectionId, folderKey)
         else if (listType === "continue_watching")
             plexBackend.load_continue_watching()
     }
@@ -346,7 +381,7 @@ FocusScope {
     AppBar {
         iconSource: moduleRoot.moduleIcon
         title: moduleRoot.moduleName
-        subtitle: libraryName
+        subtitle: folderName !== "" ? folderName : libraryName
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.125 //60
@@ -453,6 +488,7 @@ FocusScope {
                 Text {
                     id: rowText
                     text: {
+                        if (modelData.type === "folder") return (modelData.title || "") + "/"
                         if (modelData.type === "episode" && modelData.grandparentTitle) {
                             var sNum = (modelData.parentIndex != null) ? modelData.parentIndex : "?"
                             var eNum = (modelData.index != null) ? modelData.index : "?"

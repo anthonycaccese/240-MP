@@ -50,6 +50,11 @@ public:
     Q_INVOKABLE void load_playlist_items(const QString &ratingKey);
     Q_INVOKABLE void load_categories(const QString &sectionId);
     Q_INVOKABLE void load_category_items(const QString &sectionId, const QString &filterKey);
+    // Folder browsing (Plex's "by folder" library view). folderKey is empty for a
+    // section's top level and otherwise the key the server put on the folder row
+    // being opened. Emits folderLoaded with a mix of folder rows (type "folder",
+    // carrying folderKey) and ordinary media items.
+    Q_INVOKABLE void load_folder(const QString &sectionId, const QString &folderKey);
     Q_INVOKABLE void check_section_capabilities(const QString &sectionId);
     Q_INVOKABLE void load_children(const QString &ratingKey);
     // Loads the extras (trailers, deleted scenes, …) attached to an item and
@@ -141,6 +146,7 @@ signals:
     void collectionsLoaded(const QVariant &collections);
     void playlistsLoaded(const QVariant &playlists);
     void categoriesLoaded(const QVariant &categories);
+    void folderLoaded(const QVariant &items);
     void capabilitiesLoaded(const QVariant &capabilities);
 
     void itemLoaded(const QVariant &detail);
