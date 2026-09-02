@@ -213,10 +213,10 @@ At this point you can type `240mp` at any time to start up the app.  And if you 
         ```
         monitorpixelaspect=0.888889
         ```
-- By default, mpv assumes your display has square pixels (a ratio of 1). But for CRT output that ratio can distort the output slightly.  
+- By default, mpv assumes your display has square pixels (a ratio of 1). But for CRT output that ratio can distort the output slightly.
 - `monitorpixelaspect` tells MPV how to set the pixel aspect ratio (PAR) for your particular CRT and `0.888889` is a good starting ratio to try to address that distortion.
-- Please tweak the value to best work with your CRT while using a 4:3 test pattern (I recommend adding one to the local files media directory for easy access if you need it).
-- Thank you to DVDCreep for the discussion [here](https://github.com/anthonycaccese/240-MP/discussions/267) that helped work this out.
+- If that specific ratio doesn't look as you'd like on your CRT then please feel free to tweak it to best work for your set up using a 4:3 test pattern (I recommend adding one to the local files media directory for easy access if you need it).
+- For an explanation on PAR along with other values you can try for both NTSC and PAL set ups; please see [this wiki entry](https://en.wikipedia.org/wiki/Pixel_aspect_ratio#Introduction) and thank you to DVDCreep for the findings [here](https://github.com/anthonycaccese/240-MP/discussions/267) that helped work this out.
 
 **Audio**
 
