@@ -29,6 +29,8 @@ FocusScope {
     property var rows: []
     property bool capturing: false
     property int captureIndex: -1
+    // Shown in the capture overlay when a button cannot be bound.
+    property string captureError: ""
 
     // While capturing, InputManager suspends remap delivery and reports every
     // real input (keyboard key, Consumer Control button, mouse button) through
@@ -61,10 +63,20 @@ FocusScope {
 
     function startCapture(idx) {
         captureIndex = idx
+        captureError = ""
         capturing = true
     }
 
     function finishCapture(qtKey) {
+        // Qt reports 0 for a button no keyboard layout has a keysym for, and
+        // 0 is what this screen stores to mean "not bound" -- saving it would
+        // look exactly like never having pressed anything.
+        if (!qtKey) {
+            captureError = "THAT BUTTON CANNOT BE REMAPPED.\n"
+                           + "IT REACHES THE APP WITHOUT A NAME TO SAVE."
+            return
+        }
+        captureError = ""
         if (captureIndex >= 0 && captureIndex < actions.length) {
             // One physical button, one action: InputManager's remap table is
             // keyed by the button, so a key left bound to two actions would
@@ -86,6 +98,7 @@ FocusScope {
     function cancelCapture() {
         capturing = false
         captureIndex = -1
+        captureError = ""
         rowList.forceActiveFocus()
     }
 
@@ -270,6 +283,15 @@ FocusScope {
                 color: root.accentColor
                 font.family: root.globalFont
                 font.pixelSize: root.sh * 0.05 //24
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            Text {
+                text: remapRoot.captureError
+                visible: remapRoot.captureError !== ""
+                color: root.accentColor
+                font.family: root.globalFont
+                font.pixelSize: root.sh * 0.0291667 //14
+                horizontalAlignment: Text.AlignHCenter
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {

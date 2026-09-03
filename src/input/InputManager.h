@@ -100,6 +100,9 @@ private:
     void loadKeyRemap();
 #ifdef Q_OS_LINUX
     void openConsumerControlDevice();
+    // True for the codes Qt's keyboard path cannot represent, which is why
+    // they have to be read from the device directly. See the definition.
+    static bool isUnmappableRemoteCode(int linuxCode);
 #endif
     static QString evdevKeyName(int linuxCode);
     static QString mouseButtonName(int qtButton);
@@ -160,6 +163,11 @@ private:
 #ifdef Q_OS_LINUX
     int m_consumerFd = -1;
     QSocketNotifier *m_consumerNotifier = nullptr;
+    // Set when the device was chosen for the codes it advertises rather than
+    // for being a dedicated Consumer Control interface. Such a device is also
+    // the plain keyboard, and Qt is already delivering its ordinary keys, so
+    // only the codes Qt drops may be taken from it.
+    bool m_consumerIsSharedKeyboard = false;
 #endif
 
     QString m_lastInputDevice = "keyboard";
