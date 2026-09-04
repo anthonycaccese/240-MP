@@ -23,6 +23,9 @@ public:
         SlotSource    src = SlotSource::Jellyfin;
         QStringList   libraries;
         QStringList   match;
+        // The picked series' ItemIds, where the picker stored them. A series
+        // matched by id survives being renamed on the server.
+        QStringList   showIds;
         QStringList   titles;
         QStringList   genres;
         QStringList   collections;

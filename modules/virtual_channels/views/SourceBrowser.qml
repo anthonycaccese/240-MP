@@ -147,7 +147,8 @@ FocusScope {
             var at = list.indexOf(item.label)
             if (at >= 0) list.splice(at, 1)
             else         list.push(item.label)
-            if (!virtualChannelsBackend.set_channel_list(channelNumber, listField, list)) {
+            if (!virtualChannelsBackend.set_channel_list(channelNumber, listField, list,
+                                                         refsFor(list, item))) {
                 status = "Could not save"
                 return
             }
@@ -162,9 +163,27 @@ FocusScope {
     // episode, when nothing above it is on, puts that episode on and narrows the
     // show to it. Turning off the last thing airing at a level turns that level
     // off too, rather than leaving a show in the list with nothing to play.
+    // The id of every name being saved, so far as this screen knows them: the
+    // show under the cursor, plus anything else on the listing. A name we have
+    // no id for is sent blank and keeps whatever id is already stored.
+    function refsFor(list, picked) {
+        var refs = []
+        for (var i = 0; i < list.length; ++i) {
+            var ref = ""
+            if (picked && list[i] === picked.label) ref = String(picked.id || "")
+            else {
+                for (var j = 0; j < items.length; ++j)
+                    if (items[j].label === list[i]) { ref = String(items[j].id || ""); break }
+            }
+            refs.push(ref)
+        }
+        return refs
+    }
+
     function selectSeries(list) {
         if (list.indexOf(seriesName) < 0) list.push(seriesName)
-        if (virtualChannelsBackend.set_channel_list(channelNumber, "match", list)) return true
+        if (virtualChannelsBackend.set_channel_list(channelNumber, "match", list,
+                                                    refsFor(list, null))) return true
         status = "Could not save"
         return false
     }
@@ -172,7 +191,8 @@ FocusScope {
     function dropSeries(list) {
         var at = list.indexOf(seriesName)
         if (at >= 0) list.splice(at, 1)
-        virtualChannelsBackend.set_channel_list(channelNumber, "match", list)
+        virtualChannelsBackend.set_channel_list(channelNumber, "match", list,
+                                                refsFor(list, null))
     }
 
     function toggleSeason(item) {

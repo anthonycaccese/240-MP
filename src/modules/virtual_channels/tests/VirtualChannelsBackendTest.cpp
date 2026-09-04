@@ -223,6 +223,54 @@ void testIdentsSurviveASeriesRewrite() {
     check(addedJack,   "the newly ticked show was added");
 }
 
+void testSeriesIdsAreKept() {
+    section("Backend: a picked series remembers its id on its source");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["source"] = QStringLiteral("local");
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+
+    check(b.set_channel_list(3, QStringLiteral("match"),
+                             { QStringLiteral("Batman Beyond"), QStringLiteral("Samurai Jack") },
+                             { QStringLiteral("8324"), QStringLiteral("") }),
+          "a series list saves with the ids the picker knew");
+
+    QString beyondRef, jackRef;
+    for (const QJsonValue &v : fx.read(3).value(QLatin1String("programmes")).toArray()) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QLatin1String("name")).toString() == QLatin1String("Batman Beyond"))
+            beyondRef = o.value(QLatin1String("ref")).toString();
+        if (o.value(QLatin1String("name")).toString() == QLatin1String("Samurai Jack"))
+            jackRef = o.value(QLatin1String("ref")).toString();
+    }
+    checkStr(beyondRef, QStringLiteral("8324"), "the id is stored against the show");
+    check(jackRef.isEmpty(), "a show the picker had no id for is stored without one");
+
+    // A screen that never saw the ids must not wipe them off.
+    check(b.set_channel_list(3, QStringLiteral("match"),
+                             { QStringLiteral("Batman Beyond"), QStringLiteral("Samurai Jack") }),
+          "the same list saves again from a screen with no ids");
+
+    QString afterRef;
+    for (const QJsonValue &v : fx.read(3).value(QLatin1String("programmes")).toArray()) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QLatin1String("name")).toString() == QLatin1String("Batman Beyond"))
+            afterRef = o.value(QLatin1String("ref")).toString();
+    }
+    checkStr(afterRef, QStringLiteral("8324"), "and the id it already had is still there");
+
+    check(b.set_channel_list(3, QStringLiteral("match"), { QStringLiteral("Samurai Jack") }),
+          "dropping a show saves");
+    bool beyondGone = true;
+    for (const QJsonValue &v : fx.read(3).value(QLatin1String("programmes")).toArray())
+        if (v.toObject().value(QLatin1String("name")).toString() == QLatin1String("Batman Beyond"))
+            beyondGone = false;
+    check(beyondGone, "and takes its id with it");
+}
+
 void testSourceSwitchSticks() {
     section("Backend: switching a channel's source takes effect");
 
@@ -394,6 +442,7 @@ int runVirtualChannelsBackendTests() {
     testOneBadRowDoesNotBlockThePool();
     testPoolReadBack();
     testIdentsSurviveASeriesRewrite();
+    testSeriesIdsAreKept();
     testSourceSwitchSticks();
     testExclusionsOnALocalChannel();
     testBookingWrites();

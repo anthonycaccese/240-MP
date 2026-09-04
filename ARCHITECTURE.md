@@ -360,6 +360,17 @@ folder of clips); older channel files hold bare strings for folders and are
 still read. A programme entry can carry its own `intros`/`outros`, which
 override the channel's for that show.
 
+**A picked series carries its id.** A `kind: series` entry stores `ref`, the
+show's own id on its source — a Plex `ratingKey`, a Jellyfin or Emby `ItemId`.
+The pass takes a show whose id matches, *or* whose title matches in full, so a
+show renamed on the server is still found by id and one removed and added back
+under a new id is still found by name. Matching a name as a substring is what
+let the entry "STAR TREK" claim the whole franchise. Entries written before
+`ref` existed carry only the name and still work; the id is filled in the next
+time that show is picked, and `set_channel_list` leaves a stored id alone when
+the caller passes none, so editing the list from a screen that never saw the
+ids cannot discard them.
+
 **Exclusions** live in the channel's own source block, not on the entry:
 `exclude.seasons` is a list of season keys, `exclude.episodes` is a map of
 season key → episode refs. Both must be read when generating, or a season
