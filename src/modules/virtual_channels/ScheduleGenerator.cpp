@@ -215,42 +215,16 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     // Round-robin across series, each series in its own broadcast order, so a
     // channel of shows from different decades takes turns instead of airing one
     // show until it runs out.
-    const auto interleaveInto = [&](QVector<int> &into) {
-        QVector<QVector<int>> dealt = groups;
-        for (QVector<int> &one : dealt)
+    // Interleaved keeps each series in its own order and gives each a turn.
+    // Sorted once here rather than per pass: the turn order never changes.
+    if (def.order == Ordering::Interleaved)
+        for (QVector<int> &one : groups)
             std::sort(one.begin(), one.end(), airedBefore);
-
-        // Spread each series evenly across the whole cycle, in proportion to
-        // how many episodes it has. Dealing one each in turn instead looks
-        // right until the shortest series runs out: every remaining round is
-        // then the longest series alone, so a channel of four shows ends in an
-        // unbroken block of whichever has the most episodes.
-        struct Placed { double at; int index; };
-        QVector<Placed> spread;
-        spread.reserve(progCount);
-        for (const QVector<int> &one : dealt) {
-            const double count = double(one.size());
-            for (int k = 0; k < one.size(); ++k)
-                spread.append({ (double(k) + 0.5) / count, one[k] });
-        }
-        // Stable, so series of equal length keep the order they were grouped
-        // in and a rebuild lays out the same timeline.
-        std::stable_sort(spread.begin(), spread.end(),
-                         [](const Placed &a, const Placed &b) { return a.at < b.at; });
-
-        into.clear();
-        into.reserve(progCount);
-        for (const Placed &p : spread) into.append(p.index);
-    };
 
     const auto loadPass = [&](qint64 pass) {
         for (int i = 0; i < progCount; ++i) order[i] = i;
         if (def.order == Ordering::Broadcast) {
             std::sort(order.begin(), order.end(), airedBefore);
-            return;
-        }
-        if (def.order == Ordering::Interleaved) {
-            interleaveInto(order);
             return;
         }
         shuffleInto(order, pass);
@@ -264,6 +238,16 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     };
 
     const auto peekProgramme = [&]() -> const MediaItem & {
+        if (def.order == Ordering::Interleaved) {
+            // One episode of each series in turn, then round again. Each series
+            // holds its own place and wraps on its own, so a short run repeats
+            // sooner rather than leaving a long one playing by itself, and the
+            // series drift out of step instead of restarting together.
+            const qint64 seriesCount = groups.size();
+            const QVector<int> &turn = groups[int(rotation % seriesCount)];
+            const qint64 visit = rotation / seriesCount;
+            return programmes[turn[int(visit % turn.size())]];
+        }
         const qint64 pass = rotation / progCount;
         if (pass != loadedPass) { loadedPass = pass; loadPass(pass); }
         return programmes[order[rotation % progCount]];

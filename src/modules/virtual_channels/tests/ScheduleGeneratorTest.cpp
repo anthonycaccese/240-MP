@@ -257,7 +257,7 @@ int runScheduleGeneratorTests() {
         checkStr(aired.value(2), QStringLiteral("Alpha-2.mkv"), "and continues in order on its next turn");
     }
 
-    section("generate: a long series does not end up playing alone");
+    section("generate: each series keeps its own place and wraps on its own");
     {
         ChannelDef d = basicDef();
         d.order = Ordering::Interleaved;
@@ -280,8 +280,6 @@ int runScheduleGeneratorTests() {
         for (const Slot &sl : generateSlots(d, kBase))
             if (sl.kind == SlotKind::Programme && aired.size() < 15) aired << sl.ref;
 
-        // Dealing one each in turn would put all three Shorts in the first six
-        // slots and leave nine straight Longs after them.
         int longestRun = 0, run = 0;
         QString previous;
         for (const QString &ref : aired) {
@@ -290,13 +288,42 @@ int runScheduleGeneratorTests() {
             previous = show;
             longestRun = qMax(longestRun, run);
         }
-        check(longestRun <= 5, "the longer series never runs more than a few deep");
+        check(longestRun == 1, "every series gets a turn before any series gets a second");
 
-        int lastShortAt = -1;
-        for (int i = 0; i < aired.size(); ++i)
-            if (aired[i].startsWith("Short")) lastShortAt = i;
-        check(lastShortAt > aired.size() / 2,
-              "the shorter series still appears in the back half of the cycle");
+        checkStr(aired.value(7), QStringLiteral("Short-1.mkv"),
+                 "the short series runs out and starts itself over");
+        checkStr(aired.value(8), QStringLiteral("Long-5.mkv"),
+                 "while the long series carries on, so the two stop being lined up");
+    }
+
+    section("generate: a rebuild resumes each series where it left off");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Interleaved;
+        d.horizonHours = 2.0;
+        d.rotation = 8;
+
+        QVector<MediaItem> progs;
+        for (int ep = 1; ep <= 12; ++ep) {
+            MediaItem m = item(QStringLiteral("Long-%1.mkv").arg(ep), 600000);
+            m.series = "Long"; m.seasonNo = 1; m.episodeNo = ep;
+            progs.append(m);
+        }
+        for (int ep = 1; ep <= 3; ++ep) {
+            MediaItem m = item(QStringLiteral("Short-%1.mkv").arg(ep), 600000);
+            m.series = "Short"; m.seasonNo = 1; m.episodeNo = ep;
+            progs.append(m);
+        }
+        d.programmes = progs;
+
+        QStringList aired;
+        for (const Slot &sl : generateSlots(d, kBase))
+            if (sl.kind == SlotKind::Programme && aired.size() < 2) aired << sl.ref;
+
+        checkStr(aired.value(0), QStringLiteral("Long-5.mkv"),
+                 "the long series picks up mid-run rather than at episode one");
+        checkStr(aired.value(1), QStringLiteral("Short-2.mkv"),
+                 "and the short series picks up at its own separate place");
     }
 
     section("generate: episode 10 airs after episode 9");
