@@ -194,7 +194,7 @@ FocusScope {
         case "order":       return sourcesRoot.order === "shuffle"
                                    ? "Series take turns, and everything plays once before anything repeats."
                                  : sourcesRoot.order === "interleaved"
-                                   ? "Series take turns, each playing in order. Use this when the channel holds shows from different eras."
+                                   ? "Series take turns, each keeping its own place — a short one comes round again while a long one plays on."
                                    : "Everything airs in the order it first did, oldest first, whichever show it belongs to."
         case "timing":      return sourcesRoot.gridMinutes === 0
                                    ? "Free run: each program starts when the last one ended."
