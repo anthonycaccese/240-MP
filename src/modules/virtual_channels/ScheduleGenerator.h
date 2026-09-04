@@ -2,6 +2,7 @@
 #include "ChannelSchedule.h"
 
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QVector>
 
@@ -64,6 +65,15 @@ struct ChannelDef {
     int adsPerBreak = 0;
 
     qint64  rotation = 0;
+
+    // Where each series had got to, as the ref of the last episode it aired,
+    // keyed by lowercased series name. Interleaved resumes every series from
+    // its own mark, so editing the pool cannot shuffle the others' places.
+    QHash<QString, QString> marks;
+
+    // The same, for the one timeline Broadcast runs: the ref of the last
+    // programme aired, whichever series it belonged to.
+    QString mark;
 
     QVector<MediaItem> programmes;
     QVector<Appointment> appointments;

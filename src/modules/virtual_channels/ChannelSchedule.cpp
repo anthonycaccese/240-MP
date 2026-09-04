@@ -98,6 +98,13 @@ ChannelSchedule ChannelSchedule::fromJson(const QByteArray &json,
     s.m_generatedAt = static_cast<qint64>(root.value(QLatin1String("generated_at")).toDouble(0));
     s.m_horizonEnd  = static_cast<qint64>(root.value(QLatin1String("horizon_end")).toDouble(0));
     s.m_rotation    = static_cast<qint64>(root.value(QLatin1String("rotation")).toDouble(0));
+    s.m_mark        = root.value(QLatin1String("mark")).toString();
+
+    const QJsonObject marks = root.value(QLatin1String("marks")).toObject();
+    for (auto it = marks.constBegin(); it != marks.constEnd(); ++it) {
+        const QString ref = it.value().toString();
+        if (!ref.isEmpty()) s.m_marks.insert(it.key(), ref);
+    }
 
     const QJsonValue slotsVal = root.value(QLatin1String("slots"));
     if (!slotsVal.isArray())

@@ -1275,6 +1275,29 @@ qint64 VirtualChannelsBackend::rotationAt(int channelNumber, qint64 t) {
     return old.rotation() + aired;
 }
 
+void VirtualChannelsBackend::marksAt(int channelNumber, qint64 t,
+                                     QHash<QString, QString> *perSeries, QString *overall) {
+    const ChannelSchedule &old = scheduleFor(channelNumber);
+    if (!old.isValid()) return;
+
+    // Carry forward what the last build was told, then replay everything that
+    // has aired since, so the marks describe this moment rather than the moment
+    // the window was written.
+    if (perSeries) *perSeries = old.marks();
+    if (overall)   *overall   = old.mark();
+
+    for (const Slot &s : old.slotList()) {
+        if (s.start >= t) break;
+        if (s.kind != SlotKind::Programme || s.ref.isEmpty()) continue;
+        if (overall) *overall = s.ref;
+        if (perSeries) {
+            const QString name = s.series.trimmed();
+            perSeries->insert(name.isEmpty() ? QStringLiteral("\x1f") : name.toLower(),
+                              s.ref);
+        }
+    }
+}
+
 void VirtualChannelsBackend::regenerate(int channelNumber) {
     if (m_genActive) {
         qWarning("[VirtualChannels] generation already running for channel %d", m_genChannel);
@@ -1306,6 +1329,7 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
     def.horizonHours = double(schedule_days()) * 24.0;
     def.order        = orderingFromString(o.value(QLatin1String("order")).toString());
     def.rotation     = rotationAt(channelNumber, nowMs());
+    marksAt(channelNumber, nowMs(), &def.marks, &def.mark);
     def.adsPerBreak  = o.value(QLatin1String("ads_per_break")).toInt(0);
     {
         const int grid = o.value(QLatin1String("grid_minutes")).toInt(0);
