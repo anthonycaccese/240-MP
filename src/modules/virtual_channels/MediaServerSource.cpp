@@ -1,8 +1,5 @@
 #include "MediaServerSource.h"
 
-#include <QDateTime>
-#include <QTimeZone>
-
 #include <QDebug>
 #include <QMetaObject>
 #include <QTimer>
@@ -216,17 +213,8 @@ bool MediaServerSource::itemToMedia(const QVariantMap &m, SlotSource src, MediaI
     // ProductionYear into "year". Emby asks for those fields explicitly;
     // Jellyfin does not, so an empty date here is expected rather than wrong,
     // and the year carries the ordering.
-    const QDate aired = QDate::fromString(
-        m.value(QStringLiteral("releaseDate")).toString().left(10), Qt::ISODate);
-    if (aired.isValid()) {
-        out->airMs = QDateTime(aired, QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
-    } else {
-        bool ok = false;
-        const int year = m.value(QStringLiteral("year")).toInt(&ok);
-        if (ok && year > 1800 && year < 2200)
-            out->airMs = QDateTime(QDate(year, 1, 1), QTime(0, 0),
-                                   QTimeZone::utc()).toMSecsSinceEpoch();
-    }
+    out->airMs = airedAtMs(m.value(QStringLiteral("releaseDate")).toString(),
+                           m.value(QStringLiteral("year")));
     return true;
 }
 
@@ -453,9 +441,8 @@ void MediaServerSource::onItemsLoaded(const QVariant &items) {
             } else if (wantsFilms(m_req.wants)) {
                 if (type != QLatin1String("movie")) continue;
                 if (!m_req.titles.isEmpty() || !m_req.genres.isEmpty()
-                    || !m_req.match.isEmpty() || !m_req.showIds.isEmpty()) {
-                    bool wanted = listContainsCI(m_req.titles, mi.title)
-                                  || (!mi.ref.isEmpty() && m_req.showIds.contains(mi.ref));
+                    || !m_req.match.isEmpty()) {
+                    bool wanted = listContainsCI(m_req.titles, mi.title);
                     if (!wanted) {
                         for (const QString &g : m.value(QStringLiteral("genres")).toStringList())
                             if (listContainsCI(m_req.genres, g)) { wanted = true; break; }

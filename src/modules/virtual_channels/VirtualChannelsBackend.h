@@ -347,7 +347,7 @@ private:
                          int pack = -1;
                          // Known only for library items. A folder of clips has
                          // none of this and falls back to its directory name.
-                         QString series;
+                         QString series = {};
                          qint64  airMs = 0;
                          int     seasonNo = -1;
                          int     episodeNo = -1; };

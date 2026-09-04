@@ -157,12 +157,6 @@ FocusScope {
         status = ""
     }
 
-    // A tick anywhere means the same thing -- this airs -- so a tick low down
-    // carries upward until that is true. Ticking a show puts the whole show on;
-    // ticking a season puts that season on and the show with it; ticking one
-    // episode, when nothing above it is on, puts that episode on and narrows the
-    // show to it. Turning off the last thing airing at a level turns that level
-    // off too, rather than leaving a show in the list with nothing to play.
     // The id of every name being saved, so far as this screen knows them: the
     // show under the cursor, plus anything else on the listing. A name we have
     // no id for is sent blank and keeps whatever id is already stored.
@@ -180,6 +174,12 @@ FocusScope {
         return refs
     }
 
+    // A tick anywhere means the same thing -- this airs -- so a tick low down
+    // carries upward until that is true. Ticking a show puts the whole show on;
+    // ticking a season puts that season on and the show with it; ticking one
+    // episode, when nothing above it is on, puts that episode on and narrows the
+    // show to it. Turning off the last thing airing at a level turns that level
+    // off too, rather than leaving a show in the list with nothing to play.
     function selectSeries(list) {
         if (list.indexOf(seriesName) < 0) list.push(seriesName)
         if (virtualChannelsBackend.set_channel_list(channelNumber, "match", list,

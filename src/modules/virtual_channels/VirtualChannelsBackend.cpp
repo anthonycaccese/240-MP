@@ -272,21 +272,6 @@ QVariantMap VirtualChannelsBackend::channelObject(int channelNumber) const {
     return {};
 }
 
-// When a programme first aired, as epoch ms, from whatever the library knows.
-// An episode's own date is best; a season's or show's year is enough to keep it
-// among its contemporaries; zero means the library had nothing and the ordering
-// falls back to alphabetical.
-qint64 airMsFrom(const QString &isoDate, const QVariant &yearValue) {
-    const QDate exact = QDate::fromString(isoDate.left(10), Qt::ISODate);
-    if (exact.isValid())
-        return QDateTime(exact, QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
-    bool ok = false;
-    const int year = yearValue.toInt(&ok);
-    if (ok && year > 1800 && year < 2200)
-        return QDateTime(QDate(year, 1, 1), QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
-    return 0;
-}
-
 // ---------------------------------------------------------------------------
 // Channel list / guide
 // ---------------------------------------------------------------------------
@@ -1333,7 +1318,7 @@ void VirtualChannelsBackend::marksAt(int channelNumber, qint64 t,
         if (overall) *overall = s.ref;
         if (perSeries) {
             const QString name = s.series.trimmed();
-            perSeries->insert(name.isEmpty() ? QStringLiteral("\x1f") : name.toLower(),
+            perSeries->insert(name.isEmpty() ? unnamedSeriesKey() : name.toLower(),
                               s.ref);
         }
     }
@@ -1452,7 +1437,7 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                         if (!vchan::LocalLibrary::matchesName(sh.name, sh.year, sh.folder, showName))
                             continue;
                         display = sh.name;
-                        showAir = airMsFrom(QString(), sh.year > 0 ? QVariant(sh.year) : QVariant());
+                        showAir = airedAtMs(QString(), sh.year > 0 ? QVariant(sh.year) : QVariant());
                         break;
                     }
                     for (const vchan::LocalEpisode &ep : eps)
@@ -1771,7 +1756,7 @@ bool VirtualChannelsBackend::plexItemToMedia(const QVariantMap &m, MediaItem *ou
 
     QVariant year = m.value("year");
     if (!year.isValid() || year.toInt() <= 0) year = m.value("parentYear");
-    out->airMs = airMsFrom(m.value("originallyAvailableAt").toString(), year);
+    out->airMs = airedAtMs(m.value("originallyAvailableAt").toString(), year);
     return true;
 }
 
@@ -2044,27 +2029,28 @@ void VirtualChannelsBackend::onPlexItemsLoaded(const QVariant &items) {
 
     if (m_pgStage != PlexStage::Shows) return;
 
+    // Naming nothing at all means the whole library, which is what a channel
+    // pointed at a library asks for. A pass scoped to a collection or a playlist
+    // has named something: its shows arrive from that listing, so taking them
+    // from here as well would sweep the library in behind them.
+    const bool takesWholeLibrary =
+        m_pgMatch.isEmpty() && m_pgShowIds.isEmpty()
+        && m_pgCollections.isEmpty() && m_pgPlaylists.isEmpty();
+
     for (const QVariant &v : items.toList()) {
         const QVariantMap m = v.toMap();
         const QString title = m.value("title").toString();
-        const QString key = m.value("ratingKey").toString();
+        const QString key   = m.value("ratingKey").toString();
 
-        // A show is taken by its id where the picker stored one. Failing that
-        // it is matched on its whole name: matching on a substring made one
-        // entry claim every show whose title began the same way, so "STAR TREK"
-        // took the whole franchise. Jellyfin and Emby already compare in full.
-        // Nothing named at all means the whole library, which is what a channel
-        // pointed at a library asks for. A job scoped to a collection or a
-        // playlist has named something: its shows arrive from that listing, so
-        // taking them from here as well would sweep in the entire library.
-        const bool takesWholeLibrary =
-            m_pgMatch.isEmpty() && m_pgShowIds.isEmpty()
-            && m_pgCollections.isEmpty() && m_pgPlaylists.isEmpty();
+        // A show is taken by its id where the picker stored one, and otherwise
+        // by its whole name. Matching a name as a substring made one entry
+        // claim every show whose title began the same way, so "STAR TREK" took
+        // the franchise. Jellyfin and Emby already compare a series in full.
         bool wanted = takesWholeLibrary;
-        if (!wanted && !key.isEmpty() && m_pgShowIds.contains(key)) wanted = true;
+        if (!wanted && !key.isEmpty()) wanted = m_pgShowIds.contains(key);
         for (const QString &want : m_pgMatch) {
             if (wanted) break;
-            if (title.compare(want, Qt::CaseInsensitive) == 0) wanted = true;
+            wanted = title.compare(want, Qt::CaseInsensitive) == 0;
         }
         if (!wanted) continue;
         if (!key.isEmpty()) m_pgShows << key;
@@ -2258,7 +2244,7 @@ void VirtualChannelsBackend::serverApptNext() {
         req.titles      = job.titles;
         req.genres      = job.genres;
         req.collections = job.collections;
-    req.showIds     = job.showIds;
+        req.showIds     = job.showIds;
         req.match       = job.match;
 
         m_serverJob       = job;
