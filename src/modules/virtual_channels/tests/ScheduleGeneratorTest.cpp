@@ -520,6 +520,47 @@ int runScheduleGeneratorTests() {
         checkEq(dayOfWeekFromString("caturday"), 0, "not a day");
     }
 
+    section("appointments: a free-run lead-in never leaves dead air");
+    {
+        // WESTERNS on the Pi: built at 13:56 against a movie slot at 15:00,
+        // with every programme longer than the hour in between and no break
+        // content to pad with. The lead-in was left as a hole and the channel
+        // reported itself off air for sixty-three minutes.
+        const QDateTime base(QDate(2026, 8, 24), QTime(13, 56));
+        const qint64 start = base.toMSecsSinceEpoch();
+
+        Appointment film;
+        film.name = "Movie Slot";
+        film.minuteOfDay = 15 * 60;
+        film.pool = { item("western.mkv", 90 * 60000, "The Last Challenge") };
+
+        ChannelDef d = basicDef();
+        d.horizonHours = 6;
+        d.gridMinutes = 0;
+        d.programmes = { item("long-a.mkv", 95 * 60000), item("long-b.mkv", 91 * 60000) };
+        d.commercials.clear();
+        d.bumps.clear();
+        d.appointments = { film };
+
+        const QVector<Slot> s = generateSlots(d, start);
+        check(!s.isEmpty(), "produces a timeline");
+        check(contiguous(s), "with no hole anywhere in it");
+        checkEq(s.first().start, start, "beginning the moment it was built");
+
+        const qint64 filmAt = QDateTime(QDate(2026, 8, 24), QTime(15, 0)).toMSecsSinceEpoch();
+        bool covered = false;
+        for (const Slot &x : s)
+            if (x.start <= start && start < x.start + x.dur) covered = true;
+        check(covered, "something is on air at the moment of the build");
+
+        int filmIdx = -1;
+        for (int i = 0; i < s.size(); ++i)
+            if (s[i].ref == QLatin1String("western.mkv")) { filmIdx = i; break; }
+        check(filmIdx >= 0, "the movie slot is still scheduled");
+        if (filmIdx >= 0)
+            checkEq(s[filmIdx].start, filmAt, "and still starts exactly on time");
+    }
+
     section("appointments: honoured exactly");
     {
         const QDateTime base(QDate(2026, 8, 24), QTime(6, 0));
