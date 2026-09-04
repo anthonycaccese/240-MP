@@ -1049,7 +1049,15 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
 
             if (kind == QLatin1String("collection"))    job.collections << name;
             else if (kind == QLatin1String("playlist")) job.playlists   << name;
-            else if (kind == QLatin1String("series"))   job.match       << name;
+            else if (kind == QLatin1String("series")) {
+                // Both, and either will do. The id survives the show being
+                // renamed on the server; the name survives it being removed and
+                // added back under a new id. Neither can over-reach now that a
+                // name is matched in full.
+                job.match << name;
+                const QString ref = o.value(QLatin1String("ref")).toString().trimmed();
+                if (!ref.isEmpty()) job.showIds << ref;
+            }
             else if (kind == QLatin1String("library"))  job.library      = name;
             else {
                 qWarning("[VirtualChannels] ignoring pool entry of unknown kind '%s'",
@@ -1715,13 +1723,15 @@ bool VirtualChannelsBackend::plexItemToMedia(const QVariantMap &m, MediaItem *ou
 void VirtualChannelsBackend::plexEnumStart(int channelNumber,
                                            const ChannelDef &def,
                                            const QString &library,
-                                           const QStringList &match) {
+                                           const QStringList &match,
+                                           const QStringList &showIds) {
     if (!m_plex) { plexEnumFail(QStringLiteral("Plex is not available")); return; }
 
     m_pgChannel     = channelNumber;
     m_pgDef         = def;
     m_pgLibraryName = library;
     m_pgMatch       = match;
+    m_pgShowIds     = showIds;
     m_pgSections.clear();
     m_pgShows.clear();
     m_pgSeasons.clear();
@@ -1982,16 +1992,19 @@ void VirtualChannelsBackend::onPlexItemsLoaded(const QVariant &items) {
     for (const QVariant &v : items.toList()) {
         const QVariantMap m = v.toMap();
         const QString title = m.value("title").toString();
-        // A picked series is named in full, so it is matched in full. Matching
-        // on a substring made one entry claim every show whose title began the
-        // same way: "STAR TREK" took the whole franchise, so the six series
-        // named separately beside it aired twice and two nobody asked for
-        // aired at all. Jellyfin and Emby already compare series this way.
-        bool wanted = m_pgMatch.isEmpty();
-        for (const QString &want : m_pgMatch)
-            if (title.compare(want, Qt::CaseInsensitive) == 0) { wanted = true; break; }
-        if (!wanted) continue;
         const QString key = m.value("ratingKey").toString();
+
+        // A show is taken by its id where the picker stored one. Failing that
+        // it is matched on its whole name: matching on a substring made one
+        // entry claim every show whose title began the same way, so "STAR TREK"
+        // took the whole franchise. Jellyfin and Emby already compare in full.
+        bool wanted = m_pgMatch.isEmpty() && m_pgShowIds.isEmpty();
+        if (!wanted && !key.isEmpty() && m_pgShowIds.contains(key)) wanted = true;
+        for (const QString &want : m_pgMatch) {
+            if (wanted) break;
+            if (title.compare(want, Qt::CaseInsensitive) == 0) wanted = true;
+        }
+        if (!wanted) continue;
         if (!key.isEmpty()) m_pgShows << key;
     }
 
@@ -2183,6 +2196,7 @@ void VirtualChannelsBackend::serverApptNext() {
         req.titles      = job.titles;
         req.genres      = job.genres;
         req.collections = job.collections;
+    req.showIds     = job.showIds;
         req.match       = job.match;
 
         m_serverJob       = job;
@@ -2369,7 +2383,7 @@ void VirtualChannelsBackend::plexApptNext() {
         m_pgPlaylists       = job.playlists;
         m_pgExcludeSeasons  = job.excludeSeasons;
         m_pgExcludeEpisodes = job.excludeEpisodes;
-        plexEnumStart(m_genChannel, m_genDef, job.library, job.match);
+        plexEnumStart(m_genChannel, m_genDef, job.library, job.match, job.showIds);
         return;
     }
 
@@ -4005,7 +4019,8 @@ bool VirtualChannelsBackend::set_channel_source(int channelNumber, const QString
 }
 
 bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &field,
-                                              const QStringList &values) {
+                                              const QStringList &values,
+                                              const QStringList &refs) {
     static const QStringList kAllowed = { QStringLiteral("match"),
                                           QStringLiteral("collections"),
                                           QStringLiteral("playlists") };
@@ -4042,12 +4057,15 @@ bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &
 
             QJsonArray out;
             for (const QJsonValue &v : kept) out.append(v);
-            for (const QString &name : values) {
+            for (int n = 0; n < values.size(); ++n) {
+                const QString name = values[n];
                 if (name.trimmed().isEmpty()) continue;
                 QJsonObject e = existing.value(name);
                 e["name"] = name;
                 e["kind"] = QStringLiteral("series");
                 e["src"]  = slotSourceToString(src);
+                const QString ref = refs.value(n).trimmed();
+                if (!ref.isEmpty()) e["ref"] = ref;
                 out.append(e);
             }
             o[QLatin1String("programmes")] = out;

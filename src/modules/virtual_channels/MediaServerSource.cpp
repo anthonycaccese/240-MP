@@ -280,7 +280,7 @@ void MediaServerSource::genNext() {
     }
 
     const bool named = !m_req.match.isEmpty() || !m_req.titles.isEmpty()
-                       || !m_req.genres.isEmpty();
+                       || !m_req.genres.isEmpty() || !m_req.showIds.isEmpty();
     const bool takesAll = m_req.collections.isEmpty()
                           && (!wantsFilms(m_req.wants) || m_req.anyFilm);
     const bool wantsLibraryItems = named || takesAll;
@@ -453,8 +453,9 @@ void MediaServerSource::onItemsLoaded(const QVariant &items) {
             } else if (wantsFilms(m_req.wants)) {
                 if (type != QLatin1String("movie")) continue;
                 if (!m_req.titles.isEmpty() || !m_req.genres.isEmpty()
-                    || !m_req.match.isEmpty()) {
-                    bool wanted = listContainsCI(m_req.titles, mi.title);
+                    || !m_req.match.isEmpty() || !m_req.showIds.isEmpty()) {
+                    bool wanted = listContainsCI(m_req.titles, mi.title)
+                                  || (!mi.ref.isEmpty() && m_req.showIds.contains(mi.ref));
                     if (!wanted) {
                         for (const QString &g : m.value(QStringLiteral("genres")).toStringList())
                             if (listContainsCI(m_req.genres, g)) { wanted = true; break; }
@@ -471,10 +472,14 @@ void MediaServerSource::onItemsLoaded(const QVariant &items) {
                 }
             } else {
                 if (type != QLatin1String("episode")) continue;
-                if (!m_expandingSeries && !m_req.match.isEmpty()
-                    && !listContainsCI(m_req.match, mi.series)) continue;
-
                 const QString seriesId = m.value(QStringLiteral("seriesId")).toString();
+                if (!m_expandingSeries
+                    && (!m_req.match.isEmpty() || !m_req.showIds.isEmpty())) {
+                    const bool byId   = !seriesId.isEmpty()
+                                        && m_req.showIds.contains(seriesId);
+                    const bool byName = listContainsCI(m_req.match, mi.series);
+                    if (!byId && !byName) continue;
+                }
                 const int season = m.value(QStringLiteral("parentIndex")).toInt();
                 if (!seriesId.isEmpty()
                     && m_req.excludeSeasons.contains(seasonKey(seriesId, season))) continue;

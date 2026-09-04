@@ -124,8 +124,13 @@ public:
 
     Q_INVOKABLE QVariantMap channel_source_config(int channelNumber);
     Q_INVOKABLE bool set_channel_source(int channelNumber, const QString &source);
+    // `refs` runs alongside `values`: the id of each picked series on its
+    // source, where the picker knew it. A blank entry leaves whatever id is
+    // already stored for that name in place, so editing the list from a screen
+    // that never saw the ids cannot throw them away.
     Q_INVOKABLE bool set_channel_list(int channelNumber, const QString &field,
-                                      const QStringList &values);
+                                      const QStringList &values,
+                                      const QStringList &refs = {});
     // `seasonKey` says which season an episode belongs to, so that switching a
     // season back on can put all of its episodes on with it. Ignored for
     // seasons, which have no parent above the series.
@@ -223,6 +228,7 @@ private:
     vchan::ChannelDef m_pgDef;
     QString     m_pgLibraryName;
     QStringList m_pgMatch;
+    QStringList m_pgShowIds;
     QSet<QString> m_pgExcludeSeasons;
     QSet<QString> m_pgExcludeEpisodes;
     QStringList m_pgCollections;
@@ -250,6 +256,9 @@ private:
         QStringList playlists;
         bool anyFilm = true;
         QStringList match;
+        // The picked series' own ids on their source. Preferred over the name:
+        // a show renamed on the server keeps its id.
+        QStringList showIds;
         QSet<QString> excludeSeasons;
         QSet<QString> excludeEpisodes;
         vchan::SlotSource src = vchan::SlotSource::Plex;
@@ -310,7 +319,8 @@ private:
     void finishLocalGeneration();
 
     void plexEnumStart(int channelNumber, const vchan::ChannelDef &def,
-                       const QString &library, const QStringList &match);
+                       const QString &library, const QStringList &match,
+                       const QStringList &showIds = {});
     bool plexExcluded(const QString &ratingKey, bool isSeason) const;
     bool plexItemToMedia(const QVariantMap &m, vchan::MediaItem *out) const;
     void plexEnumNext();
