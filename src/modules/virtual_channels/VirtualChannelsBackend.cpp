@@ -1982,9 +1982,14 @@ void VirtualChannelsBackend::onPlexItemsLoaded(const QVariant &items) {
     for (const QVariant &v : items.toList()) {
         const QVariantMap m = v.toMap();
         const QString title = m.value("title").toString();
+        // A picked series is named in full, so it is matched in full. Matching
+        // on a substring made one entry claim every show whose title began the
+        // same way: "STAR TREK" took the whole franchise, so the six series
+        // named separately beside it aired twice and two nobody asked for
+        // aired at all. Jellyfin and Emby already compare series this way.
         bool wanted = m_pgMatch.isEmpty();
-        for (const QString &needle : m_pgMatch)
-            if (title.contains(needle, Qt::CaseInsensitive)) { wanted = true; break; }
+        for (const QString &want : m_pgMatch)
+            if (title.compare(want, Qt::CaseInsensitive) == 0) { wanted = true; break; }
         if (!wanted) continue;
         const QString key = m.value("ratingKey").toString();
         if (!key.isEmpty()) m_pgShows << key;
