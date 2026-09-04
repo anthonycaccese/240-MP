@@ -1448,11 +1448,22 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                 for (const QString &film : job.titles) {
                     if (job.excludeEpisodes.contains(film)) continue;
                     const QString ref = m_localLibrary.movieRefFor(film);
-                    if (ref.isEmpty())
+                    if (ref.isEmpty()) {
                         qWarning("[VirtualChannels] channel %d: local film '%s' matched nothing",
                                  channelNumber, qPrintable(film));
-                    else
-                        refs << ref;
+                        continue;
+                    }
+                    // A film's year, so broadcast order can place it among the
+                    // episodes rather than in the undated pile at the end.
+                    qint64 filmAir = 0;
+                    for (const vchan::LocalMovie &mv : m_localLibrary.movies()) {
+                        if (mv.ref != ref) continue;
+                        filmAir = airedAtMs(QString(), mv.year > 0 ? QVariant(mv.year) : QVariant());
+                        break;
+                    }
+                    m_genQueue.push_back({ QDir(absRoot).filePath(ref), ref,
+                                           job.pool, job.apptIndex, job.pack,
+                                           QString(), filmAir, -1, -1 });
                 }
                 for (const QString &rel : std::as_const(refs))
                     m_genQueue.push_back({ QDir(absRoot).filePath(rel), rel,
