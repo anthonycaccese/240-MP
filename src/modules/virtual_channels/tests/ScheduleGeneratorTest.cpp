@@ -347,6 +347,22 @@ int runScheduleGeneratorTests() {
                  "and the short series picks up at its own separate place");
     }
 
+    section("generate: a mark on the first episode still advances");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Interleaved;
+        d.horizonHours = 2.0;
+        d.programmes = twoSeriesPool();
+        d.marks.insert("long", "Long-1.mkv");
+        d.marks.insert("short", "Short-1.mkv");
+
+        const QStringList aired = airedRefs(d, 2);
+        checkStr(aired.value(0), QStringLiteral("Long-2.mkv"),
+                 "a series marked at its first episode moves on to the second");
+        checkStr(aired.value(1), QStringLiteral("Short-2.mkv"),
+                 "and so does the one beside it");
+    }
+
     section("generate: adding a series does not move the others");
     {
         ChannelDef d = basicDef();
