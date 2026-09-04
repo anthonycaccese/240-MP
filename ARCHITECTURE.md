@@ -394,9 +394,14 @@ picked films, or a folder, or both.
 **Ordering** is one of three, set per channel:
 
 - **Broadcast** runs the whole pool as one timeline, oldest first, whichever
-  show an episode belongs to. Air date comes from the episode, falling back to
-  its season's or show's year, then to season/episode number, then to title, so
-  a pool with no metadata still lands somewhere stable.
+  show an episode belongs to. The date comes from the episode, falling back to
+  its season's or show's year; anything the library cannot date sorts after
+  everything it can. Programmes sharing a date fall back to series title, then
+  season and episode number, then ref, so a pool with no metadata at all still
+  lands somewhere stable and lands there again on the next build. Note that a
+  date is any non-zero value: a programme first aired before 1970 has a
+  negative one, and reading those as undated put The Twilight Zone among the
+  things nothing was known about.
 - **Interleaved** gives each series a turn in rotation. Each series holds its
   own place and wraps on its own, so a short run comes round again while a long
   one plays on. Dealing one per round from a single cycle instead left the

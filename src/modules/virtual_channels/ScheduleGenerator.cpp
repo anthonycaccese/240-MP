@@ -77,6 +77,17 @@ bool Appointment::airsOn(int qtDayOfWeek) const {
     return days.contains(qtDayOfWeek);
 }
 
+qint64 airedAtMs(const QString &isoDate, const QVariant &yearValue) {
+    const QDate exact = QDate::fromString(isoDate.left(10), Qt::ISODate);
+    if (exact.isValid())
+        return QDateTime(exact, QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
+    bool ok = false;
+    const int year = yearValue.toInt(&ok);
+    if (ok && year > 1800 && year < 2200)
+        return QDateTime(QDate(year, 1, 1), QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
+    return 0;
+}
+
 Ordering orderingFromString(const QString &s) {
     const QString v = s.trimmed().toLower();
     if (v == QLatin1String("shuffle"))     return Ordering::Shuffle;
@@ -157,8 +168,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         QHash<QString, int> byName;
         for (int i = 0; i < progCount; ++i) {
             const QString name = programmes[i].series.trimmed();
-            const QString key = name.isEmpty() ? QStringLiteral("\x1f")
-                                               : name.toLower();
+            const QString key = name.isEmpty() ? unnamedSeriesKey() : name.toLower();
             const auto it = byName.constFind(key);
             if (it == byName.constEnd()) {
                 byName.insert(key, int(groups.size()));
@@ -176,8 +186,13 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     const auto airedBefore = [&programmes](int lhs, int rhs) {
         const MediaItem &a = programmes[lhs];
         const MediaItem &b = programmes[rhs];
-        if ((a.airMs > 0) != (b.airMs > 0)) return a.airMs > 0;
-        if (a.airMs > 0 && a.airMs != b.airMs) return a.airMs < b.airMs;
+        // Zero is the only "unknown": anything else is a date, negative ones
+        // included. Testing for a positive treated every programme first aired
+        // before 1970 as undated, which is most of the classic television this
+        // is for -- Star Trek and The Twilight Zone sorted alphabetically among
+        // the things nothing was known about.
+        if ((a.airMs != 0) != (b.airMs != 0)) return a.airMs != 0;
+        if (a.airMs != 0 && a.airMs != b.airMs) return a.airMs < b.airMs;
         const int byName = a.series.localeAwareCompare(b.series);
         if (byName != 0) return byName < 0;
         if (a.seasonNo  != b.seasonNo)  return a.seasonNo  < b.seasonNo;
@@ -214,11 +229,9 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         }
     };
 
-    // Round-robin across series, each series in its own broadcast order, so a
-    // channel of shows from different decades takes turns instead of airing one
-    // show until it runs out.
-    // Interleaved keeps each series in its own order and gives each a turn.
-    // Sorted once here rather than per pass: the turn order never changes.
+    // Interleaved gives each series a turn, each in its own broadcast order, so
+    // a channel of shows from different decades takes turns instead of airing
+    // one until it runs out. Sorted once: the turn order never changes.
     QVector<int> resume(groups.size(), 0);
     QVector<int> taken(groups.size(), 0);
     qint64 placedHere = 0;

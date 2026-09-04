@@ -1,5 +1,7 @@
 #include "../ChannelSchedule.h"
 #include "../ScheduleGenerator.h"
+
+#include <QTimeZone>
 #include "TestHarness.h"
 
 #include <QDateTime>
@@ -303,6 +305,75 @@ int runScheduleGeneratorTests() {
                  "the short series runs out and starts itself over");
         checkStr(aired.value(8), QStringLiteral("Long-5.mkv"),
                  "while the long series carries on, so the two stop being lined up");
+    }
+
+    section("airedAtMs: what a library knows, and what it does not");
+    {
+        // Before the epoch, so negative -- which is a date, not an absence.
+        const qint64 day = airedAtMs(QStringLiteral("1966-09-08"), QVariant());
+        check(day != 0, "an episode's own date is read");
+        check(day < 0, "a 1966 date lands before the epoch");
+        checkEq(QDateTime::fromMSecsSinceEpoch(day, QTimeZone::utc()).date().year(), 1966,
+                "as the day it says");
+
+        const qint64 stamped = airedAtMs(QStringLiteral("1966-09-08T00:00:00Z"), QVariant());
+        checkEq(stamped, day, "a full timestamp reads the same as a bare date");
+
+        const qint64 yearOnly = airedAtMs(QString(), QVariant(1987));
+        check(yearOnly > 0, "a year alone still dates a programme");
+        check(yearOnly > airedAtMs(QStringLiteral("1966-09-08"), QVariant()),
+              "and sorts after an older one");
+
+        checkEq(airedAtMs(QString(), QVariant()), qint64(0),
+                "nothing at all is undated rather than 1970");
+        checkEq(airedAtMs(QStringLiteral("not a date"), QVariant()), qint64(0),
+                "and so is a date the library mangled");
+        checkEq(airedAtMs(QString(), QVariant(0)), qint64(0),
+                "a year of zero is not a date");
+        checkEq(airedAtMs(QString(), QVariant(9999)), qint64(0),
+                "nor is one outside any plausible range");
+        checkEq(airedAtMs(QString(), QVariant(QStringLiteral("banana"))), qint64(0),
+                "nor is text where a year should be");
+
+        // The date wins: a show's year is only ever a fallback for the episode.
+        const qint64 both = airedAtMs(QStringLiteral("1966-09-08"), QVariant(2020));
+        checkEq(both, day, "an episode's own date beats the show's year");
+    }
+
+    section("generate: broadcast puts pre-1970 shows in their real place");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Broadcast;
+        d.horizonHours = 4.0;
+        d.programmes.clear();
+
+        // Chosen to straddle the epoch, and named so that sorting on the title
+        // would give the opposite answer to sorting on the date.
+        struct Show { const char *name; const char *date; };
+        const Show shows[] = {
+            { "Zebra 1959",  "1959-10-02" },
+            { "Alpha 1987",  "1987-09-28" },
+            { "Middle 1966", "1966-09-08" },
+        };
+        for (const Show &sh : shows) {
+            MediaItem m = item(QString::fromLatin1(sh.name) + QStringLiteral(".mkv"), 600000);
+            m.series = QString::fromLatin1(sh.name);
+            m.airMs  = airedAtMs(QString::fromLatin1(sh.date), QVariant());
+            d.programmes.append(m);
+        }
+
+        const QStringList aired = airedRefs(d, 3);
+        checkStr(aired.value(0), QStringLiteral("Zebra 1959.mkv"), "the oldest airs first");
+        checkStr(aired.value(1), QStringLiteral("Middle 1966.mkv"), "then the next oldest");
+        checkStr(aired.value(2), QStringLiteral("Alpha 1987.mkv"), "then the newest");
+
+        // An undated programme still sorts after everything dated, whichever
+        // side of the epoch the dated ones fall.
+        MediaItem unknown = item(QStringLiteral("Aaa unknown.mkv"), 600000);
+        unknown.series = QStringLiteral("Aaa unknown");
+        d.programmes.append(unknown);
+        checkStr(airedRefs(d, 4).value(3), QStringLiteral("Aaa unknown.mkv"),
+                 "and what nothing is known about comes last, not first");
     }
 
     section("generate: broadcast holds its place when the pool changes");

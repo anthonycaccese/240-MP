@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QString>
+#include <QVariant>
 #include <QVector>
 
 namespace vchan {
@@ -96,6 +97,18 @@ int dayOfWeekFromString(const QString &name);
 QByteArray serializeSchedule(const ChannelDef &def,
                              qint64 generatedAt,
                              const QVector<Slot> &placed);
+
+// The key an item with no series name of its own is grouped and marked under.
+// The generator groups on it and the backend writes marks against it, so it
+// lives here rather than in either: a silent disagreement would lose the place
+// of everything unnamed, which on a real channel means the films.
+inline QString unnamedSeriesKey() { return QStringLiteral("\x1f"); }
+
+// When something first aired, as epoch ms, from whatever a library knows: an
+// episode's own date where there is one, otherwise its season's or show's year,
+// which is enough to keep it among its contemporaries. Zero means the library
+// had nothing and the ordering falls back to alphabetical.
+qint64 airedAtMs(const QString &isoDate, const QVariant &yearValue);
 
 inline constexpr qint64 kMinFillerMs = 1000;
 
