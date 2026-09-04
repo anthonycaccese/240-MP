@@ -18,6 +18,15 @@ struct MediaItem {
     QString    desc;
     QString    art;
     int        pack = -1;
+    // When this first aired, as epoch ms; 0 when nothing could be learned.
+    // Sources fall back from an episode's own date to its season's or show's
+    // year, so "unknown" means the library really has nothing.
+    qint64     airMs = 0;
+    // The numbers behind `ep`. Sorting on the string put episode 100 before
+    // episode 99, and a show numbered by year (Young Indiana Jones) not in any
+    // sensible place at all.
+    int        seasonNo  = -1;
+    int        episodeNo = -1;
 };
 
 struct BreakPack {
@@ -26,7 +35,9 @@ struct BreakPack {
     QVector<MediaItem> outros;
 };
 
-enum class Ordering { Sequential, Shuffle };
+// How a channel lays its programmes out. Broadcast replaced an ordering that
+// sorted by series title, which put a 1978 show before a 1953 one.
+enum class Ordering { Broadcast, Shuffle, Interleaved };
 
 struct Appointment {
     QString name;
@@ -46,7 +57,7 @@ struct ChannelDef {
     QString name;
     quint32 seed = 1;
     double  horizonHours = 24.0;
-    Ordering order = Ordering::Sequential;
+    Ordering order = Ordering::Broadcast;
 
     int gridMinutes = 0;
 

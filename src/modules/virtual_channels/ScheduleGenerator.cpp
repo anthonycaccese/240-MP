@@ -78,13 +78,21 @@ bool Appointment::airsOn(int qtDayOfWeek) const {
 }
 
 Ordering orderingFromString(const QString &s) {
-    return s.trimmed().toLower() == QLatin1String("shuffle") ? Ordering::Shuffle
-                                                             : Ordering::Sequential;
+    const QString v = s.trimmed().toLower();
+    if (v == QLatin1String("shuffle"))     return Ordering::Shuffle;
+    if (v == QLatin1String("interleaved")) return Ordering::Interleaved;
+    // "sequential" is what channels written before this said. It sorted by
+    // series title, which nobody chose on purpose, so it reads as broadcast.
+    return Ordering::Broadcast;
 }
 
 QString orderingToString(Ordering o) {
-    return o == Ordering::Shuffle ? QStringLiteral("shuffle")
-                                  : QStringLiteral("sequential");
+    switch (o) {
+    case Ordering::Shuffle:     return QStringLiteral("shuffle");
+    case Ordering::Interleaved: return QStringLiteral("interleaved");
+    case Ordering::Broadcast:   break;
+    }
+    return QStringLiteral("broadcast");
 }
 
 bool ChannelDef::isPlayable() const {
@@ -160,6 +168,21 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         }
     }
 
+    // Broadcast order: when it first aired. Anything the library could not date
+    // sorts after everything dated, alphabetically, so an undatable show lands
+    // in one predictable place instead of scattered through the day.
+    const auto airedBefore = [&programmes](int lhs, int rhs) {
+        const MediaItem &a = programmes[lhs];
+        const MediaItem &b = programmes[rhs];
+        if ((a.airMs > 0) != (b.airMs > 0)) return a.airMs > 0;
+        if (a.airMs > 0 && a.airMs != b.airMs) return a.airMs < b.airMs;
+        const int byName = a.series.localeAwareCompare(b.series);
+        if (byName != 0) return byName < 0;
+        if (a.seasonNo  != b.seasonNo)  return a.seasonNo  < b.seasonNo;
+        if (a.episodeNo != b.episodeNo) return a.episodeNo < b.episodeNo;
+        return a.ref < b.ref;
+    };
+
     const auto shuffleInto = [&](QVector<int> &into, qint64 pass) {
         std::mt19937 rng(def.seed ^ static_cast<quint32>(pass * 2654435761ull));
         const auto shuffle = [&rng](QVector<int> &v) {
@@ -189,9 +212,37 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         }
     };
 
+    // Round-robin across series, each series in its own broadcast order, so a
+    // channel of shows from different decades takes turns instead of airing one
+    // show until it runs out.
+    const auto interleaveInto = [&](QVector<int> &into) {
+        QVector<QVector<int>> dealt = groups;
+        for (QVector<int> &one : dealt)
+            std::sort(one.begin(), one.end(), airedBefore);
+
+        into.clear();
+        into.reserve(progCount);
+        QVector<int> taken(dealt.size(), 0);
+        for (bool any = true; any; ) {
+            any = false;
+            for (int t = 0; t < dealt.size(); ++t) {
+                if (taken[t] >= dealt[t].size()) continue;
+                into.append(dealt[t][taken[t]++]);
+                any = true;
+            }
+        }
+    };
+
     const auto loadPass = [&](qint64 pass) {
         for (int i = 0; i < progCount; ++i) order[i] = i;
-        if (def.order != Ordering::Shuffle) return;
+        if (def.order == Ordering::Broadcast) {
+            std::sort(order.begin(), order.end(), airedBefore);
+            return;
+        }
+        if (def.order == Ordering::Interleaved) {
+            interleaveInto(order);
+            return;
+        }
         shuffleInto(order, pass);
 
         if (progCount > 1 && pass > 0) {

@@ -1,5 +1,8 @@
 #include "MediaServerSource.h"
 
+#include <QDateTime>
+#include <QTimeZone>
+
 #include <QDebug>
 #include <QMetaObject>
 #include <QTimer>
@@ -201,11 +204,29 @@ bool MediaServerSource::itemToMedia(const QVariantMap &m, SlotSource src, MediaI
 
     const int season  = m.value(QStringLiteral("parentIndex")).toInt();
     const int episode = m.value(QStringLiteral("index")).toInt();
+    out->seasonNo  = season  > 0 ? season  : -1;
+    out->episodeNo = episode > 0 ? episode : -1;
     out->ep = (season > 0 && episode > 0)
                   ? QStringLiteral("S%1E%2")
                         .arg(season,  2, 10, QLatin1Char('0'))
                         .arg(episode, 2, 10, QLatin1Char('0'))
                   : QString();
+
+    // Both backends already fold PremiereDate into "releaseDate" and
+    // ProductionYear into "year". Emby asks for those fields explicitly;
+    // Jellyfin does not, so an empty date here is expected rather than wrong,
+    // and the year carries the ordering.
+    const QDate aired = QDate::fromString(
+        m.value(QStringLiteral("releaseDate")).toString().left(10), Qt::ISODate);
+    if (aired.isValid()) {
+        out->airMs = QDateTime(aired, QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
+    } else {
+        bool ok = false;
+        const int year = m.value(QStringLiteral("year")).toInt(&ok);
+        if (ok && year > 1800 && year < 2200)
+            out->airMs = QDateTime(QDate(year, 1, 1), QTime(0, 0),
+                                   QTimeZone::utc()).toMSecsSinceEpoch();
+    }
     return true;
 }
 
