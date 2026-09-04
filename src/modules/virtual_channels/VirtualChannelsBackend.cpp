@@ -1088,6 +1088,39 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
     for (const PoolJob &j : std::as_const(jobs))
         if (j.pool == SlotKind::Programme) { haveProgrammes = true; break; }
 
+    // Collections and playlists picked in the interface are still written to
+    // the channel's source block, so they have to be read whether or not the
+    // pool also holds entries. Only `match` there is legacy: reading that
+    // beside the entries would air the same shows twice. Without this a
+    // collection showed as ticked on the sources screen and never aired.
+    if (haveProgrammes) {
+        for (const SlotSource src : { SlotSource::Plex, SlotSource::Jellyfin,
+                                      SlotSource::Emby }) {
+            const QString block = sourceBlockName(src);
+            if (!channel.contains(block)) continue;
+            const QJsonObject cfg = channel.value(block).toObject();
+
+            PoolJob job;
+            job.pool    = SlotKind::Programme;
+            job.src     = src;
+            job.wants   = MediaServerSource::Request::Wants::Episodes;
+            job.anyFilm = false;
+            job.library = cfg.value(QLatin1String("library")).toString();
+            for (const QJsonValue &v : cfg.value(QLatin1String("collections")).toArray())
+                if (v.isString()) job.collections << v.toString();
+            for (const QJsonValue &v : cfg.value(QLatin1String("playlists")).toArray())
+                if (v.isString()) job.playlists << v.toString();
+            if (job.collections.isEmpty() && job.playlists.isEmpty()) continue;
+
+            const QJsonObject excl = cfg.value(QLatin1String("exclude")).toObject();
+            for (const QJsonValue &v : excl.value(QLatin1String("seasons")).toArray())
+                if (v.isString()) job.excludeSeasons.insert(v.toString());
+            for (const QString &ep : excludedEpisodesIn(excl))
+                job.excludeEpisodes.insert(ep);
+            jobs.append(job);
+        }
+    }
+
     if (!haveProgrammes) {
         for (const SlotSource src : { SlotSource::Local, SlotSource::Plex,
                                      SlotSource::Jellyfin, SlotSource::Emby }) {
@@ -1565,6 +1598,28 @@ void VirtualChannelsBackend::onGenerationTick() {
 }
 
 void VirtualChannelsBackend::finishLocalGeneration() {
+    // One episode can reach the pool by more than one road -- picked as a
+    // series and again inside a collection that holds the same show. A pool
+    // holding it twice airs it twice as often as everything beside it, and
+    // the second copy sits one place along, so a rebuild resuming after the
+    // first lands straight back on it. The first arrival wins.
+    {
+        QSet<QString> seen;
+        QVector<MediaItem> once;
+        once.reserve(m_genDef.programmes.size());
+        for (const MediaItem &m : std::as_const(m_genDef.programmes)) {
+            if (!m.ref.isEmpty() && seen.contains(m.ref)) continue;
+            if (!m.ref.isEmpty()) seen.insert(m.ref);
+            once.append(m);
+        }
+        if (once.size() != m_genDef.programmes.size())
+            qInfo("[VirtualChannels] channel %d: %lld programme(s) reached the pool "
+                  "more than once and were kept once",
+                  m_genChannel,
+                  static_cast<long long>(m_genDef.programmes.size() - once.size()));
+        m_genDef.programmes = once;
+    }
+
     if (!m_genDef.isPlayable()) {
         finishGeneration(false, QStringLiteral("No programmes with a usable duration"));
         return;
@@ -3746,6 +3801,10 @@ QVariantList VirtualChannelsBackend::channel_pool(int channelNumber, const QStri
                 e["name"] = j.value(QLatin1String("name")).toString();
                 e["count"] = -1;
             }
+            // Carried out and back so that a screen editing the pool returns
+            // the show's id rather than dropping it.
+            const QString ref = j.value(QLatin1String("ref")).toString();
+            if (!ref.isEmpty()) e["ref"] = ref;
             for (const char *k : { "intros", "outros" }) {
                 QStringList folders;
                 for (const QJsonValue &f : j.value(QLatin1String(k)).toArray())
@@ -3823,6 +3882,8 @@ bool VirtualChannelsBackend::set_channel_pool(int channelNumber, const QString &
             }
             e["kind"] = kind;
             e["name"] = name;
+            const QString ref = m.value(QStringLiteral("ref")).toString().trimmed();
+            if (!ref.isEmpty()) e["ref"] = ref;
         }
 
         for (const char *k : { "intros", "outros" }) {
@@ -3848,9 +3909,20 @@ bool VirtualChannelsBackend::set_channel_pool(int channelNumber, const QString &
         if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
         if (arr.isEmpty()) o.remove(QLatin1String(field));
         else               o[QLatin1String(field)] = arr;
+        // Writing entries retires only the legacy whole-channel series list,
+        // which would otherwise air the same shows a second time. The rest of
+        // the block stays: it holds the seasons and episodes switched off, and
+        // the collections and playlists, none of which the entries carry.
+        // Removing the block outright discarded all of it.
         if (QLatin1String(field) == QLatin1String("programmes") && !arr.isEmpty())
-            for (const SlotSource sb : { SlotSource::Plex, SlotSource::Jellyfin, SlotSource::Emby })
-                o.remove(sourceBlockName(sb));
+            for (const SlotSource sb : { SlotSource::Plex, SlotSource::Jellyfin, SlotSource::Emby }) {
+                const QString block = sourceBlockName(sb);
+                if (!o.contains(block)) continue;
+                QJsonObject b = o.value(block).toObject();
+                b.remove(QLatin1String("match"));
+                if (b.isEmpty()) o.remove(block);
+                else             o[block] = b;
+            }
         channels[i] = o;
         return writeChannels(channels);
     }

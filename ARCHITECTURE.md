@@ -371,6 +371,18 @@ time that show is picked, and `set_channel_list` leaves a stored id alone when
 the caller passes none, so editing the list from a screen that never saw the
 ids cannot discard them.
 
+**Collections and playlists live in the source block, not in the entry list**,
+and are read whether or not the pool also holds entries. Only the block's
+`match` is legacy — it is read when the pool has no entries at all, and writing
+entries retires it, because reading both would air the same shows twice. The
+rest of the block survives a pool save: it carries the seasons and episodes
+switched off as well as the collections, none of which an entry holds.
+
+**The pool is de-duplicated by ref before a build.** One episode can arrive by
+two roads — picked as a series and again inside a collection holding the same
+show — and a pool holding it twice airs it twice as often as everything beside
+it.
+
 **Exclusions** live in the channel's own source block, not on the entry:
 `exclude.seasons` is a list of season keys, `exclude.episodes` is a map of
 season key → episode refs. Both must be read when generating, or a season
