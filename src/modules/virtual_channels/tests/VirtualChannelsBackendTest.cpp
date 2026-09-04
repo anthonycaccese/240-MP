@@ -271,6 +271,64 @@ void testSeriesIdsAreKept() {
     check(beyondGone, "and takes its id with it");
 }
 
+void testPoolSaveKeepsWhatItDoesNotOwn() {
+    section("Backend: saving a pool keeps the ids, exclusions and collections");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+
+    QJsonObject entry;
+    entry["src"]  = QStringLiteral("plex");
+    entry["kind"] = QStringLiteral("series");
+    entry["name"] = QStringLiteral("Deep Space Nine");
+    entry["ref"]  = QStringLiteral("6049");
+    QJsonArray programmes;
+    programmes.append(entry);
+    ch["programmes"] = programmes;
+
+    // The things the entries do not carry, which used to go with the block.
+    QJsonObject excl;
+    QJsonArray seasons;
+    seasons.append(QStringLiteral("s1"));
+    excl["seasons"] = seasons;
+    QJsonObject plex;
+    plex["exclude"] = excl;
+    QJsonArray cols;
+    cols.append(QStringLiteral("STARGATE"));
+    plex["collections"] = cols;
+    QJsonArray legacy;
+    legacy.append(QStringLiteral("An Old Name"));
+    plex["match"] = legacy;
+    ch["plex"] = plex;
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+
+    QVariantList round;
+    for (const QVariant &v : b.channel_pool(3, QStringLiteral("programmes")))
+        round.append(v);
+    check(!round.isEmpty(), "the pool reads back");
+    check(b.set_channel_pool(3, QStringLiteral("programmes"), round),
+          "and saves again unchanged");
+
+    const QJsonObject after = fx.read(3);
+    QString keptRef;
+    for (const QJsonValue &v : after.value(QLatin1String("programmes")).toArray())
+        if (v.toObject().value(QLatin1String("name")).toString()
+            == QLatin1String("Deep Space Nine"))
+            keptRef = v.toObject().value(QLatin1String("ref")).toString();
+    checkStr(keptRef, QStringLiteral("6049"), "the show keeps the id it was picked with");
+
+    const QJsonObject blockAfter = after.value(QLatin1String("plex")).toObject();
+    checkEq(blockAfter.value(QLatin1String("exclude")).toObject()
+                      .value(QLatin1String("seasons")).toArray().size(), 1,
+            "a season switched off stays switched off");
+    checkEq(blockAfter.value(QLatin1String("collections")).toArray().size(), 1,
+            "a collection on the channel is still there");
+    check(!blockAfter.contains(QLatin1String("match")),
+          "while the legacy series list is retired, so nothing airs twice");
+}
+
 void testSourceSwitchSticks() {
     section("Backend: switching a channel's source takes effect");
 
@@ -443,6 +501,7 @@ int runVirtualChannelsBackendTests() {
     testPoolReadBack();
     testIdentsSurviveASeriesRewrite();
     testSeriesIdsAreKept();
+    testPoolSaveKeepsWhatItDoesNotOwn();
     testSourceSwitchSticks();
     testExclusionsOnALocalChannel();
     testBookingWrites();
