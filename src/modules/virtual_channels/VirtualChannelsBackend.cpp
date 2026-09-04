@@ -2053,7 +2053,14 @@ void VirtualChannelsBackend::onPlexItemsLoaded(const QVariant &items) {
         // it is matched on its whole name: matching on a substring made one
         // entry claim every show whose title began the same way, so "STAR TREK"
         // took the whole franchise. Jellyfin and Emby already compare in full.
-        bool wanted = m_pgMatch.isEmpty() && m_pgShowIds.isEmpty();
+        // Nothing named at all means the whole library, which is what a channel
+        // pointed at a library asks for. A job scoped to a collection or a
+        // playlist has named something: its shows arrive from that listing, so
+        // taking them from here as well would sweep in the entire library.
+        const bool takesWholeLibrary =
+            m_pgMatch.isEmpty() && m_pgShowIds.isEmpty()
+            && m_pgCollections.isEmpty() && m_pgPlaylists.isEmpty();
+        bool wanted = takesWholeLibrary;
         if (!wanted && !key.isEmpty() && m_pgShowIds.contains(key)) wanted = true;
         for (const QString &want : m_pgMatch) {
             if (wanted) break;
