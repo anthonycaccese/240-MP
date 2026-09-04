@@ -464,6 +464,12 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             place(padPool[chosen].first, padPool[chosen].second);
             progress = true;
         }
+
+        // Whatever break content could not cover, the card holds — the same as
+        // the grid path. A free-run channel with a movie slot and nothing short
+        // enough to pad with was otherwise left as a hole, and a hole is dead
+        // air: the tuner reports the channel off between the two.
+        if (t < limit) placeFiller(limit - t);
     };
 
     const auto fillGrid = [&](qint64 limit) {
