@@ -220,17 +220,27 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         for (QVector<int> &one : dealt)
             std::sort(one.begin(), one.end(), airedBefore);
 
+        // Spread each series evenly across the whole cycle, in proportion to
+        // how many episodes it has. Dealing one each in turn instead looks
+        // right until the shortest series runs out: every remaining round is
+        // then the longest series alone, so a channel of four shows ends in an
+        // unbroken block of whichever has the most episodes.
+        struct Placed { double at; int index; };
+        QVector<Placed> spread;
+        spread.reserve(progCount);
+        for (const QVector<int> &one : dealt) {
+            const double count = double(one.size());
+            for (int k = 0; k < one.size(); ++k)
+                spread.append({ (double(k) + 0.5) / count, one[k] });
+        }
+        // Stable, so series of equal length keep the order they were grouped
+        // in and a rebuild lays out the same timeline.
+        std::stable_sort(spread.begin(), spread.end(),
+                         [](const Placed &a, const Placed &b) { return a.at < b.at; });
+
         into.clear();
         into.reserve(progCount);
-        QVector<int> taken(dealt.size(), 0);
-        for (bool any = true; any; ) {
-            any = false;
-            for (int t = 0; t < dealt.size(); ++t) {
-                if (taken[t] >= dealt[t].size()) continue;
-                into.append(dealt[t][taken[t]++]);
-                any = true;
-            }
-        }
+        for (const Placed &p : spread) into.append(p.index);
     };
 
     const auto loadPass = [&](qint64 pass) {

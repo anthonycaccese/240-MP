@@ -257,6 +257,48 @@ int runScheduleGeneratorTests() {
         checkStr(aired.value(2), QStringLiteral("Alpha-2.mkv"), "and continues in order on its next turn");
     }
 
+    section("generate: a long series does not end up playing alone");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Interleaved;
+        d.horizonHours = 12.0;
+
+        QVector<MediaItem> progs;
+        for (int ep = 1; ep <= 12; ++ep) {
+            MediaItem m = item(QStringLiteral("Long-%1.mkv").arg(ep), 600000);
+            m.series = "Long"; m.seasonNo = 1; m.episodeNo = ep;
+            progs.append(m);
+        }
+        for (int ep = 1; ep <= 3; ++ep) {
+            MediaItem m = item(QStringLiteral("Short-%1.mkv").arg(ep), 600000);
+            m.series = "Short"; m.seasonNo = 1; m.episodeNo = ep;
+            progs.append(m);
+        }
+        d.programmes = progs;
+
+        QStringList aired;
+        for (const Slot &sl : generateSlots(d, kBase))
+            if (sl.kind == SlotKind::Programme && aired.size() < 15) aired << sl.ref;
+
+        // Dealing one each in turn would put all three Shorts in the first six
+        // slots and leave nine straight Longs after them.
+        int longestRun = 0, run = 0;
+        QString previous;
+        for (const QString &ref : aired) {
+            const QString show = ref.section(QLatin1Char('-'), 0, 0);
+            run = (show == previous) ? run + 1 : 1;
+            previous = show;
+            longestRun = qMax(longestRun, run);
+        }
+        check(longestRun <= 5, "the longer series never runs more than a few deep");
+
+        int lastShortAt = -1;
+        for (int i = 0; i < aired.size(); ++i)
+            if (aired[i].startsWith("Short")) lastShortAt = i;
+        check(lastShortAt > aired.size() / 2,
+              "the shorter series still appears in the back half of the cycle");
+    }
+
     section("generate: episode 10 airs after episode 9");
     {
         ChannelDef d = basicDef();
