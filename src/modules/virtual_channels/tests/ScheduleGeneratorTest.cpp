@@ -185,6 +185,103 @@ int runScheduleGeneratorTests() {
               "no programme repeats until every one has aired");
     }
 
+    section("generate: broadcast order airs oldest first");
+    {
+        const qint64 day = 86400000LL;
+        ChannelDef d = basicDef();
+        d.order = Ordering::Broadcast;
+        d.horizonHours = 2.0;
+
+        MediaItem newer = item("newer.mkv", 600000);
+        newer.series = "Zulu Show"; newer.airMs = 900 * day;
+        MediaItem older = item("older.mkv", 600000);
+        older.series = "Alpha Show"; older.airMs = 100 * day;
+        MediaItem middle = item("middle.mkv", 600000);
+        middle.series = "Mike Show"; middle.airMs = 500 * day;
+        d.programmes = { newer, older, middle };
+
+        QStringList aired;
+        for (const Slot &sl : generateSlots(d, kBase))
+            if (sl.kind == SlotKind::Programme && aired.size() < 3) aired << sl.ref;
+        checkStr(aired.value(0), QStringLiteral("older.mkv"), "oldest airs first");
+        checkStr(aired.value(1), QStringLiteral("middle.mkv"), "then the middle one");
+        checkStr(aired.value(2), QStringLiteral("newer.mkv"), "then the newest");
+    }
+
+    section("generate: undated programmes sort after dated ones");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Broadcast;
+        d.horizonHours = 2.0;
+
+        MediaItem dated = item("dated.mkv", 600000);
+        dated.series = "Zulu Show"; dated.airMs = 500 * 86400000LL;
+        MediaItem undated = item("undated.mkv", 600000);
+        undated.series = "Alpha Show"; undated.airMs = 0;
+        d.programmes = { undated, dated };
+
+        QStringList aired;
+        for (const Slot &sl : generateSlots(d, kBase))
+            if (sl.kind == SlotKind::Programme && aired.size() < 2) aired << sl.ref;
+        checkStr(aired.value(0), QStringLiteral("dated.mkv"),
+                 "a dated programme airs before one with no date at all");
+    }
+
+    section("generate: interleaved takes turns, each series in order");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Interleaved;
+        d.horizonHours = 3.0;
+
+        QVector<MediaItem> progs;
+        const char *shows[] = { "Alpha", "Beta" };
+        for (const char *show : shows) {
+            for (int ep = 1; ep <= 3; ++ep) {
+                MediaItem m = item(QStringLiteral("%1-%2.mkv").arg(show).arg(ep), 600000);
+                m.series = QString::fromLatin1(show);
+                m.seasonNo = 1;
+                m.episodeNo = ep;
+                m.airMs = qint64(ep) * 86400000LL;
+                progs.append(m);
+            }
+        }
+        d.programmes = progs;
+
+        QStringList aired;
+        for (const Slot &sl : generateSlots(d, kBase))
+            if (sl.kind == SlotKind::Programme && aired.size() < 6) aired << sl.ref;
+
+        check(aired.value(0).startsWith("Alpha") && aired.value(1).startsWith("Beta"),
+              "the two series alternate rather than running in blocks");
+        checkStr(aired.value(0), QStringLiteral("Alpha-1.mkv"), "each series starts at its first episode");
+        checkStr(aired.value(2), QStringLiteral("Alpha-2.mkv"), "and continues in order on its next turn");
+    }
+
+    section("generate: episode 10 airs after episode 9");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Broadcast;
+        d.horizonHours = 2.0;
+
+        QVector<MediaItem> progs;
+        for (int ep : { 9, 10, 2 }) {
+            MediaItem m = item(QStringLiteral("ep%1.mkv").arg(ep), 600000);
+            m.series = "One Show";
+            m.seasonNo = 1;
+            m.episodeNo = ep;
+            m.airMs = 0;   // undated: the numbers have to settle it
+            progs.append(m);
+        }
+        d.programmes = progs;
+
+        QStringList aired;
+        for (const Slot &sl : generateSlots(d, kBase))
+            if (sl.kind == SlotKind::Programme && aired.size() < 3) aired << sl.ref;
+        checkStr(aired.value(0), QStringLiteral("ep2.mkv"),  "episode 2 first");
+        checkStr(aired.value(1), QStringLiteral("ep9.mkv"),  "then 9");
+        checkStr(aired.value(2), QStringLiteral("ep10.mkv"), "then 10, not before 9");
+    }
+
     section("generate: bounded");
     {
         ChannelDef d = basicDef();

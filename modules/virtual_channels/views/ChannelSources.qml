@@ -58,7 +58,7 @@ FocusScope {
     property string channelLogo: ""
     property int gridMinutes: 0
     property int adsPerBreak: 0
-    property string order: "sequential"
+    property string order: "broadcast"
 
     readonly property var gridChoices: [0, 15, 30, 60]
 
@@ -159,7 +159,9 @@ FocusScope {
                              : src + (src === 1 ? " SOURCE" : " SOURCES")
         }
         case "order":
-            return sourcesRoot.order === "shuffle" ? "SHUFFLE" : "IN ORDER"
+            return sourcesRoot.order === "shuffle" ? "SHUFFLE"
+                 : sourcesRoot.order === "interleaved" ? "INTERLEAVED"
+                                                       : "BROADCAST"
         case "timing":
             return sourcesRoot.gridMinutes === 0
                    ? "FREE RUN" : "ON THE " + sourcesRoot.gridMinutes + " MIN"
@@ -191,7 +193,9 @@ FocusScope {
         case "logo":        return "The mark this channel flies in the corner. Its size and position are under Channel Logo in Channels settings."
         case "order":       return sourcesRoot.order === "shuffle"
                                    ? "Series take turns, and everything plays once before anything repeats."
-                                   : "Episodes play in order, which is what a series wants."
+                                 : sourcesRoot.order === "interleaved"
+                                   ? "Series take turns, each playing in order. Use this when the channel holds shows from different eras."
+                                   : "Everything airs in the order it first did, oldest first, whichever show it belongs to."
         case "timing":      return sourcesRoot.gridMinutes === 0
                                    ? "Free run: each program starts when the last one ended."
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
@@ -216,7 +220,9 @@ FocusScope {
         var r = rows[current]
         if (r === "source") { cycleSource(delta); return }
         if (r === "order") {
-            var next = order === "shuffle" ? "sequential" : "shuffle"
+            var next = order === "broadcast" ? "interleaved"
+                     : order === "interleaved" ? "shuffle"
+                                               : "broadcast"
             if (!virtualChannelsBackend.set_channel_order(channelNumber, next))
                 status = "Could not change the order"
             else { status = ""; reload() }

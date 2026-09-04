@@ -334,7 +334,13 @@ private:
     vchan::ChannelDef m_genDef;
     struct PendingItem { QString absPath; QString rel; vchan::SlotKind kind;
                          int apptIndex = -1;
-                         int pack = -1; };
+                         int pack = -1;
+                         // Known only for library items. A folder of clips has
+                         // none of this and falls back to its directory name.
+                         QString series;
+                         qint64  airMs = 0;
+                         int     seasonNo = -1;
+                         int     episodeNo = -1; };
     QVector<PendingItem> m_genQueue;
     int     m_genCursor = 0;
 

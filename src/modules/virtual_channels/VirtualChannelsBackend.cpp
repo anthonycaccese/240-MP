@@ -4,6 +4,7 @@
 #include "PathGuard.h"
 
 #include <QDateTime>
+#include <QTimeZone>
 #include <QDir>
 #include <QDirIterator>
 #include <QElapsedTimer>
@@ -269,6 +270,21 @@ QVariantMap VirtualChannelsBackend::channelObject(int channelNumber) const {
             return o.toVariantMap();
     }
     return {};
+}
+
+// When a programme first aired, as epoch ms, from whatever the library knows.
+// An episode's own date is best; a season's or show's year is enough to keep it
+// among its contemporaries; zero means the library had nothing and the ordering
+// falls back to alphabetical.
+qint64 airMsFrom(const QString &isoDate, const QVariant &yearValue) {
+    const QDate exact = QDate::fromString(isoDate.left(10), Qt::ISODate);
+    if (exact.isValid())
+        return QDateTime(exact, QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
+    bool ok = false;
+    const int year = yearValue.toInt(&ok);
+    if (ok && year > 1800 && year < 2200)
+        return QDateTime(QDate(year, 1, 1), QTime(0, 0), QTimeZone::utc()).toMSecsSinceEpoch();
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1361,7 +1377,23 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                     if (eps.isEmpty())
                         qWarning("[VirtualChannels] channel %d: local series '%s' matched nothing",
                                  channelNumber, qPrintable(showName));
-                    for (const vchan::LocalEpisode &ep : eps) refs << ep.ref;
+
+                    // The show, not the season folder the file happens to sit
+                    // in: grouping keys on this, and every "Season 1" would
+                    // otherwise be treated as one programme.
+                    QString display = showName;
+                    qint64  showAir = 0;
+                    for (const vchan::LocalShow &sh : m_localLibrary.shows()) {
+                        if (!vchan::LocalLibrary::matchesName(sh.name, sh.year, sh.folder, showName))
+                            continue;
+                        display = sh.name;
+                        showAir = airMsFrom(QString(), sh.year > 0 ? QVariant(sh.year) : QVariant());
+                        break;
+                    }
+                    for (const vchan::LocalEpisode &ep : eps)
+                        m_genQueue.push_back({ QDir(absRoot).filePath(ep.ref), ep.ref,
+                                               job.pool, job.apptIndex, job.pack,
+                                               display, showAir, ep.season, ep.number });
                 }
                 for (const QString &film : job.titles) {
                     if (job.excludeEpisodes.contains(film)) continue;
@@ -1453,8 +1485,15 @@ void VirtualChannelsBackend::onGenerationTick() {
         m.src   = SlotSource::Local;
         m.durMs = dur;
         m.title = QFileInfo(p.rel).completeBaseName();
-        const QString parent = QFileInfo(p.rel).dir().dirName();
-        if (!parent.isEmpty() && parent != QLatin1String(".")) m.series = parent;
+        m.airMs     = p.airMs;
+        m.seasonNo  = p.seasonNo;
+        m.episodeNo = p.episodeNo;
+        if (!p.series.isEmpty()) {
+            m.series = p.series;
+        } else {
+            const QString parent = QFileInfo(p.rel).dir().dirName();
+            if (!parent.isEmpty() && parent != QLatin1String(".")) m.series = parent;
+        }
 
         if (p.apptIndex >= 0 && p.apptIndex < m_genDef.appointments.size()) {
             m_genDef.appointments[p.apptIndex].pool.append(m);
@@ -1636,10 +1675,16 @@ bool VirtualChannelsBackend::plexItemToMedia(const QVariantMap &m, MediaItem *ou
     }
     const int season  = m.value("parentIndex").toInt();
     const int episode = m.value("index").toInt();
+    out->seasonNo  = season  > 0 ? season  : -1;
+    out->episodeNo = episode > 0 ? episode : -1;
     if (season > 0 && episode > 0)
         out->ep = QStringLiteral("S%1E%2")
                       .arg(season, 2, 10, QLatin1Char('0'))
                       .arg(episode, 2, 10, QLatin1Char('0'));
+
+    QVariant year = m.value("year");
+    if (!year.isValid() || year.toInt() <= 0) year = m.value("parentYear");
+    out->airMs = airMsFrom(m.value("originallyAvailableAt").toString(), year);
     return true;
 }
 
@@ -2359,6 +2404,8 @@ void VirtualChannelsBackend::plexEnumFinish() {
     std::sort(m_pgEpisodes.begin(), m_pgEpisodes.end(),
               [](const MediaItem &a, const MediaItem &b) {
                   if (a.series != b.series) return a.series < b.series;
+                  if (a.seasonNo  != b.seasonNo)  return a.seasonNo  < b.seasonNo;
+                  if (a.episodeNo != b.episodeNo) return a.episodeNo < b.episodeNo;
                   return a.ep < b.ep;
               });
 
@@ -3045,7 +3092,7 @@ int VirtualChannelsBackend::create_channel(const QString &name) {
     ch["number"]        = number;
     ch["name"]          = wanted;
     ch["seed"]          = number;
-    ch["order"]         = QStringLiteral("sequential");
+    ch["order"]         = QStringLiteral("broadcast");
     ch["ads_per_break"] = 0;
 
     const QString absRoot = QFileInfo(m_mediaRoot).canonicalFilePath();
