@@ -368,9 +368,31 @@ switched off in the interface airs anyway.
 **Movie slots** (`appointments`) are films at fixed times. A slot draws on
 picked films, or a folder, or both.
 
-**Rotation is per show, not per episode**: each programme in the pool takes its
-turn equally, so a three-episode entry comes round as often as a five-hundred
-episode one.
+**Ordering** is one of three, set per channel:
+
+- **Broadcast** runs the whole pool as one timeline, oldest first, whichever
+  show an episode belongs to. Air date comes from the episode, falling back to
+  its season's or show's year, then to season/episode number, then to title, so
+  a pool with no metadata still lands somewhere stable.
+- **Interleaved** gives each series a turn in rotation. Each series holds its
+  own place and wraps on its own, so a short run comes round again while a long
+  one plays on. Dealing one per round from a single cycle instead left the
+  longest series playing alone once the others were spent.
+- **Shuffle** plays the pool through in a random order, everything once before
+  anything repeats, reshuffling each pass.
+
+**Where a channel had got to is stored as refs, not offsets.** The schedule
+file carries `marks` (series key → the ref that series last aired) and `mark`
+(the same for the one timeline Broadcast runs), both as of the moment the
+window opened; `marksAt` replays the old slot list up to now, exactly as
+`rotationAt` does for the count. A build resumes each series after its own
+mark. This is what makes a position survive editing the pool: an offset shifts
+the moment an episode is added or removed anywhere ahead of it, so every show
+would jump, whereas a ref still names the same episode. A mark naming an
+episode the library no longer has reads as absent, and only that series starts
+over. `rotation` remains a count of programmes aired; Interleaved uses it only
+to decide whose turn is next, never where in a series to resume. A schedule
+written before marks existed has only the count, which Broadcast still honours.
 
 **Tests.** `vchan-tests` covers the schedule, tuner, generator, path guard,
 duration probe, media-server source, local library and the backend's write

@@ -152,6 +152,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     QVector<int> order(progCount);
 
     QVector<QVector<int>> groups;
+    QVector<QString> groupKeys;
     {
         QHash<QString, int> byName;
         for (int i = 0; i < progCount; ++i) {
@@ -162,6 +163,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             if (it == byName.constEnd()) {
                 byName.insert(key, int(groups.size()));
                 groups.append(QVector<int>{ i });
+                groupKeys.append(key);
             } else {
                 groups[it.value()].append(i);
             }
@@ -217,16 +219,46 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     // show until it runs out.
     // Interleaved keeps each series in its own order and gives each a turn.
     // Sorted once here rather than per pass: the turn order never changes.
-    if (def.order == Ordering::Interleaved)
-        for (QVector<int> &one : groups)
+    QVector<int> resume(groups.size(), 0);
+    QVector<int> taken(groups.size(), 0);
+    qint64 placedHere = 0;
+
+    // Broadcast runs one timeline for the whole channel, so it keeps one place.
+    // Held as a ref rather than an offset: adding an episode anywhere in the
+    // pool shifts every offset after it, but the mark still names the same
+    // programme, so the channel carries on from where it actually was.
+    QVector<int> broadcastOrder(progCount);
+    int resumeAired = 0;
+    if (def.order == Ordering::Broadcast) {
+        for (int i = 0; i < progCount; ++i) broadcastOrder[i] = i;
+        std::sort(broadcastOrder.begin(), broadcastOrder.end(), airedBefore);
+        // A schedule written before marks existed carries only the count, which
+        // says the same thing as long as the pool has not changed since.
+        resumeAired = int(rotation % progCount);
+        if (!def.mark.isEmpty()) {
+            for (int k = 0; k < progCount; ++k) {
+                if (programmes[broadcastOrder[k]].ref == def.mark) { resumeAired = k + 1; break; }
+            }
+        }
+    }
+    if (def.order == Ordering::Interleaved) {
+        for (int g = 0; g < groups.size(); ++g) {
+            QVector<int> &one = groups[g];
             std::sort(one.begin(), one.end(), airedBefore);
+
+            // Resume after the episode this series last aired. A mark for an
+            // episode no longer in the library reads as absent, so a series
+            // whose files moved restarts rather than refusing to air.
+            const QString mark = def.marks.value(groupKeys[g]);
+            if (mark.isEmpty()) continue;
+            for (int k = 0; k < one.size(); ++k) {
+                if (programmes[one[k]].ref == mark) { resume[g] = k + 1; break; }
+            }
+        }
+    }
 
     const auto loadPass = [&](qint64 pass) {
         for (int i = 0; i < progCount; ++i) order[i] = i;
-        if (def.order == Ordering::Broadcast) {
-            std::sort(order.begin(), order.end(), airedBefore);
-            return;
-        }
         shuffleInto(order, pass);
 
         if (progCount > 1 && pass > 0) {
@@ -237,17 +269,26 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         }
     };
 
+    const auto advanceProgramme = [&]() {
+        if (def.order == Ordering::Interleaved)
+            ++taken[int(rotation % groups.size())];
+        ++placedHere;
+        ++rotation;
+    };
+
     const auto peekProgramme = [&]() -> const MediaItem & {
         if (def.order == Ordering::Interleaved) {
             // One episode of each series in turn, then round again. Each series
             // holds its own place and wraps on its own, so a short run repeats
             // sooner rather than leaving a long one playing by itself, and the
             // series drift out of step instead of restarting together.
-            const qint64 seriesCount = groups.size();
-            const QVector<int> &turn = groups[int(rotation % seriesCount)];
-            const qint64 visit = rotation / seriesCount;
-            return programmes[turn[int(visit % turn.size())]];
+            const int s = int(rotation % groups.size());
+            const QVector<int> &turn = groups[s];
+            return programmes[turn[(resume[s] + taken[s]) % turn.size()]];
         }
+        if (def.order == Ordering::Broadcast)
+            return programmes[broadcastOrder[int((resumeAired + placedHere) % progCount)]];
+
         const qint64 pass = rotation / progCount;
         if (pass != loadedPass) { loadedPass = pass; loadPass(pass); }
         return programmes[order[rotation % progCount]];
@@ -391,7 +432,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             qint64 need = prog.durMs + (intro ? intro->durMs : 0);
             if (t + need > limit) break;
 
-            ++rotation;
+            advanceProgramme();
             if (intro) place(*intro, SlotKind::Intro);
             place(prog, SlotKind::Programme);
 
@@ -453,7 +494,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             }
 
             const MediaItem closing = prog;
-            ++rotation;
+            advanceProgramme();
             place(closing, SlotKind::Programme);
             const QVector<MediaItem> &myOutros = outrosFor(closing);
             if (!myOutros.isEmpty()) {
@@ -526,6 +567,13 @@ QByteArray serializeSchedule(const ChannelDef &def,
     root["generated_at"] = double(generatedAt);
     root["horizon_end"]  = double(placed.isEmpty() ? generatedAt : placed.last().end());
     root["rotation"]     = double(def.rotation);
+    if (!def.marks.isEmpty()) {
+        QJsonObject marks;
+        for (auto it = def.marks.constBegin(); it != def.marks.constEnd(); ++it)
+            marks.insert(it.key(), it.value());
+        root["marks"] = marks;
+    }
+    if (!def.mark.isEmpty()) root["mark"] = def.mark;
     root["slots"]        = arr;
 
     return QJsonDocument(root).toJson(QJsonDocument::Compact);

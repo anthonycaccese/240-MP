@@ -1,5 +1,6 @@
 #pragma once
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QVector>
 
@@ -62,6 +63,8 @@ public:
     qint64  generatedAt() const { return m_generatedAt; }
     qint64  horizonEnd()  const { return m_horizonEnd; }
     qint64  rotation()    const { return m_rotation; }
+    const QHash<QString, QString> &marks() const { return m_marks; }
+    const QString &mark()                  const { return m_mark; }
 
     const QVector<Slot> &slotList() const { return m_slots; }
     int   slotCount()               const { return m_slots.size(); }
@@ -101,6 +104,8 @@ private:
     qint64        m_generatedAt = 0;
     qint64        m_horizonEnd  = 0;
     qint64        m_rotation    = 0;
+    QHash<QString, QString> m_marks;
+    QString       m_mark;
     QVector<Slot> m_slots;
 };
 

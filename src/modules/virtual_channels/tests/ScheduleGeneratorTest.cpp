@@ -53,6 +53,28 @@ ChannelDef basicDef() {
     return d;
 }
 
+QVector<MediaItem> twoSeriesPool() {
+    QVector<MediaItem> progs;
+    const QPair<const char *, int> shows[] = { { "Long", 12 }, { "Short", 3 } };
+    for (const auto &show : shows) {
+        for (int ep = 1; ep <= show.second; ++ep) {
+            MediaItem m = item(QStringLiteral("%1-%2.mkv").arg(show.first).arg(ep), 600000);
+            m.series = QString::fromLatin1(show.first);
+            m.seasonNo = 1;
+            m.episodeNo = ep;
+            progs.append(m);
+        }
+    }
+    return progs;
+}
+
+QStringList airedRefs(const ChannelDef &d, int want) {
+    QStringList aired;
+    for (const Slot &sl : generateSlots(d, kBase))
+        if (sl.kind == SlotKind::Programme && aired.size() < want) aired << sl.ref;
+    return aired;
+}
+
 bool contiguous(const QVector<Slot> &s) {
     for (int i = 1; i < s.size(); ++i)
         if (s[i].start != s[i - 1].end()) return false;
@@ -263,22 +285,9 @@ int runScheduleGeneratorTests() {
         d.order = Ordering::Interleaved;
         d.horizonHours = 12.0;
 
-        QVector<MediaItem> progs;
-        for (int ep = 1; ep <= 12; ++ep) {
-            MediaItem m = item(QStringLiteral("Long-%1.mkv").arg(ep), 600000);
-            m.series = "Long"; m.seasonNo = 1; m.episodeNo = ep;
-            progs.append(m);
-        }
-        for (int ep = 1; ep <= 3; ++ep) {
-            MediaItem m = item(QStringLiteral("Short-%1.mkv").arg(ep), 600000);
-            m.series = "Short"; m.seasonNo = 1; m.episodeNo = ep;
-            progs.append(m);
-        }
-        d.programmes = progs;
+        d.programmes = twoSeriesPool();
 
-        QStringList aired;
-        for (const Slot &sl : generateSlots(d, kBase))
-            if (sl.kind == SlotKind::Programme && aired.size() < 15) aired << sl.ref;
+        const QStringList aired = airedRefs(d, 15);
 
         int longestRun = 0, run = 0;
         QString previous;
@@ -296,34 +305,89 @@ int runScheduleGeneratorTests() {
                  "while the long series carries on, so the two stop being lined up");
     }
 
+    section("generate: broadcast holds its place when the pool changes");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Broadcast;
+        d.horizonHours = 2.0;
+        d.programmes.clear();
+        for (int ep = 1; ep <= 5; ++ep) {
+            MediaItem m = item(QStringLiteral("e%1.mkv").arg(ep), 600000);
+            m.airMs = qint64(ep) * 86400000LL;
+            d.programmes.append(m);
+        }
+        d.mark = QStringLiteral("e3.mkv");
+
+        checkStr(airedRefs(d, 1).value(0), QStringLiteral("e4.mkv"),
+                 "broadcast opens on the programme after its mark");
+
+        // An older episode joins the pool and sorts ahead of the mark, moving
+        // every offset behind it. The mark names a programme, not an offset.
+        MediaItem extra = item(QStringLiteral("e0.mkv"), 600000);
+        extra.airMs = 3600000LL;
+        d.programmes.append(extra);
+
+        checkStr(airedRefs(d, 1).value(0), QStringLiteral("e4.mkv"),
+                 "and still does once an earlier episode is added ahead of it");
+    }
+
     section("generate: a rebuild resumes each series where it left off");
     {
         ChannelDef d = basicDef();
         d.order = Ordering::Interleaved;
         d.horizonHours = 2.0;
-        d.rotation = 8;
+        d.programmes = twoSeriesPool();
+        d.marks.insert("long", "Long-4.mkv");
+        d.marks.insert("short", "Short-1.mkv");
 
-        QVector<MediaItem> progs;
-        for (int ep = 1; ep <= 12; ++ep) {
-            MediaItem m = item(QStringLiteral("Long-%1.mkv").arg(ep), 600000);
-            m.series = "Long"; m.seasonNo = 1; m.episodeNo = ep;
-            progs.append(m);
-        }
-        for (int ep = 1; ep <= 3; ++ep) {
-            MediaItem m = item(QStringLiteral("Short-%1.mkv").arg(ep), 600000);
-            m.series = "Short"; m.seasonNo = 1; m.episodeNo = ep;
-            progs.append(m);
-        }
-        d.programmes = progs;
-
-        QStringList aired;
-        for (const Slot &sl : generateSlots(d, kBase))
-            if (sl.kind == SlotKind::Programme && aired.size() < 2) aired << sl.ref;
-
+        const QStringList aired = airedRefs(d, 2);
         checkStr(aired.value(0), QStringLiteral("Long-5.mkv"),
                  "the long series picks up mid-run rather than at episode one");
         checkStr(aired.value(1), QStringLiteral("Short-2.mkv"),
                  "and the short series picks up at its own separate place");
+    }
+
+    section("generate: adding a series does not move the others");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Interleaved;
+        d.horizonHours = 3.0;
+        d.programmes = twoSeriesPool();
+        d.marks.insert("long", "Long-4.mkv");
+        d.marks.insert("short", "Short-1.mkv");
+
+        // A third series joins the pool, which changes whose turn falls where.
+        // Deriving each place from a single rotation count sent every series
+        // somewhere else; a mark of its own holds each one still.
+        for (int ep = 1; ep <= 5; ++ep) {
+            MediaItem m = item(QStringLiteral("New-%1.mkv").arg(ep), 600000);
+            m.series = "New"; m.seasonNo = 1; m.episodeNo = ep;
+            d.programmes.append(m);
+        }
+
+        const QStringList aired = airedRefs(d, 3);
+        check(aired.contains(QStringLiteral("Long-5.mkv")),
+              "the long series still resumes at the episode after its mark");
+        check(aired.contains(QStringLiteral("Short-2.mkv")),
+              "and so does the short one");
+        check(aired.contains(QStringLiteral("New-1.mkv")),
+              "while the series with no mark starts at its first episode");
+    }
+
+    section("generate: a mark for a missing episode restarts just that series");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Interleaved;
+        d.horizonHours = 2.0;
+        d.programmes = twoSeriesPool();
+        d.marks.insert("long", "Long-999.mkv");
+        d.marks.insert("short", "Short-1.mkv");
+
+        const QStringList aired = airedRefs(d, 2);
+        checkStr(aired.value(0), QStringLiteral("Long-1.mkv"),
+                 "a series whose mark is gone starts over instead of refusing to air");
+        checkStr(aired.value(1), QStringLiteral("Short-2.mkv"),
+                 "and the series beside it keeps its place");
     }
 
     section("generate: episode 10 airs after episode 9");
@@ -392,6 +456,33 @@ int runScheduleGeneratorTests() {
         check(parsed.statusAt(mid) == Status::Ok, "parsed timeline is playable");
         check(parsed.indexAt(mid) >= 0, "resolves to a slot");
         check(!parsed.runWindow(parsed.indexAt(mid)).isEmpty(), "produces a run window");
+    }
+
+    section("serialize: where each series had got to survives the round trip");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::Interleaved;
+        d.programmes = twoSeriesPool();
+        d.marks.insert("long", "Long-4.mkv");
+        d.marks.insert("short", "Short-1.mkv");
+        d.mark = QStringLiteral("Long-4.mkv");
+
+        QString err;
+        const ChannelSchedule parsed =
+            ChannelSchedule::fromJson(serializeSchedule(d, kBase - 1000,
+                                                        generateSlots(d, kBase)), &err);
+
+        check(parsed.isValid(), "a schedule carrying marks parses");
+        checkEq(parsed.marks().size(), 2, "both series are remembered");
+        checkStr(parsed.marks().value("long"), QStringLiteral("Long-4.mkv"),
+                 "each against its own place");
+        checkStr(parsed.mark(), QStringLiteral("Long-4.mkv"),
+                 "and the single broadcast place too");
+
+        ChannelDef resumed = d;
+        resumed.marks = parsed.marks();
+        checkStr(airedRefs(resumed, 1).value(0), QStringLiteral("Long-5.mkv"),
+                 "so a build from the parsed marks carries on where it left off");
     }
 
     section("appointments: parsing");
@@ -622,6 +713,13 @@ int runScheduleGeneratorTests() {
         checkStr(secondRefs.first(),
                  firstRefs[endRotation % 5],
                  "the next build opens on the programme the last one stopped at");
+
+        ChannelDef marked = d;
+        marked.mark = QStringLiteral("e4.mkv");
+        marked.rotation = 0;
+        const QStringList markedRefs = airedRefs(marked, 1);
+        checkStr(markedRefs.value(0), QStringLiteral("e5.mkv"),
+                 "and a mark is followed in preference to the count");
         check(secondRefs.first() != QStringLiteral("e1.mkv"),
               "and not back at the first episode");
     }

@@ -355,6 +355,8 @@ private:
 
     QVariantMap  channelObject(int channelNumber) const;
     qint64       rotationAt(int channelNumber, qint64 t);
+    void         marksAt(int channelNumber, qint64 t,
+                         QHash<QString, QString> *perSeries, QString *overall);
     QStringList  mediaFilesUnder(const QString &relDir) const;
     QString      relativeMediaFolder(const QString &folder, QString *why = nullptr) const;
 
