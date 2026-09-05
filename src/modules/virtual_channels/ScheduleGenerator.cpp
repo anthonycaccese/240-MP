@@ -92,6 +92,7 @@ Ordering orderingFromString(const QString &s) {
     const QString v = s.trimmed().toLower();
     if (v == QLatin1String("shuffle"))     return Ordering::Shuffle;
     if (v == QLatin1String("interleaved")) return Ordering::Interleaved;
+    if (v == QLatin1String("as_listed"))   return Ordering::AsListed;
     // "sequential" is what channels written before this said. It sorted by
     // series title, which nobody chose on purpose, so it reads as broadcast.
     return Ordering::Broadcast;
@@ -101,6 +102,7 @@ QString orderingToString(Ordering o) {
     switch (o) {
     case Ordering::Shuffle:     return QStringLiteral("shuffle");
     case Ordering::Interleaved: return QStringLiteral("interleaved");
+    case Ordering::AsListed:    return QStringLiteral("as_listed");
     case Ordering::Broadcast:   break;
     }
     return QStringLiteral("broadcast");
@@ -242,9 +244,12 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     // programme, so the channel carries on from where it actually was.
     QVector<int> broadcastOrder(progCount);
     int resumeAired = 0;
-    if (def.order == Ordering::Broadcast) {
+    if (def.order == Ordering::Broadcast || def.order == Ordering::AsListed) {
         for (int i = 0; i < progCount; ++i) broadcastOrder[i] = i;
-        std::sort(broadcastOrder.begin(), broadcastOrder.end(), airedBefore);
+        // AsListed keeps the pool's own order, which is the order a playlist
+        // was written in. Sorting it would throw away the one thing it carries.
+        if (def.order == Ordering::Broadcast)
+            std::sort(broadcastOrder.begin(), broadcastOrder.end(), airedBefore);
         // A schedule written before marks existed carries only the count, which
         // says the same thing as long as the pool has not changed since.
         resumeAired = int(rotation % progCount);
@@ -299,7 +304,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             const QVector<int> &turn = groups[s];
             return programmes[turn[(resume[s] + taken[s]) % turn.size()]];
         }
-        if (def.order == Ordering::Broadcast)
+        if (def.order == Ordering::Broadcast || def.order == Ordering::AsListed)
             return programmes[broadcastOrder[int((resumeAired + placedHere) % progCount)]];
 
         const qint64 pass = rotation / progCount;

@@ -376,6 +376,56 @@ int runScheduleGeneratorTests() {
                  "and what nothing is known about comes last, not first");
     }
 
+    section("generate: a playlist airs in the order it was written");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::AsListed;
+        d.horizonHours = 4.0;
+        d.programmes.clear();
+
+        // Dated and named so that either sorting by date or sorting by title
+        // would give a different answer to the order they are listed in.
+        struct Film { const char *ref; const char *date; };
+        const Film films[] = {
+            { "Zulu",   "1964-01-22" },
+            { "Alien",  "1979-05-25" },
+            { "Marnie", "1964-07-22" },
+        };
+        for (const Film &f : films) {
+            MediaItem m = item(QString::fromLatin1(f.ref) + QStringLiteral(".mkv"), 600000);
+            m.airMs = airedAtMs(QString::fromLatin1(f.date), QVariant());
+            d.programmes.append(m);
+        }
+
+        const QStringList aired = airedRefs(d, 4);
+        checkStr(aired.value(0), QStringLiteral("Zulu.mkv"),   "the first listed airs first");
+        checkStr(aired.value(1), QStringLiteral("Alien.mkv"),  "then the second, not the older one");
+        checkStr(aired.value(2), QStringLiteral("Marnie.mkv"), "then the third");
+        checkStr(aired.value(3), QStringLiteral("Zulu.mkv"),   "and then it rounds again");
+
+        // Broadcast on the same pool must disagree, or the test proves nothing.
+        ChannelDef byDate = d;
+        byDate.order = Ordering::Broadcast;
+        checkStr(airedRefs(byDate, 1).value(0), QStringLiteral("Zulu.mkv"),
+                 "broadcast opens on the oldest, which here is also the first listed");
+        checkStr(airedRefs(byDate, 2).value(1), QStringLiteral("Marnie.mkv"),
+                 "but takes the older film second, where as-listed took Alien");
+    }
+
+    section("generate: a playlist resumes where it left off");
+    {
+        ChannelDef d = basicDef();
+        d.order = Ordering::AsListed;
+        d.horizonHours = 2.0;
+        d.programmes.clear();
+        for (const char *n : { "one", "two", "three", "four" })
+            d.programmes.append(item(QString::fromLatin1(n) + QStringLiteral(".mkv"), 600000));
+        d.mark = QStringLiteral("two.mkv");
+
+        checkStr(airedRefs(d, 1).value(0), QStringLiteral("three.mkv"),
+                 "a rebuild carries on after the film it last aired");
+    }
+
     section("generate: broadcast holds its place when the pool changes");
     {
         ChannelDef d = basicDef();

@@ -81,6 +81,13 @@ public:
     Q_INVOKABLE bool set_channel_grid(int channelNumber, int minutes);
     Q_INVOKABLE bool set_channel_ads(int channelNumber, int adsPerBreak);
     Q_INVOKABLE bool set_channel_order(int channelNumber, const QString &order);
+    // "tv" or "movies". A movie channel airs films as its programmes, has no
+    // movie slots and no grid, and takes its running order from where the films
+    // come from rather than from a setting.
+    Q_INVOKABLE bool set_channel_kind(int channelNumber, const QString &kind);
+    // "playlist" or "selection", on a movie channel: a playlist airs in its own
+    // order, a selection is shuffled.
+    Q_INVOKABLE bool set_channel_films_from(int channelNumber, const QString &from);
 
     Q_INVOKABLE QVariantList list_logos();
     Q_INVOKABLE QString logos_dir() const { return m_dataRoot + QStringLiteral("/logos"); }
@@ -195,6 +202,8 @@ private:
 
     vchan::SlotSource channelSource(int channelNumber) const;
     static vchan::SlotSource sourceOf(const QJsonObject &channel);
+    static bool    isMovieChannel(const QJsonObject &channel);
+    static bool    playsAPlaylist(const QJsonObject &channel);
     static bool usesEntryPools(const QJsonObject &channel);
     static QString    sourceBlockName(vchan::SlotSource src);
     QStringList       availableSources() const;

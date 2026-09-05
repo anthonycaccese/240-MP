@@ -1043,6 +1043,15 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                 const QString ref = o.value(QLatin1String("ref")).toString().trimmed();
                 if (!ref.isEmpty()) job.showIds << ref;
             }
+            else if (kind == QLatin1String("movie") || kind == QLatin1String("genre")) {
+                // A film is not an episode: it is asked for by title or by
+                // genre, the same two ways a movie slot asks. anyFilm is left
+                // to the line below, which already says only a library takes
+                // everything.
+                job.wants = MediaServerSource::Request::Wants::Films;
+                if (kind == QLatin1String("movie")) job.titles << name;
+                else                                job.genres << name;
+            }
             else if (kind == QLatin1String("library"))  job.library      = name;
             else {
                 qWarning("[VirtualChannels] ignoring pool entry of unknown kind '%s'",
@@ -1365,12 +1374,28 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                      channelNumber, grid);
     }
 
+    // A movie channel decides these itself, so the sources screen carries no
+    // ordering or timing row to disagree with. Its running order follows where
+    // the films come from: a playlist airs in the order it was written, a
+    // selection is shuffled. Films do not sit on a clock -- a two-hour film on
+    // a half-hour grid is a card holding the remainder every time.
+    if (isMovieChannel(o)) {
+        def.order       = playsAPlaylist(o) ? Ordering::AsListed : Ordering::Shuffle;
+        def.gridMinutes = 0;
+    }
+
     QVector<PoolJob> jobs = readPools(o, def);
 
     QVector<QPair<int, QStringList>> folderPools;
     QVector<QPair<int, QStringList>> localApptTitles;
-    parseBookings(o, channelNumber, def, apptJobs, serverApptJobs, &folderPools,
-                  &localApptTitles);
+    // Movie slots are read for every channel but a movie one, where booking a
+    // film to a time means nothing because every programme is already a film.
+    // The slots stay in the file untouched, so switching the channel back to TV
+    // brings them back exactly as they were -- but nothing airs from them while
+    // the sources screen is not showing them.
+    if (!isMovieChannel(o))
+        parseBookings(o, channelNumber, def, apptJobs, serverApptJobs, &folderPools,
+                      &localApptTitles);
 
     m_genQueue.clear();
     m_genCursor = 0;
@@ -2503,13 +2528,16 @@ void VirtualChannelsBackend::plexEnumFinish() {
         return;
     }
 
-    std::sort(m_pgEpisodes.begin(), m_pgEpisodes.end(),
-              [](const MediaItem &a, const MediaItem &b) {
-                  if (a.series != b.series) return a.series < b.series;
-                  if (a.seasonNo  != b.seasonNo)  return a.seasonNo  < b.seasonNo;
-                  if (a.episodeNo != b.episodeNo) return a.episodeNo < b.episodeNo;
-                  return a.ep < b.ep;
-              });
+    // Stable, because films carry none of these: they compare equal on every
+    // one and would otherwise come out in whatever order the sort happened to
+    // leave them, throwing away the running order a playlist was written in.
+    std::stable_sort(m_pgEpisodes.begin(), m_pgEpisodes.end(),
+                     [](const MediaItem &a, const MediaItem &b) {
+                         if (a.series != b.series) return a.series < b.series;
+                         if (a.seasonNo  != b.seasonNo)  return a.seasonNo  < b.seasonNo;
+                         if (a.episodeNo != b.episodeNo) return a.episodeNo < b.episodeNo;
+                         return a.ep < b.ep;
+                     });
 
     if (m_pgApptCursor < m_pgApptJobs.size())
         appendToPool(m_pgApptJobs[m_pgApptCursor], m_pgEpisodes);
@@ -3255,6 +3283,44 @@ QVariantMap VirtualChannelsBackend::channel_timing(int channelNumber) {
                             o.value(QLatin1String("order")).toString()))}};
 }
 
+// One writer for both of the movie channel's switches: each takes a small set
+// of words and refuses anything else rather than writing a value the generator
+// would have to guess at later.
+static bool writeChannelWord(QJsonArray &channels, int channelNumber,
+                             const char *field, const QString &value,
+                             const QStringList &allowed) {
+    const QString clean = value.trimmed().toLower();
+    if (!allowed.contains(clean)) return false;
+    for (int i = 0; i < channels.size(); ++i) {
+        QJsonObject o = channels[i].toObject();
+        if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
+        o[QLatin1String(field)] = clean;
+        channels[i] = o;
+        return true;
+    }
+    return false;
+}
+
+bool VirtualChannelsBackend::set_channel_kind(int channelNumber, const QString &kind) {
+    QJsonArray channels = readChannels();
+    if (!writeChannelWord(channels, channelNumber, "kind", kind,
+                          { QStringLiteral("tv"), QStringLiteral("movies") })) {
+        qWarning("[VirtualChannels] refused channel kind '%s'", qPrintable(kind));
+        return false;
+    }
+    return writeChannels(channels);
+}
+
+bool VirtualChannelsBackend::set_channel_films_from(int channelNumber, const QString &from) {
+    QJsonArray channels = readChannels();
+    if (!writeChannelWord(channels, channelNumber, "films_from", from,
+                          { QStringLiteral("playlist"), QStringLiteral("selection") })) {
+        qWarning("[VirtualChannels] refused films-from '%s'", qPrintable(from));
+        return false;
+    }
+    return writeChannels(channels);
+}
+
 bool VirtualChannelsBackend::set_channel_order(int channelNumber, const QString &order) {
     const QString clean = orderingToString(orderingFromString(order));
     if (clean.compare(order.trimmed(), Qt::CaseInsensitive) != 0) {
@@ -3607,6 +3673,19 @@ bool VirtualChannelsBackend::usesEntryPools(const QJsonObject &o) {
     return false;
 }
 
+bool VirtualChannelsBackend::isMovieChannel(const QJsonObject &channel) {
+    return channel.value(QLatin1String("kind")).toString().trimmed().toLower()
+           == QLatin1String("movies");
+}
+
+// A selection is the default: a channel that has never been told otherwise
+// shuffles what it was given rather than waiting for a playlist to be set.
+bool VirtualChannelsBackend::playsAPlaylist(const QJsonObject &channel) {
+    return isMovieChannel(channel)
+           && channel.value(QLatin1String("films_from")).toString().trimmed().toLower()
+              == QLatin1String("playlist");
+}
+
 SlotSource VirtualChannelsBackend::channelSource(int channelNumber) const {
     return sourceOf(QJsonObject::fromVariantMap(channelObject(channelNumber)));
 }
@@ -3869,6 +3948,7 @@ bool VirtualChannelsBackend::set_channel_pool(int channelNumber, const QString &
             static const QStringList kKinds = { QStringLiteral("library"),
                                                 QStringLiteral("series"),
                                                 QStringLiteral("movie"),
+                                                QStringLiteral("genre"),
                                                 QStringLiteral("collection"),
                                                 QStringLiteral("playlist") };
             const QString kind = m.value(QStringLiteral("kind")).toString();
@@ -4018,6 +4098,9 @@ QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
     out["available"]   = choices;
     out["supportsPlaylists"] = source_supports_playlists(slotSourceToString(src));
     out["usesEntryPools"] = usesEntryPools(o);
+    out["kind"]        = isMovieChannel(o) ? QStringLiteral("movies") : QStringLiteral("tv");
+    out["filmsFrom"]   = playsAPlaylist(o) ? QStringLiteral("playlist")
+                                           : QStringLiteral("selection");
     const QStringList programmes = listOf(o, "programmes");
     out["folder"] = programmes.isEmpty() ? QString() : programmes.first();
     int folderCount = 0;
@@ -4029,16 +4112,26 @@ QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
     // carry its own idents. The legacy per-source "match" array is still read
     // for channels written before that, and is retired the next time the list
     // is saved.
-    QStringList picked;
+    // Split by kind, so the screen can count shows, films and genres apart. A
+    // pool holding all three would otherwise report every entry as a show.
+    QStringList picked, films, genres;
     for (const QJsonValue &v : o.value(QLatin1String("programmes")).toArray()) {
         if (!v.isObject()) continue;
         const QJsonObject e = v.toObject();
         if (slotSourceFromString(e.value(QLatin1String("src")).toString()) != src) continue;
-        const QString name = e.value(QLatin1String("name")).toString();
-        if (!name.trimmed().isEmpty()) picked << name;
+        const QString name = e.value(QLatin1String("name")).toString().trimmed();
+        if (name.isEmpty()) continue;
+        const QString kind = e.value(QLatin1String("kind")).toString();
+        if      (kind == QLatin1String("movie")) films  << name;
+        else if (kind == QLatin1String("genre")) genres << name;
+        else if (kind == QLatin1String("series")
+                 || kind.isEmpty())              picked << name;
     }
-    if (picked.isEmpty()) picked = listOf(plex, "match");
+    if (picked.isEmpty() && films.isEmpty() && genres.isEmpty())
+        picked = listOf(plex, "match");
     out["match"]       = picked;
+    out["films"]       = films;
+    out["genres"]      = genres;
     out["collections"] = listOf(plex, "collections");
     out["playlists"]   = listOf(plex, "playlists");
 
@@ -4097,7 +4190,17 @@ bool VirtualChannelsBackend::set_channel_source(int channelNumber, const QString
 bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &field,
                                               const QStringList &values,
                                               const QStringList &refs) {
+    // "match" is the shows list, kept under that name because that is what the
+    // screen and the older channel files call it. Films and genres are the same
+    // shape of list, differing only in the kind each entry is written as.
+    static const QHash<QString, QString> kEntryKinds = {
+        { QStringLiteral("match"),  QStringLiteral("series") },
+        { QStringLiteral("films"),  QStringLiteral("movie")  },
+        { QStringLiteral("genres"), QStringLiteral("genre")  },
+    };
     static const QStringList kAllowed = { QStringLiteral("match"),
+                                          QStringLiteral("films"),
+                                          QStringLiteral("genres"),
                                           QStringLiteral("collections"),
                                           QStringLiteral("playlists") };
     if (!kAllowed.contains(field)) {
@@ -4114,7 +4217,8 @@ bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &
         const QString block = sourceBlockName(channelSource(channelNumber));
         QJsonObject plex = o.value(block).toObject();
 
-        if (field == QLatin1String("match")) {
+        if (kEntryKinds.contains(field)) {
+            const QString entryKind = kEntryKinds.value(field);
             // Only this source's SERIES entries are ours to rewrite. Another
             // source's entries, collections, folders and the bare strings an
             // older channel file uses are carried across untouched.
@@ -4126,7 +4230,7 @@ bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &
                 const QJsonObject e = v.toObject();
                 const bool mine =
                     slotSourceFromString(e.value(QLatin1String("src")).toString()) == src
-                    && e.value(QLatin1String("kind")).toString() == QLatin1String("series");
+                    && e.value(QLatin1String("kind")).toString() == entryKind;
                 if (!mine) { kept.append(e); continue; }
                 existing.insert(e.value(QLatin1String("name")).toString(), e);
             }
@@ -4138,15 +4242,16 @@ bool VirtualChannelsBackend::set_channel_list(int channelNumber, const QString &
                 if (name.trimmed().isEmpty()) continue;
                 QJsonObject e = existing.value(name);
                 e["name"] = name;
-                e["kind"] = QStringLiteral("series");
+                e["kind"] = entryKind;
                 e["src"]  = slotSourceToString(src);
                 const QString ref = refs.value(n).trimmed();
                 if (!ref.isEmpty()) e["ref"] = ref;
                 out.append(e);
             }
             o[QLatin1String("programmes")] = out;
-            // The legacy array is retired rather than left to disagree.
-            plex.remove(QLatin1String("match"));
+            // The legacy array is retired rather than left to disagree. Only
+            // the shows list ever had one.
+            if (field == QLatin1String("match")) plex.remove(QLatin1String("match"));
         } else {
             QJsonArray arr;
             for (const QString &v : values) if (!v.trimmed().isEmpty()) arr.append(v);

@@ -52,8 +52,10 @@ FocusScope {
                                         : (kind === "seasons" ? heading : "")
     readonly property bool seriesSelected:
         seriesName !== "" && (cfg.match || []).indexOf(seriesName) >= 0
-    readonly property string listField: kind === "collections" ? "collections"
-                                      : kind === "playlists"   ? "playlists"
+    readonly property string listField: kind === "collections"  ? "collections"
+                                      : kind === "playlists"    ? "playlists"
+                                      : kind === "movies"       ? "films"
+                                      : kind === "moviegenres"  ? "genres"
                                       : "match"
     readonly property bool canDescend: kind === "shows" || kind === "seasons"
 

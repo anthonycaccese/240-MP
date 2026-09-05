@@ -15,6 +15,7 @@ FocusScope {
     // What this picker is for: programmes come from a library of shows and
     // films, breaks from a folder of clips.
     property string purpose:    navParams.purpose    || "programmes"
+    property string channelKind: navParams.channelKind || "tv"
 
     signal navigateTo(string path, var params, var listState)
     signal goBack()
@@ -27,6 +28,10 @@ FocusScope {
             && virtualChannelsBackend.source_supports_playlists(pickRoot.source))
             k.push({ kind: "playlist", browse: "playlists", label: "Playlists" })
         k.push({ kind: "series", browse: "shows", label: "Series" })
+        if (pickRoot.channelKind === "movies") {
+            k.push({ kind: "movie", browse: "movies", label: "Movies" })
+            k.push({ kind: "genre", browse: "moviegenres", label: "Movie Genres" })
+        }
         return k
     }
 
