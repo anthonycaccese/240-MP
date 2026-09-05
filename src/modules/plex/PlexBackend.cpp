@@ -960,6 +960,16 @@ QVariantList PlexBackend::get_switchable_servers() {
     return list;
 }
 
+// A playback URL is worth logging -- it is the only way to tell afterwards
+// whether a title direct-played or was transcoded -- but it can carry a token,
+// so the token never reaches the journal.
+static QString loggableUrl(QString u) {
+    const int i = u.indexOf(QLatin1String("X-Plex-Token="));
+    if (i < 0) return u;
+    const int j = u.indexOf(QLatin1Char('&'), i);
+    return u.left(i + 13) + QStringLiteral("<redacted>") + (j < 0 ? QString() : u.mid(j));
+}
+
 void PlexBackend::build_stream_url(const QString &ratingKey,
                                    const QString &partKey,
                                    const QString &sessionId) {
@@ -972,7 +982,8 @@ void PlexBackend::build_stream_url(const QString &ratingKey,
                 + (partKey.contains('?') ? "&" : "?")
                 + "X-Plex-Client-Identifier="   + clientId()
                 + "&X-Plex-Session-Identifier=" + sessionId;
-    qDebug() << "[Plex] Playback: DIRECT PLAY";
+    qInfo("[Plex] playback DIRECT for %s -> %s",
+          qPrintable(ratingKey), qPrintable(loggableUrl(url)));
     emit streamUrlReady(url, token);
 }
 
@@ -2460,7 +2471,8 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
     QString token = serverToken();
     QString quality = videoQuality();
 
-    qDebug() << "[Plex] Playback: TRANSCODE — full re-encode, quality cap:" << quality << "kbps";
+    qInfo("[Plex] playback TRANSCODE for %s at offset %d s, cap %s kbps",
+          qPrintable(ratingKey), offsetMs / 1000, qPrintable(quality));
     QUrl url(uri + "/video/:/transcode/universal/start.m3u8");
     QUrlQuery q;
     q.addQueryItem("hasMDE",      "1");
@@ -2525,7 +2537,7 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
         } else {
             streamUrl = reply->url().toString();
         }
-        qDebug() << "[Plex] Transcode stream URL for mpv:" << streamUrl;
+        qInfo("[Plex] transcode stream for mpv: %s", qPrintable(loggableUrl(streamUrl)));
         emit streamUrlReady(streamUrl, token);
     });
 }
