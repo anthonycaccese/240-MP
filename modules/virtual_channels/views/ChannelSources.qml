@@ -27,13 +27,20 @@ FocusScope {
             // from, so it carries no order row and no timing row: films do not
             // sit on a clock. Movie Slots is gone too -- booking a film to a
             // time says nothing when every programme is already a film.
-            r.push("filmsfrom")
-            if (fromPlaylist) {
-                if (cfg.supportsPlaylists) r.push("playlists")
-            } else {
+            // Local files have no playlists, genres or collections: a film is
+            // a file under movies/. Offering those rows would be offering a
+            // server's furniture to a folder.
+            if (cfg.source === "local") {
                 r.push("films")
-                r.push("genres")
-                r.push("collections")
+            } else {
+                r.push("filmsfrom")
+                if (fromPlaylist) {
+                    if (cfg.supportsPlaylists) r.push("playlists")
+                } else {
+                    r.push("films")
+                    r.push("genres")
+                    r.push("collections")
+                }
             }
             // Shows left behind by a channel that used to be a TV one. Shown so
             // that nothing airs which the screen is not admitting to.
@@ -170,14 +177,17 @@ FocusScope {
         switch (rows[i]) {
         case "source": return (cfg.sourceName || "Local Files").toUpperCase()
         case "kind":   return sourcesRoot.isMovies ? "MOVIES" : "TV"
-        case "filmsfrom": return sourcesRoot.fromPlaylist ? "A PLAYLIST" : "A SELECTION"
+        case "filmsfrom": return sourcesRoot.fromPlaylist ? "PLAYLIST" : "SELECTION"
         case "films": {
             var n = countOf("films")
             return n === 0 ? "NONE" : n + (n === 1 ? " FILM" : " FILMS")
         }
         case "genres": {
+            // One reads better as its name; a list of six would run off a CRT.
             var g = countOf("genres")
-            return g === 0 ? "NONE" : (cfg.genres || []).join(", ").toUpperCase()
+            if (g === 0) return "NONE"
+            return g === 1 ? String((cfg.genres || [])[0]).toUpperCase()
+                           : g + " GENRES"
         }
         case "series": {
             var n = countOf("match")
@@ -235,7 +245,7 @@ FocusScope {
         case "playlists":   return "A list kept on " + server + ", added whole. Change it there and this channel follows on its next rebuild."
         case "slots":       return "Movies at fixed times, each drawing on its own set of movies."
         case "kind":        return sourcesRoot.isMovies
-                                   ? "A channel of films. They air one after another with whatever breaks you set, and there are no movie slots — every program is already a film."
+                                   ? "A channel of films, one after another. No movie slots: every program is already a film."
                                    : "A channel of programs from series. Films go in Movie Slots, at a time you choose."
         case "filmsfrom":   return sourcesRoot.fromPlaylist
                                    ? "A playlist kept on " + server + ", aired in the order you put it in. Change it there and this channel follows on its next rebuild."

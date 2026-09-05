@@ -452,6 +452,41 @@ void testFilmAndShowListsAreSeparate() {
           "a list the backend does not know is refused");
 }
 
+void testFilmsFromDecidesWhatAirs() {
+    section("Backend: a film channel reads only the way of choosing it is set to");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["kind"] = QStringLiteral("movies");
+    ch["films_from"] = QStringLiteral("playlist");
+    ch["source"] = QStringLiteral("local");
+
+    // Both ways of choosing films are present in the file at once.
+    QJsonObject film;
+    film["src"] = QStringLiteral("local");
+    film["kind"] = QStringLiteral("movie");
+    film["name"] = QStringLiteral("Mask of the Phantasm");
+    QJsonArray programmes;
+    programmes.append(film);
+    ch["programmes"] = programmes;
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+
+    // Nothing is deleted by the mode: the film is still in the file, waiting
+    // for the channel to be switched back to a selection.
+    bool stillThere = false;
+    for (const QJsonValue &v : fx.read(3).value(QLatin1String("programmes")).toArray())
+        if (v.toObject().value(QLatin1String("name")).toString()
+            == QLatin1String("Mask of the Phantasm")) stillThere = true;
+    check(stillThere, "a film is left in the file while the channel plays a playlist");
+
+    check(b.set_channel_films_from(3, QStringLiteral("selection")),
+          "switching back to a selection saves");
+    checkEq(b.channel_source_config(3).value(QStringLiteral("films")).toStringList().size(), 1,
+            "and the film is offered again, exactly as it was");
+}
+
 void testSourceSwitchSticks() {
     section("Backend: switching a channel's source takes effect");
 
@@ -627,6 +662,7 @@ int runVirtualChannelsBackendTests() {
     testMovieChannel();
     testFilmPoolEntries();
     testFilmAndShowListsAreSeparate();
+    testFilmsFromDecidesWhatAirs();
     testPoolSaveKeepsWhatItDoesNotOwn();
     testSourceSwitchSticks();
     testExclusionsOnALocalChannel();
