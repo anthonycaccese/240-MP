@@ -238,6 +238,8 @@ private:
     QString     m_pgLibraryName;
     QStringList m_pgMatch;
     QStringList m_pgShowIds;
+    // How many things carry each label being browsed, so a picker can show it.
+    QHash<QString, int> m_browseTally;
     QSet<QString> m_pgExcludeSeasons;
     QSet<QString> m_pgExcludeEpisodes;
     QStringList m_pgCollections;

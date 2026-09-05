@@ -75,6 +75,13 @@ static QStringList excludedEpisodesIn(const QJsonObject &excl) {
     return out;
 }
 
+// What a picker says under a collection, playlist or genre: how much is in it.
+// Picking blind is how a channel ends up airing one film over and over.
+QString countedAs(int n, const char *singular, const char *plural) {
+    if (n <= 0) return QString();
+    return QStringLiteral("%1 %2").arg(n).arg(QLatin1String(n == 1 ? singular : plural));
+}
+
 QStringList stringListOf(const QJsonObject &o, const char *key) {
     QStringList out;
     for (const QJsonValue &v : o.value(QLatin1String(key)).toArray())
@@ -1032,8 +1039,27 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
             const QString name = o.value(QLatin1String("name")).toString();
             if (name.trimmed().isEmpty()) continue;
 
-            if (kind == QLatin1String("collection"))    job.collections << name;
-            else if (kind == QLatin1String("playlist")) job.playlists   << name;
+            // A movie channel reads one of the two ways of choosing films, not
+            // both: a playlist airs in its own order, a selection is shuffled,
+            // and the sources screen shows only the rows for whichever is in
+            // force. Reading both would air films from a row that is not on the
+            // screen. What is not read stays in the file, so flipping back
+            // brings it round again exactly as it was.
+            if (isMovieChannel(channel)
+                && playsAPlaylist(channel) != (kind == QLatin1String("playlist")))
+                continue;
+
+            // A collection or a playlist is looked for among shows or among
+            // films depending on what the channel airs. The two enumerations
+            // scan different libraries, so a film collection asked for down the
+            // episode path is simply never found -- which is what "No episodes
+            // matched" meant on a channel pointed at a collection of films.
+            if (kind == QLatin1String("collection") || kind == QLatin1String("playlist")) {
+                if (kind == QLatin1String("collection")) job.collections << name;
+                else                                     job.playlists   << name;
+                if (isMovieChannel(channel))
+                    job.wants = MediaServerSource::Request::Wants::Films;
+            }
             else if (kind == QLatin1String("series")) {
                 // Both, and either will do. The id survives the show being
                 // renamed on the server; the name survives it being removed and
@@ -1097,13 +1123,19 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
             PoolJob job;
             job.pool    = SlotKind::Programme;
             job.src     = src;
-            job.wants   = MediaServerSource::Request::Wants::Episodes;
+            job.wants   = isMovieChannel(channel)
+                              ? MediaServerSource::Request::Wants::Films
+                              : MediaServerSource::Request::Wants::Episodes;
             job.anyFilm = false;
             job.library = cfg.value(QLatin1String("library")).toString();
-            for (const QJsonValue &v : cfg.value(QLatin1String("collections")).toArray())
-                if (v.isString()) job.collections << v.toString();
-            for (const QJsonValue &v : cfg.value(QLatin1String("playlists")).toArray())
-                if (v.isString()) job.playlists << v.toString();
+            const bool onlyPlaylists = isMovieChannel(channel) && playsAPlaylist(channel);
+            const bool noPlaylists    = isMovieChannel(channel) && !playsAPlaylist(channel);
+            if (!onlyPlaylists)
+                for (const QJsonValue &v : cfg.value(QLatin1String("collections")).toArray())
+                    if (v.isString()) job.collections << v.toString();
+            if (!noPlaylists)
+                for (const QJsonValue &v : cfg.value(QLatin1String("playlists")).toArray())
+                    if (v.isString()) job.playlists << v.toString();
             if (job.collections.isEmpty() && job.playlists.isEmpty()) continue;
 
             const QJsonObject excl = cfg.value(QLatin1String("exclude")).toObject();
@@ -1125,7 +1157,9 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
             PoolJob job;
             job.pool  = SlotKind::Programme;
             job.src   = src;
-            job.wants = MediaServerSource::Request::Wants::Episodes;
+            job.wants = isMovieChannel(channel)
+                            ? MediaServerSource::Request::Wants::Films
+                            : MediaServerSource::Request::Wants::Episodes;
             job.library = cfg.value(QLatin1String("library")).toString();
             for (const QJsonValue &v : cfg.value(QLatin1String("match")).toArray())
                 if (v.isString()) job.match << v.toString();
@@ -1977,10 +2011,11 @@ void VirtualChannelsBackend::onPlexItemsLoaded(const QVariant &items) {
 
             for (const QString &value : std::as_const(values)) {
                 if (value.isEmpty()) continue;
-                bool already = false;
-                for (const QVariant &e : std::as_const(m_browseItems))
-                    if (e.toMap().value("label").toString() == value) { already = true; break; }
-                if (already) continue;
+                // Tallied rather than de-duplicated by scanning what is already
+                // there: the picker says how many films carry a genre, and a
+                // genre with one film in it is worth seeing before you pick it.
+                const int seen = ++m_browseTally[value];
+                if (seen > 1) continue;
                 m_browseItems.append(QVariantMap{{"id", value}, {"label", value},
                                                  {"sub", QString()}});
             }
@@ -1993,6 +2028,14 @@ void VirtualChannelsBackend::onPlexItemsLoaded(const QVariant &items) {
         }
         m_pgStage = PlexStage::Idle;
         m_pgTimer->stop();
+        if (m_browseKind == QLatin1String("moviegenres")) {
+            for (QVariant &e : m_browseItems) {
+                QVariantMap row = e.toMap();
+                row["sub"] = countedAs(m_browseTally.value(row.value("label").toString()),
+                                       "FILM", "FILMS");
+                e = row;
+            }
+        }
         if (m_browseKind != QLatin1String("movies")) {
             std::sort(m_browseItems.begin(), m_browseItems.end(),
                       [](const QVariant &a, const QVariant &b) {
@@ -2188,7 +2231,9 @@ void VirtualChannelsBackend::onPlexCollectionsLoaded(const QVariant &collections
             const QVariantMap m = v.toMap();
             const QString title = m.value("title").toString();
             if (title.isEmpty()) continue;
-            m_browseItems.append(QVariantMap{{"id", title}, {"label", title}, {"sub", QString()}});
+            m_browseItems.append(QVariantMap{
+                {"id", title}, {"label", title},
+                {"sub", countedAs(m.value("childCount").toInt(), "ITEM", "ITEMS")}});
         }
         if (!m_pgSections.isEmpty()) {
             m_pgTimer->start();
@@ -2232,7 +2277,9 @@ void VirtualChannelsBackend::onPlexPlaylistsLoaded(const QVariant &playlists) {
             const QVariantMap m = v.toMap();
             const QString title = m.value("title").toString();
             if (title.isEmpty()) continue;
-            m_browseItems.append(QVariantMap{{"id", title}, {"label", title}, {"sub", QString()}});
+            m_browseItems.append(QVariantMap{
+                {"id", title}, {"label", title},
+                {"sub", countedAs(m.value("leafCount").toInt(), "ITEM", "ITEMS")}});
         }
         if (!m_pgSections.isEmpty()) {
             m_pgTimer->start();
@@ -3094,6 +3141,7 @@ bool VirtualChannelsBackend::renumberDial() {
 
 void VirtualChannelsBackend::browseStart(const QString &kind) {
     m_browseKind = kind;
+    m_browseTally.clear();
     ensurePlexTimer();
     m_pgTimer->start();
 }

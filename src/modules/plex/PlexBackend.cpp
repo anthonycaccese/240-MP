@@ -1615,8 +1615,11 @@ void PlexBackend::load_collections(const QString &sectionId) {
         QVariantList items;
         for (const auto &mv : metadata) {
             QJsonObject m = mv.toObject();
+            // childCount so a picker can say how much is in it before you pick.
             items.append(QVariantMap{{"ratingKey",m["ratingKey"].toString()},
-                                     {"title",m["title"].toString().toUpper()},{"type","collection"}});
+                                     {"title",m["title"].toString().toUpper()},
+                                     {"childCount",m["childCount"].toInt()},
+                                     {"type","collection"}});
         }
         emit collectionsLoaded(items);
     });
@@ -1660,7 +1663,9 @@ void PlexBackend::load_playlists(const QString &sectionId) {
         for (const auto &mv : metadata) {
             QJsonObject m = mv.toObject();
             items.append(QVariantMap{{"ratingKey",m["ratingKey"].toString()},
-                                     {"title",m["title"].toString().toUpper()},{"type","playlist"}});
+                                     {"title",m["title"].toString().toUpper()},
+                                     {"leafCount",m["leafCount"].toInt()},
+                                     {"type","playlist"}});
         }
         emit playlistsLoaded(items);
     });
