@@ -647,9 +647,21 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
     m_plexTranscodeSession.clear();
 
     const QString quality = plexVideoQuality();
-    if (transcodeAllowed && quality != QLatin1String("auto")
+    const bool willTranscode =
+        transcodeAllowed && quality != QLatin1String("auto")
         && m_plex->metaObject()->indexOfMethod(
-               "request_transcode(QString,QString,QString,QString,QString,int)") >= 0) {
+               "request_transcode(QString,QString,QString,QString,QString,int)") >= 0;
+
+    // Which road a programme takes, and why. A channel joins part-way through
+    // and allows transcoding; a guide preview starts at nothing and does not.
+    // When one of the two plays and the other does not, this is the line that
+    // says which was which.
+    qInfo("[VirtualChannels] %s for %s: offset %lld s, quality %s, transcode %s",
+          willTranscode ? "TRANSCODE" : "DIRECT", qPrintable(ratingKey),
+          static_cast<long long>(offsetMs / 1000), qPrintable(quality),
+          transcodeAllowed ? "allowed" : "not allowed");
+
+    if (willTranscode) {
         m_plexTranscodeSession = sessionId;
         return QMetaObject::invokeMethod(
             m_plex, "request_transcode",
@@ -877,7 +889,14 @@ void VirtualChannelsBackend::onPlexStreamUrlReady(const QString &url, const QStr
     m["pending"]   = false;
     m["url"]       = url;
     m["plexToken"] = plexToken;
-    if (!m_plexTranscodeSession.isEmpty()) m["startSeconds"] = 0.0;
+    // A transcode is started at the join offset, so the stream mpv is handed is
+    // meant to begin there. Logged because that assumption is exactly what a
+    // programme that never starts calls into question.
+    if (!m_plexTranscodeSession.isEmpty()) {
+        qInfo("[VirtualChannels] handing mpv a transcode stream, telling it to start at 0 "
+              "(was going to start at %.1f s)", m.value(QStringLiteral("startSeconds")).toDouble());
+        m["startSeconds"] = 0.0;
+    }
     emit playDescriptorReady(m);
 }
 
