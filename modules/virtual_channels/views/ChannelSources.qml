@@ -21,7 +21,31 @@ FocusScope {
     property bool building: false
 
     readonly property var rows: {
-        var r = ["source"]
+        var r = ["source", "kind"]
+        if (isMovies) {
+            // A film channel takes its running order from where the films come
+            // from, so it carries no order row and no timing row: films do not
+            // sit on a clock. Movie Slots is gone too -- booking a film to a
+            // time says nothing when every programme is already a film.
+            r.push("filmsfrom")
+            if (fromPlaylist) {
+                if (cfg.supportsPlaylists) r.push("playlists")
+            } else {
+                r.push("films")
+                r.push("genres")
+                r.push("collections")
+            }
+            // Shows left behind by a channel that used to be a TV one. Shown so
+            // that nothing airs which the screen is not admitting to.
+            if (countOf("match") > 0) r.push("series")
+            r.push("logo")
+            r.push("ads")
+            r.push("breaks")
+            r.push("rebuild")
+            r.push("rename")
+            r.push("delete")
+            return r
+        }
         if (cfg.source === "local") {
             // Local files are a library like any other source: the two things a
             // media folder can hold, straight off this screen. There is no
@@ -33,6 +57,10 @@ FocusScope {
             r.push("series")
         } else if (cfg.source !== undefined) {
             r.push("series")
+            // Films on a TV channel are not offered, but if a channel has them
+            // -- from being a film channel once -- they air, so they are shown.
+            if (countOf("films") > 0)  r.push("films")
+            if (countOf("genres") > 0) r.push("genres")
             r.push("collections")
             if (cfg.supportsPlaylists) r.push("playlists")
         }
@@ -59,6 +87,8 @@ FocusScope {
     property int gridMinutes: 0
     property int adsPerBreak: 0
     property string order: "broadcast"
+    readonly property bool isMovies: cfg.kind === "movies"
+    readonly property bool fromPlaylist: cfg.filmsFrom === "playlist"
 
     readonly property var gridChoices: [0, 15, 30, 60]
 
@@ -116,6 +146,10 @@ FocusScope {
     function labelFor(i) {
         switch (rows[i]) {
         case "source":       return "Source"
+        case "kind":         return "Kind"
+        case "filmsfrom":    return "Films From"
+        case "films":        return "Films"
+        case "genres":       return "Genres"
         case "series":       return "Series"
         case "collections":  return "Collections"
         case "playlists":    return "Playlists"
@@ -135,6 +169,16 @@ FocusScope {
     function valueFor(i) {
         switch (rows[i]) {
         case "source": return (cfg.sourceName || "Local Files").toUpperCase()
+        case "kind":   return sourcesRoot.isMovies ? "MOVIES" : "TV"
+        case "filmsfrom": return sourcesRoot.fromPlaylist ? "A PLAYLIST" : "A SELECTION"
+        case "films": {
+            var n = countOf("films")
+            return n === 0 ? "NONE" : n + (n === 1 ? " FILM" : " FILMS")
+        }
+        case "genres": {
+            var g = countOf("genres")
+            return g === 0 ? "NONE" : (cfg.genres || []).join(", ").toUpperCase()
+        }
         case "series": {
             var n = countOf("match")
             var ex = excludedCount()
@@ -190,6 +234,14 @@ FocusScope {
         case "collections": return "A group kept on " + server + ", added whole — everything in it airs, even shows not ticked in Series."
         case "playlists":   return "A list kept on " + server + ", added whole. Change it there and this channel follows on its next rebuild."
         case "slots":       return "Movies at fixed times, each drawing on its own set of movies."
+        case "kind":        return sourcesRoot.isMovies
+                                   ? "A channel of films. They air one after another with whatever breaks you set, and there are no movie slots — every program is already a film."
+                                   : "A channel of programs from series. Films go in Movie Slots, at a time you choose."
+        case "filmsfrom":   return sourcesRoot.fromPlaylist
+                                   ? "A playlist kept on " + server + ", aired in the order you put it in. Change it there and this channel follows on its next rebuild."
+                                   : "Films you pick, by name, by genre, or a collection at a time. They air shuffled."
+        case "films":       return "Films picked one at a time from " + server + "."
+        case "genres":      return "Every film on " + server + " of these genres. Add a genre and the channel follows the library as it grows."
         case "logo":        return "The mark this channel flies in the corner. Its size and position are under Channel Logo in Channels settings."
         case "order":       return sourcesRoot.order === "shuffle"
                                    ? "Series take turns, and everything plays once before anything repeats."
@@ -213,12 +265,27 @@ FocusScope {
     function cycles(i) {
         var r = rows[i]
         return r === "source" || r === "order" || r === "timing" || r === "ads"
+               || r === "kind" || r === "filmsfrom"
     }
 
     function step(delta) {
         if (building) return
         var r = rows[current]
         if (r === "source") { cycleSource(delta); return }
+        if (r === "kind") {
+            var nextKind = sourcesRoot.isMovies ? "tv" : "movies"
+            if (!virtualChannelsBackend.set_channel_kind(channelNumber, nextKind))
+                status = "Could not change the kind"
+            else { status = ""; reload() }
+            return
+        }
+        if (r === "filmsfrom") {
+            var nextFrom = sourcesRoot.fromPlaylist ? "selection" : "playlist"
+            if (!virtualChannelsBackend.set_channel_films_from(channelNumber, nextFrom))
+                status = "Could not change where the films come from"
+            else { status = ""; reload() }
+            return
+        }
         if (r === "order") {
             var next = order === "broadcast" ? "interleaved"
                      : order === "interleaved" ? "shuffle"
@@ -306,7 +373,10 @@ FocusScope {
         navigateTo("modules/virtual_channels/views/SourceBrowser.qml", {
             moduleId:      sourcesRoot.moduleId,
             channelNumber: sourcesRoot.channelNumber,
-            kind: row === "series" ? "shows" : row,
+            kind: row === "series" ? "shows"
+                : row === "films"  ? "movies"
+                : row === "genres" ? "moviegenres"
+                                   : row,
             title: sourcesRoot.channelName
         }, { currentIndex: sourcesRoot.current })
     }

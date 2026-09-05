@@ -329,6 +329,129 @@ void testPoolSaveKeepsWhatItDoesNotOwn() {
           "while the legacy series list is retired, so nothing airs twice");
 }
 
+void testMovieChannel() {
+    section("Backend: a movie channel keeps its slots but does not air them");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["kind"] = QStringLiteral("movies");
+
+    QJsonObject slot;
+    slot["name"] = QStringLiteral("Movie Slot");
+    slot["at"]   = QStringLiteral("20:00");
+    QJsonArray booked;          // not "slots": Qt defines that as a keyword
+    booked.append(slot);
+    ch["appointments"] = booked;
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+    const QVariantMap cfg = b.channel_source_config(3);
+    checkStr(cfg.value(QStringLiteral("kind")).toString(), QStringLiteral("movies"),
+             "the screen is told it is a movie channel");
+    checkStr(cfg.value(QStringLiteral("filmsFrom")).toString(), QStringLiteral("selection"),
+             "and that a selection is the default");
+
+    // Nothing airs from the slot, but it is still in the file to come back to.
+    checkEq(fx.read(3).value(QLatin1String("appointments")).toArray().size(), 1,
+            "the slot it already had is left in the file");
+
+    check(b.set_channel_films_from(3, QStringLiteral("playlist")),
+          "a movie channel can be switched to a playlist");
+    checkStr(b.channel_source_config(3).value(QStringLiteral("filmsFrom")).toString(),
+             QStringLiteral("playlist"), "and says so afterwards");
+
+    check(!b.set_channel_films_from(3, QStringLiteral("whatever")),
+          "a films-from it does not understand is refused");
+    check(!b.set_channel_kind(3, QStringLiteral("films")),
+          "and so is a kind it does not understand");
+    checkStr(b.channel_source_config(3).value(QStringLiteral("filmsFrom")).toString(),
+             QStringLiteral("playlist"), "a refusal changes nothing");
+
+    check(b.set_channel_kind(3, QStringLiteral("tv")),
+          "switching back to TV is allowed");
+    checkEq(fx.read(3).value(QLatin1String("appointments")).toArray().size(), 1,
+            "and the slot is still there, exactly as it was");
+}
+
+void testFilmPoolEntries() {
+    section("Backend: films and genres are pool entries a channel can hold");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["kind"] = QStringLiteral("movies");
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+
+    QVariantList entries;
+    QVariantMap film;
+    film["src"] = QStringLiteral("plex");
+    film["kind"] = QStringLiteral("movie");
+    film["name"] = QStringLiteral("The Thing");
+    film["ref"]  = QStringLiteral("4242");
+    entries.append(film);
+    QVariantMap genre;
+    genre["src"] = QStringLiteral("plex");
+    genre["kind"] = QStringLiteral("genre");
+    genre["name"] = QStringLiteral("Film-Noir");
+    entries.append(genre);
+
+    check(b.set_channel_pool(3, QStringLiteral("programmes"), entries),
+          "a pool of a film and a genre saves");
+
+    QString filmKind, genreKind, filmRef;
+    for (const QJsonValue &v : fx.read(3).value(QLatin1String("programmes")).toArray()) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QLatin1String("name")).toString() == QLatin1String("The Thing")) {
+            filmKind = o.value(QLatin1String("kind")).toString();
+            filmRef  = o.value(QLatin1String("ref")).toString();
+        }
+        if (o.value(QLatin1String("name")).toString() == QLatin1String("Film-Noir"))
+            genreKind = o.value(QLatin1String("kind")).toString();
+    }
+    checkStr(filmKind,  QStringLiteral("movie"), "the film is stored as a film");
+    checkStr(filmRef,   QStringLiteral("4242"),  "with the id it was picked by");
+    checkStr(genreKind, QStringLiteral("genre"), "and the genre as a genre");
+
+    const QVariantList back = b.channel_pool(3, QStringLiteral("programmes"));
+    checkEq(back.size(), 2, "both read back for the screen");
+}
+
+void testFilmAndShowListsAreSeparate() {
+    section("Backend: saving films leaves the shows alone, and the other way round");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["source"] = QStringLiteral("local");
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+    check(b.set_channel_list(3, QStringLiteral("match"),
+                             { QStringLiteral("Batman Beyond") }),
+          "a show saves");
+    check(b.set_channel_list(3, QStringLiteral("films"),
+                             { QStringLiteral("Mask of the Phantasm") }),
+          "a film saves beside it");
+    check(b.set_channel_list(3, QStringLiteral("genres"),
+                             { QStringLiteral("Film-Noir") }),
+          "and a genre beside both");
+
+    const QVariantMap cfg = b.channel_source_config(3);
+    checkEq(cfg.value(QStringLiteral("match")).toStringList().size(),  1, "one show");
+    checkEq(cfg.value(QStringLiteral("films")).toStringList().size(),  1, "one film");
+    checkEq(cfg.value(QStringLiteral("genres")).toStringList().size(), 1, "one genre");
+
+    // Rewriting one list must not disturb the others.
+    check(b.set_channel_list(3, QStringLiteral("films"), {}), "clearing the films saves");
+    const QVariantMap after = b.channel_source_config(3);
+    checkEq(after.value(QStringLiteral("films")).toStringList().size(),  0, "the films are gone");
+    checkEq(after.value(QStringLiteral("match")).toStringList().size(),  1, "the show is untouched");
+    checkEq(after.value(QStringLiteral("genres")).toStringList().size(), 1, "so is the genre");
+
+    check(!b.set_channel_list(3, QStringLiteral("nonsense"), { QStringLiteral("x") }),
+          "a list the backend does not know is refused");
+}
+
 void testSourceSwitchSticks() {
     section("Backend: switching a channel's source takes effect");
 
@@ -501,6 +624,9 @@ int runVirtualChannelsBackendTests() {
     testPoolReadBack();
     testIdentsSurviveASeriesRewrite();
     testSeriesIdsAreKept();
+    testMovieChannel();
+    testFilmPoolEntries();
+    testFilmAndShowListsAreSeparate();
     testPoolSaveKeepsWhatItDoesNotOwn();
     testSourceSwitchSticks();
     testExclusionsOnALocalChannel();

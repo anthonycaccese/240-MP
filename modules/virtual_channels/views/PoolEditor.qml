@@ -159,6 +159,12 @@ FocusScope {
                 // a folder of clips. Saying which stops the picker offering a
                 // folder of bumps as though it were a show.
                 purpose: poolRoot.pool === "programmes" ? "programmes" : "folders",
+                // Films are only offered on a channel that airs films. On a TV
+                // channel they would land in the pool with no row on the
+                // sources screen admitting to them.
+                channelKind: virtualChannelsBackend
+                             ? (virtualChannelsBackend.channel_source_config(poolRoot.channelNumber).kind || "tv")
+                             : "tv",
                 title: poolLabel + " — " + sourceLabel(row.substring(4))
             }, { currentIndex: poolRoot.current, addFrom: row.substring(4) })
             return

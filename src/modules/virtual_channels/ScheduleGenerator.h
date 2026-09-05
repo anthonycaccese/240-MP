@@ -38,8 +38,11 @@ struct BreakPack {
 };
 
 // How a channel lays its programmes out. Broadcast replaced an ordering that
-// sorted by series title, which put a 1978 show before a 1953 one.
-enum class Ordering { Broadcast, Shuffle, Interleaved };
+// sorted by series title, which put a 1978 show before a 1953 one. AsListed is
+// Broadcast without the sort: it airs the pool in the order the pool arrived,
+// which is what a playlist means. A film channel is given it by the backend
+// rather than the viewer -- the sources screen has no ordering row.
+enum class Ordering { Broadcast, Shuffle, Interleaved, AsListed };
 
 struct Appointment {
     QString name;
