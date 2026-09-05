@@ -388,6 +388,45 @@ it.
 season key → episode refs. Both must be read when generating, or a season
 switched off in the interface airs anyway.
 
+### Movie channels
+
+A channel's `kind` is `tv` — the default, and what an absent value means — or
+`movies`. The sources screen calls the row **Type**.
+
+A movie channel airs films as its programmes, and drops the rows that mean
+nothing to it. There are **no movie slots**, because booking a film to a time
+says nothing when every programme is already a film, and **no grid**, because a
+two-hour film on a half-hour clock is a card holding the remainder every time.
+Neither is deleted: both stay in `channels.json` untouched and come back if the
+channel is switched to `tv` again. They are simply not read meanwhile, so
+nothing airs that the screen is not showing.
+
+**Where the films come from decides the running order**, so there is no ordering
+row to disagree with it. `films_from` is:
+
+- `playlist` — one playlist, aired in the order it was written. This is the only
+  thing `Ordering::AsListed` exists for: Broadcast without the sort, so it still
+  resumes where it left off from its mark. Films are sorted stably during
+  enumeration, or a playlist's order would come out however the sort happened to
+  leave it, films having no season or episode to be ordered by.
+- `selection` — films, genres and collections, shuffled.
+
+Only the one in force is read. Reading both would air films from a row the
+sources screen is not showing, which is the same fault as a collection that
+shows as ticked and never airs, in the other direction.
+
+**Films and genres are pool entries** of kind `movie` and `genre`, which become a
+Films job — the same two ways a movie slot asks for its film. A collection or a
+playlist on a movie channel becomes a Films job too: the episode and film
+enumerations scan different libraries, so a film collection asked for down the
+episode path is never found, which is what "No episodes matched" meant on a
+channel pointed at a collection of films.
+
+**Previews before each film** are the channel's Intros pointed at a folder of
+trailers. That needed nothing new — an intro plays before a programme, and a
+film is a programme. A single film can carry its own trailer through the
+per-entry `intros` the pool entry already has.
+
 **Movie slots** (`appointments`) are films at fixed times. A slot draws on
 picked films, or a folder, or both.
 

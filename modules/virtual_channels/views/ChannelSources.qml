@@ -153,7 +153,7 @@ FocusScope {
     function labelFor(i) {
         switch (rows[i]) {
         case "source":       return "Source"
-        case "kind":         return "Kind"
+        case "kind":         return "Type"
         case "filmsfrom":    return "Films From"
         case "films":        return "Films"
         case "genres":       return "Genres"
