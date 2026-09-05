@@ -49,7 +49,7 @@ The guiding idea: **browse structured content, then hand off to the right tool f
   CMakeLists.txt
 ```
 
-There are three modules today: `local_files`, `plex`, and `ambient_mode`. `plex` is a helpful reference when building something new as it covers a more complex use case (connecting to a 3rd party API with auth)
+The modules today are `ambient_mode`, `emby`, `jellyfin`, `local_files`, `nfc_reader`, `plex`, `scripts`, `virtual_channels`, `weather` and `youtube`. `plex` is a helpful reference when building something new as it covers a more complex use case (connecting to a 3rd party API with auth); `virtual_channels` is the largest, and the one to read for scheduling, multi-source browsing and a C++ test suite (see [Virtual Channels](#virtual-channels-scheduled-tv)).
 
 ## Anatomy of a Module
 
@@ -94,6 +94,7 @@ Loaded at startup by `AppCore` — the single source of truth for a module's ide
 | `toggle` | ON/OFF toggle | `default: "ON"` or `"OFF"` |
 | `list_single` | Single-select list | `options_source`, `options_slot`, `apply_slot` |
 | `multiselect_submenu` | Multi-select list via submenu | `options_source`, `options_slot` |
+| `submenu` | Opens a module-supplied sub-view | `view` (path relative to the app root) |
 | `directory_browser` | Keyboard-navigable directory picker | `default` (path string, may be empty) |
 | `action` | Button that calls a backend slot | `action_slot` |
 
@@ -106,6 +107,11 @@ Additional fields any setting may carry:
 ### Dynamic options and apply slots
 
 - For `list_single` / `multiselect_submenu` with `"options_source": "dynamic"`, the backend slot named by `options_slot` must emit `dynamicOptionsReady(key, [{id, label}])`. `AppCore` re-emits it to QML with the module ID prepended.
+- For `submenu`, `view` is a QML path relative to the app root (e.g.
+  `modules/<name>/views/Builder.qml`). The view is pushed onto the settings
+  navigation stack and receives `moduleId` and `settingLabel` as `navParams`.
+  Use this when a feature needs a guided flow rather than a row of values —
+  a multi-step builder does not read well as a flat list.
 - For `list_single` with `apply_slot`, that slot is called automatically (routed through `invoke_module_action`) when the user changes the value.
 
 A real example (Plex) — note `requires_auth`, dynamic options, and apply slots:
@@ -312,6 +318,188 @@ An NFC card's tag file can point at content another module owns, rather than at 
 - **Cards never switch server or user.** `select_server` persists config (see the settings-write rule), and auto-switching a Plex Home profile would be a PIN bypass in physical form. Wrong server / no permission / signed out are all errors.
 - A **shuffle** card sets `trackProgress: false` on the Player, suppressing both `update_timeline` calls. Progress reporting is entirely client-side, so that is sufficient to leave watched state, Continue Watching and on-deck untouched.
 - Shuffle keeps rolling via a **shuffle bag** in `PlexBackend` (`m_shuffleBag`): a shuffled permutation played to exhaustion then reshuffled, rather than independent random draws, which clump badly over the hours a jukebox card runs. `resolve_card` reports the show/season as `cardScope`; the Player's EOF branch calls `load_random_episode(scope)` instead of `load_next_episode(ratingKey)`. Both emit `nextEpisodeReady`, so the advance itself is shared. Continuation respects the module's `autoplay_next_episode` setting.
+
+## Virtual Channels (scheduled TV)
+
+The largest module. A channel is a **timeline**, not a playlist: tuning in lands
+you wherever that channel should be at this wall-clock moment, part way through
+a programme if that is where the schedule is.
+
+**Where the state lives**, all under the data directory:
+
+| File | What it holds |
+|---|---|
+| `channels/channels.json` | every channel: its number, name, source, pools, exclusions and movie slots |
+| `channels/schedule/<n>.json` | the generated timeline for one channel — what airs, when |
+| `channels/duration-cache.json` | probed durations, so a rebuild does not re-measure every file |
+| `logos/` | channel logo images |
+
+**A channel is built, not played live.** Editing a pool changes `channels.json`
+only; nothing airs differently until the channel is rebuilt, which is why every
+editing screen carries a REBUILD row and says "rebuild to air the change". A
+build probes durations (ffprobe, falling back to mpv), asks each source what it
+holds, lays out the timeline to the configured horizon, and writes the schedule
+file. `SCHEDULE AHEAD` sets that horizon; schedules are topped up nightly and at
+startup.
+
+**Four sources, one shape.** Local files, Plex, Jellyfin and Emby are all
+browsed as shows → seasons → episodes, and picks are stored the same way for
+each. Only what a source really has differs: local files have no collections or
+playlists, servers have no folders, and playlists are Plex-only — ask
+`source_supports_playlists()` rather than hardcoding that anywhere.
+
+**A channel states its source** in its `source` key. It is inferred from a
+server block, and then from the entries in its pools, only for channels written
+before that key existed — inference cannot be corrected, and a channel moved
+from a server to local files still holds that server's entries.
+
+**Pools.** `programmes` is what the channel plays; `intros`, `bumps`,
+`commercials` and `outros` are the break material. Every pool is an array of
+entry objects (`{src, kind, name}` for a library item, `{src, folder}` for a
+folder of clips); older channel files hold bare strings for folders and are
+still read. A programme entry can carry its own `intros`/`outros`, which
+override the channel's for that show.
+
+**A picked series carries its id.** A `kind: series` entry stores `ref`, the
+show's own id on its source — a Plex `ratingKey`, a Jellyfin or Emby `ItemId`.
+The pass takes a show whose id matches, *or* whose title matches in full, so a
+show renamed on the server is still found by id and one removed and added back
+under a new id is still found by name. Matching a name as a substring is what
+let the entry "STAR TREK" claim the whole franchise. Entries written before
+`ref` existed carry only the name and still work; the id is filled in the next
+time that show is picked, and `set_channel_list` leaves a stored id alone when
+the caller passes none, so editing the list from a screen that never saw the
+ids cannot discard them.
+
+**Collections and playlists live in the source block, not in the entry list**,
+and are read whether or not the pool also holds entries. Only the block's
+`match` is legacy — it is read when the pool has no entries at all, and writing
+entries retires it, because reading both would air the same shows twice. The
+rest of the block survives a pool save: it carries the seasons and episodes
+switched off as well as the collections, none of which an entry holds.
+
+**The pool is de-duplicated by ref before a build.** One episode can arrive by
+two roads — picked as a series and again inside a collection holding the same
+show — and a pool holding it twice airs it twice as often as everything beside
+it.
+
+**Exclusions** live in the channel's own source block, not on the entry:
+`exclude.seasons` is a list of season keys, `exclude.episodes` is a map of
+season key → episode refs. Both must be read when generating, or a season
+switched off in the interface airs anyway.
+
+### Movie channels
+
+A channel's `kind` is `tv` — the default, and what an absent value means — or
+`movies`. The sources screen calls the row **Type**.
+
+A movie channel airs films as its programmes, and drops the rows that mean
+nothing to it. There are **no movie slots**, because booking a film to a time
+says nothing when every programme is already a film, and **no grid**, because a
+two-hour film on a half-hour clock is a card holding the remainder every time.
+Neither is deleted: both stay in `channels.json` untouched and come back if the
+channel is switched to `tv` again. They are simply not read meanwhile, so
+nothing airs that the screen is not showing.
+
+**Where the films come from decides the running order**, so there is no ordering
+row to disagree with it. `films_from` is:
+
+- `playlist` — one playlist, aired in the order it was written. This is the only
+  thing `Ordering::AsListed` exists for: Broadcast without the sort, so it still
+  resumes where it left off from its mark. Films are sorted stably during
+  enumeration, or a playlist's order would come out however the sort happened to
+  leave it, films having no season or episode to be ordered by.
+- `selection` — films, genres and collections, shuffled.
+
+Only the one in force is read. Reading both would air films from a row the
+sources screen is not showing, which is the same fault as a collection that
+shows as ticked and never airs, in the other direction.
+
+**Films and genres are pool entries** of kind `movie` and `genre`, which become a
+Films job — the same two ways a movie slot asks for its film. A collection or a
+playlist on a movie channel becomes a Films job too: the episode and film
+enumerations scan different libraries, so a film collection asked for down the
+episode path is never found, which is what "No episodes matched" meant on a
+channel pointed at a collection of films.
+
+**Previews before each film** are the channel's Intros pointed at a folder of
+trailers. That needed nothing new — an intro plays before a programme, and a
+film is a programme. A single film can carry its own trailer through the
+per-entry `intros` the pool entry already has.
+
+**Movie slots** (`appointments`) are films at fixed times. A slot draws on
+picked films, or a folder, or both.
+
+**Ordering** is one of three, set per channel:
+
+- **Broadcast** runs the whole pool as one timeline, oldest first, whichever
+  show an episode belongs to. The date comes from the episode, falling back to
+  its season's or show's year; anything the library cannot date sorts after
+  everything it can. Programmes sharing a date fall back to series title, then
+  season and episode number, then ref, so a pool with no metadata at all still
+  lands somewhere stable and lands there again on the next build. Note that a
+  date is any non-zero value: a programme first aired before 1970 has a
+  negative one, and reading those as undated put The Twilight Zone among the
+  things nothing was known about.
+- **Interleaved** gives each series a turn in rotation. Each series holds its
+  own place and wraps on its own, so a short run comes round again while a long
+  one plays on. Dealing one per round from a single cycle instead left the
+  longest series playing alone once the others were spent.
+- **Shuffle** plays the pool through in a random order, everything once before
+  anything repeats, reshuffling each pass.
+
+**Where a channel had got to is stored as refs, not offsets.** The schedule
+file carries `marks` (series key → the ref that series last aired) and `mark`
+(the same for the one timeline Broadcast runs), both as of the moment the
+window opened; `marksAt` replays the old slot list up to now, exactly as
+`rotationAt` does for the count. A build resumes each series after its own
+mark. This is what makes a position survive editing the pool: an offset shifts
+the moment an episode is added or removed anywhere ahead of it, so every show
+would jump, whereas a ref still names the same episode. A mark naming an
+episode the library no longer has reads as absent, and only that series starts
+over. `rotation` remains a count of programmes aired; Interleaved uses it only
+to decide whose turn is next, never where in a series to resume. A schedule
+written before marks existed has only the count, which Broadcast still honours.
+
+**Tests.** `vchan-tests` covers the schedule, tuner, generator, path guard,
+duration probe, media-server source, local library and the backend's write
+paths — see [CONTRIBUTING.md](CONTRIBUTING.md#testing-your-change) to build and run it.
+Anything that saves to `channels.json` should be tested against a deliberately
+broken channel: a real box accumulates rows that no longer resolve, and a save
+that refuses the whole list because of one of them locks the viewer out.
+
+### The local library layout (Virtual Channels)
+
+Virtual Channels reads local files as a library rather than as a directory, so
+that one picker can present local files, Plex, Jellyfin and Emby the same way.
+Two folder names under the media root are the contract, and `LocalLibrary` reads
+nothing else:
+
+```
+<media>/series/<Show Name (Year)>/Season 1/<Show> S01E01 - Title.mkv
+<media>/movies/<Film Name (Year)>.mkv
+<media>/movies/<Film Name (Year)>/<Film Name>.mkv     # folder-per-film also works
+```
+
+- Both folders are created on startup, but only inside a media root that already
+  exists — the module never invents the root itself.
+- Naming follows Jellyfin's conventions, then Plex's, and **loosely**: `S01E02`,
+  `1x02`, `Season 2 Episode 5` and a bare `E04` all parse, `Specials`/`Extras`
+  mean season 0, and anything unparseable keeps its filename as its title and
+  sorts last rather than disappearing.
+- Extras are not films. A `-trailer`/`-sample`/`-featurette` suffix, or a
+  `Trailers`/`Extras`/`Behind The Scenes` folder, is skipped when films are
+  enumerated (`LocalLibrary::isExtraPath`) — including by movie slots, so a
+  trailer sitting beside a feature cannot be what airs at eight.
+- Anything **outside** `series/` and `movies/` is not a programme source. That is
+  what lets a picker tell a show from a folder of bumps: break pools (intros,
+  outros, bumps, commercials) point at ordinary folders anywhere under the root,
+  and take what is in them.
+
+A channel states its source in its `source` key. It is inferred from a server
+block, and then from the entries in its pools, only for channels written before
+that key existed — inference cannot be corrected, and a channel moved from a
+server to local files still holds that server's entries.
 
 ## Input (InputManager)
 

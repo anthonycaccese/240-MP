@@ -17,6 +17,16 @@ FocusScope {
     property var dynamicOptions: ({}) // key -> [{id, label}] loaded from backend
     property string authState: ""
 
+    property string actionStatus: ""
+
+    Connections {
+        target: appCore
+        function onModuleActionStatus(moduleId, message) {
+            if (moduleId !== moduleSettingsRoot.moduleId) return
+            moduleSettingsRoot.actionStatus = message
+        }
+    }
+
     function loadSettings() {
         var allSettings = appCore.get_settings()
         currentValues = (allSettings.modules && allSettings.modules[moduleId]) ? allSettings.modules[moduleId] : {}
@@ -56,12 +66,39 @@ FocusScope {
         }
     }
 
+    function storedValue(key) {
+        if (key === undefined || key === null) return undefined
+        var parts = String(key).split(".")
+        var cur = currentValues
+        for (var i = 0; i < parts.length; i++) {
+            if (cur === undefined || cur === null) return undefined
+            cur = cur[parts[i]]
+        }
+        return cur
+    }
+
+    function setStoredValue(key, value) {
+        if (key === undefined || key === null) return
+        var parts = String(key).split(".")
+        var root = Object.assign({}, currentValues)
+        var cur = root
+        for (var i = 0; i < parts.length - 1; i++) {
+            var childName = parts[i]
+            var child = (cur[childName] && typeof cur[childName] === "object")
+                        ? Object.assign({}, cur[childName]) : ({})
+            cur[childName] = child
+            cur = child
+        }
+        cur[parts[parts.length - 1]] = value
+        currentValues = root
+    }
+
     function currentDisplayValue(item) {
         var key = item.key
         var type = item.type
 
         if (type === "toggle") {
-            var raw = currentValues[key]
+            var raw = storedValue(key)
             if (raw === undefined || raw === null) raw = (item.default === "ON")
             return (raw === true || raw === "ON") ? "ON" : "OFF"
         }
@@ -69,17 +106,19 @@ FocusScope {
         if (type === "list_single") {
             if (item.options_source === "dynamic") {
                 var opts = dynamicOptions[key] || []
-                var storedId = currentValues[key] || null
+                var storedId = storedValue(key)
+                if (storedId === undefined || storedId === null || storedId === "")
+                    storedId = (item.default !== undefined) ? item.default : null
                 for (var i = 0; i < opts.length; i++) {
                     if (opts[i].id === storedId || (storedId !== null && opts[i].old === storedId)) return opts[i].label
                 }
                 return opts.length > 0 ? opts[0].label : "---"
             }
-            return currentValues[key] || (item.default || "---")
+            return storedValue(key) || (item.default || "---")
         }
 
         if (type === "directory_browser") {
-            var saved = currentValues[key] || ""
+            var saved = storedValue(key) || ""
             return saved !== "" ? saved : "Default"
         }
 
@@ -93,9 +132,7 @@ FocusScope {
         if (item.type === "toggle") {
             var cur = currentDisplayValue(item)
             var newVal = (cur === "ON") ? false : true
-            var updated = Object.assign({}, currentValues)
-            updated[item.key] = newVal
-            currentValues = updated
+            setStoredValue(item.key, newVal)
             appCore.save_setting(moduleId, item.key, newVal)
             settingsList.forceLayout()
         } else if (item.type === "list_single") {
@@ -103,16 +140,14 @@ FocusScope {
             if (item.options_source === "dynamic") {
                 opts = dynamicOptions[item.key] || []
                 if (opts.length === 0) return
-                var storedId = currentValues[item.key] || null
+                var storedId = storedValue(item.key) || null
                 var curIdx = 0
                 for (var i = 0; i < opts.length; i++) {
                     if (opts[i].id === storedId) { curIdx = i; break }
                 }
                 var newIdx = (curIdx + direction + opts.length) % opts.length
                 var newId = opts[newIdx].id
-                var u = Object.assign({}, currentValues)
-                u[item.key] = newId
-                currentValues = u
+                setStoredValue(item.key, newId)
                 appCore.save_setting(moduleId, item.key, newId)
                 if (item.apply_slot) {
                     appCore.invoke_module_action(moduleId, item.apply_slot)
@@ -120,13 +155,11 @@ FocusScope {
             } else {
                 opts = item.options || []
                 if (opts.length === 0) return
-                var curVal = currentValues[item.key] || opts[0]
+                var curVal = storedValue(item.key) || opts[0]
                 var ci = opts.indexOf(curVal)
                 if (ci < 0) ci = 0
                 var ni = (ci + direction + opts.length) % opts.length
-                var u2 = Object.assign({}, currentValues)
-                u2[item.key] = opts[ni]
-                currentValues = u2
+                setStoredValue(item.key, opts[ni])
                 appCore.save_setting(moduleId, item.key, opts[ni])
             }
             settingsList.forceLayout()
@@ -185,6 +218,7 @@ FocusScope {
     ListView {
         id: settingsList
         model: schemaItems
+        onCurrentIndexChanged: moduleSettingsRoot.actionStatus = ""
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.25 //120
@@ -219,6 +253,13 @@ FocusScope {
             if (!item) return
             if (item.type === "toggle") {
                 moduleSettingsRoot.cycleValue(currentIndex, 1)
+            } else if (item.type === "submenu") {
+                if (item.view) {
+                    moduleSettingsRoot.navigateTo(item.view, {
+                        moduleId: moduleSettingsRoot.moduleId,
+                        settingLabel: item.label
+                    }, { currentIndex: settingsList.currentIndex })
+                }
             } else if (item.type === "multiselect_submenu") {
                 moduleSettingsRoot.navigateTo("views/MultiSelectSettings.qml", {
                     moduleId: moduleSettingsRoot.moduleId,
@@ -228,7 +269,7 @@ FocusScope {
             } else if (item.type === "action") {
                 appCore.invoke_module_action(moduleSettingsRoot.moduleId, item.action_slot)
             } else if (item.type === "directory_browser") {
-                var savedPath = currentValues[item.key] || ""
+                var savedPath = storedValue(item.key) || ""
                 moduleSettingsRoot.navigateTo("views/DirectoryBrowser.qml", {
                     moduleId: moduleSettingsRoot.moduleId,
                     settingKey: item.key,
@@ -260,6 +301,8 @@ FocusScope {
                     font.capitalization: Font.AllUppercase
                     anchors.verticalCenter: parent.verticalCenter
                     x: 0
+                    width: Math.max(root.sw * 0.15, parent.width - valueRow.width - root.sw * 0.0125)
+                    elide: Text.ElideRight
                     topPadding: root.sh * 0.0041667 //2
                     leftPadding: root.sw * 0.009375 //6
                     rightPadding: root.sw * 0.009375 //6
@@ -269,6 +312,7 @@ FocusScope {
 
                 // Right-side value/arrow
                 Row {
+                    id: valueRow
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: root.sw * 0.009375 //6
@@ -345,7 +389,8 @@ FocusScope {
     Rectangle {
         id: rowHelpBackground
         property var currentRow: moduleSettingsRoot.schemaItems[settingsList.currentIndex]
-        visible: !!(currentRow && currentRow.description)
+        visible: moduleSettingsRoot.actionStatus !== ""
+                 || !!(currentRow && currentRow.description)
         property color baseColor: root.primaryColor
         color: Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.2)
         anchors.bottom: parent.bottom
@@ -357,7 +402,9 @@ FocusScope {
         clip: true
         Text {
             id: rowHelp
-            text: (rowHelpBackground.currentRow && rowHelpBackground.currentRow.description) || ""
+            text: moduleSettingsRoot.actionStatus !== ""
+                  ? moduleSettingsRoot.actionStatus
+                  : ((rowHelpBackground.currentRow && rowHelpBackground.currentRow.description) || "")
             color: root.primaryColor
             font.family: root.globalFont
             font.pixelSize: root.sh * 0.0291667 //14

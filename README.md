@@ -4,9 +4,9 @@
 
 240-MP is a retro VCR style frontend to play content on [Raspberry Pi](https://github.com/anthonycaccese/240-MP/wiki/Hardware-Testing) (preferably hooked up to a CRT TV), Steam OS (and other Linux x86_64 distros) or MacOS (ARM).
 
-Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. Try to think of each module as a different input on a VHS deck. There are 8 included modules currently: [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), Emby, [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader), [Weather](https://github.com/anthonycaccese/240-MP/wiki/Module:-Weather) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
+Playback experiences are handled via modules to enable new integrations without requiring major changes to the overall frontend. Try to think of each module as a different input on a VHS deck. There are 9 included modules currently: Channels, [Local Files](https://github.com/anthonycaccese/240-MP/wiki/Module:-Local-Files), [Plex](https://github.com/anthonycaccese/240-MP/wiki/Module:-Plex), [Jellyfin](https://github.com/anthonycaccese/240-MP/wiki/Module:-Jellyfin), Emby, [YouTube](https://github.com/anthonycaccese/240-MP/wiki/Module:-YouTube), [NFC Reader](https://github.com/anthonycaccese/240-MP/wiki/Module:-NFC-Reader), [Weather](https://github.com/anthonycaccese/240-MP/wiki/Module:-Weather) and a module similar to art/wallpaper modes on modern tvs called [Ambient:Mode](https://github.com/anthonycaccese/240-MP/wiki/Module:-Ambient-Mode).
 
-It's built to work in conjuction with [MPV](https://github.com/anthonycaccese/240-MP/wiki/MPV) which will be installed (or updated) as a dependency during the [install](#Install) steps.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" sections.
+It's built to work in conjuction with [MPV](https://github.com/anthonycaccese/240-MP/wiki/MPV) which will be installed (or updated) as a dependency during the [install](#install) steps.  Some modules (like YouTube and NFC Reader) have additional dependencies which are covered on their associated wiki pages under the "To Enable" sections.
 
 ## Video Overview
 
@@ -29,6 +29,19 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Playlist support for audio tracks using `m3u` and `m3u8` files
 - Mix video with a different audio track
 - Loops forever until you stop it
+
+### Channels
+- Scheduled linear TV channels: a channel has a real timeline, and tuning in lands you wherever that channel should be at this wall-clock moment, part way through a program if that is where the schedule is
+- Draws programs from Local Files, Plex, Jellyfin or Emby, mixed freely on the same channel
+- Local files are read as a library, not a folder: keep shows in `series/` and films in `movies/` and they are browsed by show, season and episode like a server's
+- Commercials, bumps, intros and outros between programs, from folders of your own clips or a collection on your server
+- Per-show idents: a channel has one intro and outro, and any show can override them with its own
+- Program guide with a moving preview of what is on, artwork, or neither
+- Movie slots: give a channel a film at 8 PM on chosen days
+- Station logo in the corner and a channel banner on tuning, both optional
+- Balanced shuffle so a channel's series take turns, or play in order
+- Optional weather station as a channel of its own
+- Off by default: switch it on under Settings, then add a channel
 
 ### Emby Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Emby))
 - Supported library types: `movies, tvshows, homevideos, boxsets`

@@ -300,6 +300,13 @@ void AppCore::registerModule(const QString &moduleId, const QString &contextProp
         QMetaObject::connect(backend, sig, this, slot);
     }
 
+    sig = bmo->indexOfSignal(QMetaObject::normalizedSignature("actionStatus(QString)"));
+    if (sig >= 0) {
+        int slot = amo->indexOfSlot(
+            QMetaObject::normalizedSignature("onBackendActionStatus(QString)"));
+        QMetaObject::connect(backend, sig, this, slot);
+    }
+
     // moduleSettingChanged(moduleId, key, value) -> backend.onSettingChanged(...)
     int slot = bmo->indexOfSlot(
         QMetaObject::normalizedSignature("onSettingChanged(QString,QString,QVariant)"));
@@ -327,6 +334,12 @@ void AppCore::onBackendAuthStateChanged() {
     QString moduleId = moduleIdForBackend(sender());
     if (!moduleId.isEmpty())
         emit moduleAuthStateChanged(moduleId);
+}
+
+void AppCore::onBackendActionStatus(const QString &message) {
+    QString moduleId = moduleIdForBackend(sender());
+    if (!moduleId.isEmpty())
+        emit moduleActionStatus(moduleId, message);
 }
 
 QString AppCore::get_module_auth_state(const QString &moduleId) {

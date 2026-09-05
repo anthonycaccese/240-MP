@@ -69,6 +69,7 @@ signals:
     void moduleSettingChanged(const QString &moduleId, const QString &key, const QVariant &value);
     void dynamicOptionsReady(const QString &moduleId, const QString &key, const QVariant &options);
     void moduleAuthStateChanged(const QString &moduleId);
+    void moduleActionStatus(const QString &moduleId, const QString &message);
 
 private slots:
     // Receive a backend's signal and re-emit it with the module ID prepended, recovering
@@ -76,6 +77,7 @@ private slots:
     // generically, with no per-module forwarding lambdas.
     void onBackendDynamicOptions(const QString &key, const QVariant &options);
     void onBackendAuthStateChanged();
+    void onBackendActionStatus(const QString &message);
 
 private:
     QJsonObject loadConfig() const;

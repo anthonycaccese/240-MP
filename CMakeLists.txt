@@ -15,6 +15,13 @@ set(APP_VERSION "dev" CACHE STRING "Release version (CI passes the git tag)")
 include(GNUInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
+
+# Optional: the guide's moving preview of what is on a channel. Optional on
+# purpose — it is one panel on one screen, and neither the build nor the app
+# should fail for want of it. The QML that uses it is loaded through a Loader
+# so a build or an install without the module simply shows a still card
+# instead. (Debian: qt6-multimedia-dev, qml6-module-qtmultimedia.)
+find_package(Qt6 QUIET COMPONENTS Multimedia)
 find_package(OpenSSL REQUIRED)
 find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
@@ -62,6 +69,14 @@ add_executable(240mp
     src/modules/weather/WeatherBackend.cpp
     src/modules/scripts/ScriptsBackend.cpp
     src/modules/scripts/ScriptLauncher.cpp
+    src/modules/virtual_channels/VirtualChannelsBackend.cpp
+    src/modules/virtual_channels/ChannelSchedule.cpp
+    src/modules/virtual_channels/ChannelTuner.cpp
+    src/modules/virtual_channels/PathGuard.cpp
+    src/modules/virtual_channels/ScheduleGenerator.cpp
+    src/modules/virtual_channels/DurationProbe.cpp
+    src/modules/virtual_channels/MediaServerSource.cpp
+    src/modules/virtual_channels/LocalLibrary.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
     src/util/MpvLocator.cpp
@@ -75,6 +90,13 @@ add_executable(240mp
 )
 
 target_compile_definitions(240mp PRIVATE APP_VERSION="${APP_VERSION}")
+
+if(Qt6Multimedia_FOUND)
+    target_link_libraries(240mp PRIVATE Qt6::Multimedia)
+    message(STATUS "Qt Multimedia found — the guide will show moving previews")
+else()
+    message(STATUS "Qt Multimedia not found — the guide will show still cards")
+endif()
 
 target_link_libraries(240mp PRIVATE
     Qt6::Core
@@ -181,6 +203,48 @@ else()
         "${CMAKE_SOURCE_DIR}/scripts"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/240mp"
         COMPONENT Runtime)
+endif()
+
+# ── Tests (opt-in) ─────────────────────────────────────────────────────────────
+# OFF by default: the normal build and the release pipeline are unaffected, and
+# an upstream PR is not forced to adopt a test framework. QtCore only — these
+# cover the scheduling arithmetic, which needs no Quick, no mpv and no display.
+#
+#   cmake -B build -DBUILD_VCHAN_TESTS=ON
+#   cmake --build build --target vchan-tests && ./build/vchan-tests
+option(BUILD_VCHAN_TESTS "Build the virtual-channels scheduling tests" OFF)
+if(BUILD_VCHAN_TESTS)
+    add_executable(vchan-tests
+        src/modules/virtual_channels/tests/main.cpp
+        src/modules/virtual_channels/tests/ChannelScheduleTest.cpp
+        src/modules/virtual_channels/tests/PathGuardTest.cpp
+        src/modules/virtual_channels/tests/ChannelTunerTest.cpp
+        src/modules/virtual_channels/tests/ScheduleGeneratorTest.cpp
+        src/modules/virtual_channels/tests/DurationProbeTest.cpp
+        src/modules/virtual_channels/tests/MediaServerSourceTest.cpp
+        src/modules/virtual_channels/tests/LocalLibraryTest.cpp
+        src/modules/virtual_channels/tests/VirtualChannelsBackendTest.cpp
+        # Listed so AUTOMOC processes it: it declares a QObject but has no
+        # same-named source file for AUTOMOC to pair it with.
+        src/modules/virtual_channels/tests/FakeMediaServer.h
+        src/modules/virtual_channels/ChannelSchedule.cpp
+        src/modules/virtual_channels/PathGuard.cpp
+        src/modules/virtual_channels/ChannelTuner.cpp
+        src/modules/virtual_channels/ScheduleGenerator.cpp
+        src/modules/virtual_channels/DurationProbe.cpp
+        src/modules/virtual_channels/MediaServerSource.cpp
+        src/modules/virtual_channels/LocalLibrary.cpp
+        src/modules/virtual_channels/VirtualChannelsBackend.cpp)
+    # MediaServerSource and the fake backend it is tested against are both
+    # QObjects, so this target needs moc even though the rest of the suite is
+    # plain C++.
+    set_target_properties(vchan-tests PROPERTIES AUTOMOC ON)
+    target_link_libraries(vchan-tests PRIVATE Qt6::Core)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(vchan-tests PRIVATE -Wall -Wextra)
+    endif()
+    enable_testing()
+    add_test(NAME vchan-schedule COMMAND vchan-tests)
 endif()
 
 # ── CPack ──────────────────────────────────────────────────────────────────────

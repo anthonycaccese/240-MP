@@ -800,6 +800,15 @@ QString PlexBackend::msToDisplay(int ms) {
     return QStringLiteral("%1MIN").arg(mins);
 }
 
+static QStringList plexTags(const QJsonObject &m, const char *key) {
+    QStringList out;
+    for (const QJsonValue &v : m[QLatin1String(key)].toArray()) {
+        const QString tag = v.toObject()["tag"].toString();
+        if (!tag.isEmpty()) out << tag;
+    }
+    return out;
+}
+
 QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
     return QVariantMap{
         {"ratingKey",              m["ratingKey"].toString()},
@@ -827,7 +836,29 @@ QVariantMap PlexBackend::formatItem(const QJsonObject &m) const {
         {"leafCount",              m["leafCount"].toInt()},
         {"viewedLeafCount",        m["viewedLeafCount"].toInt()},
         {"originallyAvailableAt",  m["originallyAvailableAt"].toString()},
+        {"genres",                 plexTags(m, "Genre")},
+        {"collections",            plexTags(m, "Collection")},
+        {"thumb",                  m["thumb"].toString()},
+        {"parentThumb",            m["parentThumb"].toString()},
+        {"grandparentThumb",       m["grandparentThumb"].toString()},
     };
+}
+
+QString PlexBackend::image_url(const QString &thumb, int width, int height) const {
+    const QString path = thumb.trimmed();
+    if (path.isEmpty()) return {};
+    const QString uri   = serverUrl();
+    const QString token = serverToken();
+    if (uri.isEmpty() || token.isEmpty()) return {};
+
+    QUrlQuery q;
+    q.addQueryItem("width",  QString::number(qBound(16, width,  1920)));
+    q.addQueryItem("height", QString::number(qBound(16, height, 1080)));
+    q.addQueryItem("minSize", QStringLiteral("1"));
+    q.addQueryItem("upscale", QStringLiteral("1"));
+    q.addQueryItem("url", path);
+    q.addQueryItem("X-Plex-Token", token);
+    return uri + QStringLiteral("/photo/:/transcode?") + q.query(QUrl::FullyEncoded);
 }
 
 void PlexBackend::flattenSeasons(const QVariantList &rawItems,
@@ -929,6 +960,16 @@ QVariantList PlexBackend::get_switchable_servers() {
     return list;
 }
 
+// A playback URL is worth logging -- it is the only way to tell afterwards
+// whether a title direct-played or was transcoded -- but it can carry a token,
+// so the token never reaches the journal.
+static QString loggableUrl(QString u) {
+    const int i = u.indexOf(QLatin1String("X-Plex-Token="));
+    if (i < 0) return u;
+    const int j = u.indexOf(QLatin1Char('&'), i);
+    return u.left(i + 13) + QStringLiteral("<redacted>") + (j < 0 ? QString() : u.mid(j));
+}
+
 void PlexBackend::build_stream_url(const QString &ratingKey,
                                    const QString &partKey,
                                    const QString &sessionId) {
@@ -941,7 +982,8 @@ void PlexBackend::build_stream_url(const QString &ratingKey,
                 + (partKey.contains('?') ? "&" : "?")
                 + "X-Plex-Client-Identifier="   + clientId()
                 + "&X-Plex-Session-Identifier=" + sessionId;
-    qDebug() << "[Plex] Playback: DIRECT PLAY";
+    qInfo("[Plex] playback DIRECT for %s -> %s",
+          qPrintable(ratingKey), qPrintable(loggableUrl(url)));
     emit streamUrlReady(url, token);
 }
 
@@ -1584,8 +1626,11 @@ void PlexBackend::load_collections(const QString &sectionId) {
         QVariantList items;
         for (const auto &mv : metadata) {
             QJsonObject m = mv.toObject();
+            // childCount so a picker can say how much is in it before you pick.
             items.append(QVariantMap{{"ratingKey",m["ratingKey"].toString()},
-                                     {"title",m["title"].toString().toUpper()},{"type","collection"}});
+                                     {"title",m["title"].toString().toUpper()},
+                                     {"childCount",m["childCount"].toInt()},
+                                     {"type","collection"}});
         }
         emit collectionsLoaded(items);
     });
@@ -1629,7 +1674,9 @@ void PlexBackend::load_playlists(const QString &sectionId) {
         for (const auto &mv : metadata) {
             QJsonObject m = mv.toObject();
             items.append(QVariantMap{{"ratingKey",m["ratingKey"].toString()},
-                                     {"title",m["title"].toString().toUpper()},{"type","playlist"}});
+                                     {"title",m["title"].toString().toUpper()},
+                                     {"leafCount",m["leafCount"].toInt()},
+                                     {"type","playlist"}});
         }
         emit playlistsLoaded(items);
     });
@@ -2424,7 +2471,8 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
     QString token = serverToken();
     QString quality = videoQuality();
 
-    qDebug() << "[Plex] Playback: TRANSCODE — full re-encode, quality cap:" << quality << "kbps";
+    qInfo("[Plex] playback TRANSCODE for %s at offset %d s, cap %s kbps",
+          qPrintable(ratingKey), offsetMs / 1000, qPrintable(quality));
     QUrl url(uri + "/video/:/transcode/universal/start.m3u8");
     QUrlQuery q;
     q.addQueryItem("hasMDE",      "1");
@@ -2489,7 +2537,7 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
         } else {
             streamUrl = reply->url().toString();
         }
-        qDebug() << "[Plex] Transcode stream URL for mpv:" << streamUrl;
+        qInfo("[Plex] transcode stream for mpv: %s", qPrintable(loggableUrl(streamUrl)));
         emit streamUrlReady(streamUrl, token);
     });
 }
@@ -2751,6 +2799,22 @@ void PlexBackend::update_live_timeline(const QString &state) {
     // Releasing the tuner ends this session; forget the key so a stray timer tick
     // can't re-ping a dead session.
     if (state == "stopped") m_liveTimelineKey.clear();
+}
+
+QString PlexBackend::video_quality() const {
+    return videoQuality();
+}
+
+void PlexBackend::stop_transcode(const QString &sessionId) {
+    if (sessionId.isEmpty()) return;
+    QString uri = serverUrl(), token = serverToken();
+    QUrl url(uri + "/video/:/transcode/universal/stop");
+    QUrlQuery q;
+    q.addQueryItem("session", sessionId);
+    q.addQueryItem("X-Plex-Client-Identifier", clientId());
+    url.setQuery(q);
+    auto *reply = plexGet(url, token);
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
 void PlexBackend::stop_live_session(const QString &sessionId) {

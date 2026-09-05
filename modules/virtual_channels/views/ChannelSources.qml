@@ -1,0 +1,448 @@
+import QtQuick
+import Components
+
+FocusScope {
+    id: sourcesRoot
+
+    focus: true
+    property var navParams: ({})
+    readonly property string moduleIcon:
+        appCore ? (appCore.get_module_info(moduleId).icon || "") : ""
+    property var navListState: navParams.navListState || ({})
+    property string moduleId:      navParams.moduleId || ""
+    property int    channelNumber: navParams.channelNumber !== undefined ? navParams.channelNumber : -1
+    property string channelName:   navParams.channelName   || ""
+
+    signal navigateTo(string path, var params, var listState)
+    signal goBack()
+
+    property var cfg: ({})
+    property string status: ""
+    property bool building: false
+
+    readonly property var rows: {
+        var r = ["source", "kind"]
+        if (isMovies) {
+            // A film channel takes its running order from where the films come
+            // from, so it carries no order row and no timing row: films do not
+            // sit on a clock. Movie Slots is gone too -- booking a film to a
+            // time says nothing when every programme is already a film.
+            // Local files have no playlists, genres or collections: a film is
+            // a file under movies/. Offering those rows would be offering a
+            // server's furniture to a folder.
+            if (cfg.source === "local") {
+                r.push("films")
+            } else {
+                r.push("filmsfrom")
+                if (fromPlaylist) {
+                    if (cfg.supportsPlaylists) r.push("playlists")
+                } else {
+                    r.push("films")
+                    r.push("genres")
+                    r.push("collections")
+                }
+            }
+            // Shows left behind by a channel that used to be a TV one. Shown so
+            // that nothing airs which the screen is not admitting to.
+            if (countOf("match") > 0) r.push("series")
+            r.push("logo")
+            r.push("ads")
+            r.push("breaks")
+            r.push("rebuild")
+            r.push("rename")
+            r.push("delete")
+            return r
+        }
+        if (cfg.source === "local") {
+            // Local files are a library like any other source: the two things a
+            // media folder can hold, straight off this screen. There is no
+            // intermediate list, and no offer to add from a server the channel
+            // is not sourced from.
+            // Films are not a pool: they are booked into Movie Slots, which is
+            // the row below. A flat list of films would air them as ordinary
+            // programmes and duplicate that mechanism.
+            r.push("series")
+        } else if (cfg.source !== undefined) {
+            r.push("series")
+            // Films on a TV channel are not offered, but if a channel has them
+            // -- from being a film channel once -- they air, so they are shown.
+            if (countOf("films") > 0)  r.push("films")
+            if (countOf("genres") > 0) r.push("genres")
+            r.push("collections")
+            if (cfg.supportsPlaylists) r.push("playlists")
+        }
+        r.push("slots")
+        r.push("logo")
+        r.push("order")
+        r.push("timing")
+        if (sourcesRoot.gridMinutes === 0) r.push("ads")
+        r.push("breaks")
+        r.push("rebuild")
+        r.push("rename")
+        r.push("delete")
+        return r
+    }
+    readonly property int rowCount: rows.length
+    readonly property var sources: cfg.available || ["local"]
+
+    property int current: 0
+
+    property int slotCount: 0
+    property var interstitials: []
+    property bool armedToDelete: false
+    property string channelLogo: ""
+    property int gridMinutes: 0
+    property int adsPerBreak: 0
+    property string order: "broadcast"
+    readonly property bool isMovies: cfg.kind === "movies"
+    readonly property bool fromPlaylist: cfg.filmsFrom === "playlist"
+
+    readonly property var gridChoices: [0, 15, 30, 60]
+
+    function reload() {
+        cfg = virtualChannelsBackend.channel_source_config(channelNumber)
+        slotCount = virtualChannelsBackend.channel_bookings(channelNumber).length
+        interstitials = virtualChannelsBackend.channel_interstitials(channelNumber)
+        channelLogo = virtualChannelsBackend.channel_logo(channelNumber) || ""
+        var timing = virtualChannelsBackend.channel_timing(channelNumber)
+        gridMinutes = timing.gridMinutes
+        adsPerBreak = timing.adsPerBreak
+        order       = timing.order
+        if (current >= rowCount) current = rowCount - 1
+    }
+
+    function cycleSource(direction) {
+        if (building || sources.length < 2) return
+        var at = sources.indexOf(cfg.source)
+        if (at < 0) at = 0
+        var next = sources[(at + direction + sources.length) % sources.length]
+        if (!virtualChannelsBackend.set_channel_source(channelNumber, next)) {
+            status = "Could not change source"
+            return
+        }
+        status = ""
+        reload()
+    }
+
+    function countOf(field) {
+        var l = cfg[field] || []
+        return l.length
+    }
+
+    function interstitialCount() {
+        var total = 0
+        for (var i = 0; i < interstitials.length; i++) total += interstitials[i].count
+        return total
+    }
+
+    // Clips on disk can be counted; a server's cannot until it is asked, so
+    // those are reported as the sources they are rather than counted as none.
+    function interstitialSources() {
+        var total = 0
+        for (var i = 0; i < interstitials.length; i++) {
+            var n = interstitials[i].sources
+            total += (n === undefined ? 0 : n)
+        }
+        return total
+    }
+
+    function excludedCount() {
+        return (cfg.excludedSeasons || []).length + (cfg.excludedEpisodes || []).length
+    }
+
+    function labelFor(i) {
+        switch (rows[i]) {
+        case "source":       return "Source"
+        case "kind":         return "Type"
+        case "filmsfrom":    return "Films From"
+        case "films":        return "Films"
+        case "genres":       return "Genres"
+        case "series":       return "Series"
+        case "collections":  return "Collections"
+        case "playlists":    return "Playlists"
+        case "slots":        return "Movie Slots"
+        case "logo":         return "Logo"
+        case "order":        return "Order"
+        case "timing":       return "Timing"
+        case "ads":          return "Per Break"
+        case "breaks":       return "Breaks"
+        case "rebuild":      return building ? "Rebuilding…" : "Rebuild This Channel"
+        case "rename":       return "Rename"
+        case "delete":       return sourcesRoot.armedToDelete ? "Delete — Press Again" : "Delete Channel"
+        }
+        return ""
+    }
+
+    function valueFor(i) {
+        switch (rows[i]) {
+        case "source": return (cfg.sourceName || "Local Files").toUpperCase()
+        case "kind":   return sourcesRoot.isMovies ? "MOVIES" : "TV"
+        case "filmsfrom": return sourcesRoot.fromPlaylist ? "PLAYLIST" : "SELECTION"
+        case "films": {
+            var n = countOf("films")
+            return n === 0 ? "NONE" : n + (n === 1 ? " FILM" : " FILMS")
+        }
+        case "genres": {
+            // One reads better as its name; a list of six would run off a CRT.
+            var g = countOf("genres")
+            if (g === 0) return "NONE"
+            return g === 1 ? String((cfg.genres || [])[0]).toUpperCase()
+                           : g + " GENRES"
+        }
+        case "series": {
+            var n = countOf("match")
+            var ex = excludedCount()
+            if (n === 0) return "NONE"
+            return n + (n === 1 ? " SHOW" : " SHOWS")
+                   + (ex > 0 ? " · " + ex + " OFF" : "")
+        }
+        case "collections": return countOf("collections") === 0 ? "NONE" : String(countOf("collections"))
+        case "playlists":   return countOf("playlists")   === 0 ? "NONE" : String(countOf("playlists"))
+        case "slots": {
+            var n = sourcesRoot.slotCount
+            return n === 0 ? "NONE" : (n === 1 ? "1 SLOT" : n + " SLOTS")
+        }
+        case "logo":
+            return sourcesRoot.channelLogo === "" ? "DEFAULT"
+                 : sourcesRoot.channelLogo.replace(/\.[^.]+$/, "").toUpperCase()
+        case "breaks": {
+            var n = sourcesRoot.interstitialCount()
+            if (n > 0) return n + " CLIPS"
+            var src = sourcesRoot.interstitialSources()
+            return src === 0 ? "NONE"
+                             : src + (src === 1 ? " SOURCE" : " SOURCES")
+        }
+        case "order":
+            return sourcesRoot.order === "shuffle" ? "SHUFFLE"
+                 : sourcesRoot.order === "interleaved" ? "INTERLEAVED"
+                                                       : "BROADCAST"
+        case "timing":
+            return sourcesRoot.gridMinutes === 0
+                   ? "FREE RUN" : "ON THE " + sourcesRoot.gridMinutes + " MIN"
+        case "ads":
+            return sourcesRoot.adsPerBreak === 0 ? "NONE" : String(sourcesRoot.adsPerBreak)
+        }
+        return ""
+    }
+
+    function helpFor(i) {
+        var server = cfg.sourceName || "the server"
+        switch (rows[i]) {
+        case "source":
+            return sources.length < 2
+                   ? "Only local files are set up. Sign in to Plex, Jellyfin or Emby to add more."
+                   // "Server" is wrong for local files, which are the one source
+                   // that is not one.
+                   : (cfg.source === "local"
+                      ? "Left and right to choose where this channel's shows come from. Its picks are kept, and come back if you change back."
+                      : "Left and right to change server. Its picks are kept, and come back if you change back.")
+        // These three overlap, and which to use is not obvious, so each says what
+        // it is FOR rather than only what it is. The distinction that matters:
+        // series are picked show by show and can be narrowed; a collection or
+        // playlist arrives whole and cannot.
+        case "series":      return "Shows picked one by one. Open one to switch off seasons or episodes you don't want."
+        case "collections": return "A group kept on " + server + ", added whole — everything in it airs, even shows not ticked in Series."
+        case "playlists":   return "A list kept on " + server + ", added whole. Change it there and this channel follows on its next rebuild."
+        case "slots":       return "Movies at fixed times, each drawing on its own set of movies."
+        case "kind":        return sourcesRoot.isMovies
+                                   ? "A channel of films, one after another. No movie slots: every program is already a film."
+                                   : "A channel of programs from series. Films go in Movie Slots, at a time you choose."
+        case "filmsfrom":   return sourcesRoot.fromPlaylist
+                                   ? "A playlist kept on " + server + ", aired in the order you put it in. Change it there and this channel follows on its next rebuild."
+                                   : "Films you pick, by name, by genre, or a collection at a time. They air shuffled."
+        case "films":       return "Films picked one at a time from " + server + "."
+        case "genres":      return "Every film on " + server + " of these genres. Add a genre and the channel follows the library as it grows."
+        case "logo":        return "The mark this channel flies in the corner. Its size and position are under Channel Logo in Channels settings."
+        case "order":       return sourcesRoot.order === "shuffle"
+                                   ? "Series take turns, and everything plays once before anything repeats."
+                                 : sourcesRoot.order === "interleaved"
+                                   ? "Series take turns, each keeping its own place — a short one comes round again while a long one plays on."
+                                   : "Everything airs in the order it first did, oldest first, whichever show it belongs to."
+        case "timing":      return sourcesRoot.gridMinutes === 0
+                                   ? "Free run: each program starts when the last one ended."
+                                   : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
+        case "ads":         return "How many things play between programs. Free run only — on a clock the gap decides."
+        case "breaks":      return "What plays between programs: intros, bumps, commercials and outros."
+        case "rebuild":     return "Rebuild the schedule so source changes actually air."
+        case "rename":      return "Change what this channel is called."
+        case "delete":      return sourcesRoot.armedToDelete
+                                   ? "Press again to remove this channel, or move away to keep it."
+                                   : "Remove this channel. Its schedule goes with it."
+        }
+        return ""
+    }
+
+    function cycles(i) {
+        var r = rows[i]
+        return r === "source" || r === "order" || r === "timing" || r === "ads"
+               || r === "kind" || r === "filmsfrom"
+    }
+
+    function step(delta) {
+        if (building) return
+        var r = rows[current]
+        if (r === "source") { cycleSource(delta); return }
+        if (r === "kind") {
+            var nextKind = sourcesRoot.isMovies ? "tv" : "movies"
+            if (!virtualChannelsBackend.set_channel_kind(channelNumber, nextKind))
+                status = "Could not change the kind"
+            else { status = ""; reload() }
+            return
+        }
+        if (r === "filmsfrom") {
+            var nextFrom = sourcesRoot.fromPlaylist ? "selection" : "playlist"
+            if (!virtualChannelsBackend.set_channel_films_from(channelNumber, nextFrom))
+                status = "Could not change where the films come from"
+            else { status = ""; reload() }
+            return
+        }
+        if (r === "order") {
+            var next = order === "broadcast" ? "interleaved"
+                     : order === "interleaved" ? "shuffle"
+                                               : "broadcast"
+            if (!virtualChannelsBackend.set_channel_order(channelNumber, next))
+                status = "Could not change the order"
+            else { status = ""; reload() }
+            return
+        }
+        if (r === "timing") {
+            var at = gridChoices.indexOf(gridMinutes)
+            if (at < 0) at = 0
+            var next = gridChoices[(at + delta + gridChoices.length) % gridChoices.length]
+            if (!virtualChannelsBackend.set_channel_grid(channelNumber, next))
+                status = "Could not change the timing"
+            else { status = ""; reload() }
+            return
+        }
+        if (r === "ads") {
+            var n = Math.max(0, Math.min(4, adsPerBreak + delta))
+            if (!virtualChannelsBackend.set_channel_ads(channelNumber, n))
+                status = "Could not change the breaks"
+            else { status = ""; reload() }
+        }
+    }
+
+    function open(i) {
+        if (building) return
+        var row = rows[i]
+
+        if (row === "rename") {
+            appCore.save_setting(moduleId, "rename_buffer", "")
+            navigateTo("modules/virtual_channels/views/TextEntry.qml", {
+                moduleId: sourcesRoot.moduleId,
+                settingKey: "rename_buffer",
+                title: "Name Channel " + sourcesRoot.channelNumber,
+                initialText: sourcesRoot.channelName
+            }, { currentIndex: sourcesRoot.current, renameThis: true })
+            return
+        }
+        if (row === "delete") {
+            if (!armedToDelete) { armedToDelete = true; status = ""; return }
+            armedToDelete = false
+            if (virtualChannelsBackend.is_generating()) {
+                status = "A channel is still building — try again in a moment"
+                return
+            }
+            if (virtualChannelsBackend.delete_channel(channelNumber)) goBack()
+            else status = "Could not remove this channel"
+            return
+        }
+
+        if (row === "rebuild") {
+            building = true
+            status = "Rebuilding…"
+            virtualChannelsBackend.regenerate(channelNumber)
+            return
+        }
+        if (row === "source") { cycleSource(1); return }
+        if (row === "logo") {
+            navigateTo("modules/virtual_channels/views/LogoPicker.qml", {
+                moduleId:      sourcesRoot.moduleId,
+                channelNumber: sourcesRoot.channelNumber,
+                title: sourcesRoot.channelName
+            }, { currentIndex: sourcesRoot.current })
+            return
+        }
+        if (row === "breaks") {
+            navigateTo("modules/virtual_channels/views/Interstitials.qml", {
+                moduleId:      sourcesRoot.moduleId,
+                channelNumber: sourcesRoot.channelNumber,
+                channelName:   sourcesRoot.channelName
+            }, { currentIndex: sourcesRoot.current })
+            return
+        }
+        if (row === "slots") {
+            navigateTo("modules/virtual_channels/views/Bookings.qml", {
+                moduleId:      sourcesRoot.moduleId,
+                channelNumber: sourcesRoot.channelNumber,
+                channelName:   sourcesRoot.channelName
+            }, { currentIndex: sourcesRoot.current })
+            return
+        }
+
+        navigateTo("modules/virtual_channels/views/SourceBrowser.qml", {
+            moduleId:      sourcesRoot.moduleId,
+            channelNumber: sourcesRoot.channelNumber,
+            kind: row === "series" ? "shows"
+                : row === "films"  ? "movies"
+                : row === "genres" ? "moviegenres"
+                                   : row,
+            title: sourcesRoot.channelName
+        }, { currentIndex: sourcesRoot.current })
+    }
+
+    function applyPendingRename() {
+        if (!navListState.renameThis) return
+        var typed = appCore.get_setting(moduleId, "rename_buffer")
+        if (typed && String(typed).trim() !== "") {
+            if (virtualChannelsBackend.rename_channel(channelNumber, String(typed))) {
+                channelName = String(typed).trim()
+                status = "Renamed"
+            } else {
+                status = "Rename failed"
+            }
+        }
+        appCore.save_setting(moduleId, "rename_buffer", "")
+        navListState = {}
+    }
+
+    Component.onCompleted: {
+        var restore = navListState.currentIndex
+        applyPendingRename()
+        reload()
+        if (restore !== undefined) current = Math.min(restore, rowCount - 1)
+    }
+
+    Connections {
+        target: virtualChannelsBackend
+        function onGenerationProgress(ch, done, total) {
+            if (ch !== sourcesRoot.channelNumber) return
+            sourcesRoot.status = total > 0 ? "Building… " + done + " / " + total : "Building…"
+        }
+        function onGenerationFinished(ch, ok, message) {
+            if (ch !== sourcesRoot.channelNumber) return
+            sourcesRoot.building = false
+            sourcesRoot.status = (ok ? "Rebuilt: " : "Failed: ") + message
+            sourcesRoot.reload()
+        }
+    }
+
+    OptionList {
+        anchors.fill: parent
+        focus: true
+        iconSource: sourcesRoot.moduleIcon
+        title: sourcesRoot.channelName + " — Settings"
+        rows: sourcesRoot.rows
+        current: sourcesRoot.current
+        onCurrentChanged: { sourcesRoot.current = current; sourcesRoot.armedToDelete = false }
+        status: sourcesRoot.status
+        busy: sourcesRoot.building
+        labelFor: function(i) { return sourcesRoot.labelFor(i) }
+        valueFor: function(i) { return sourcesRoot.valueFor(i) }
+        helpFor:  function(i) { return sourcesRoot.helpFor(i) }
+        cycles:   function(i) { return sourcesRoot.cycles(i) }
+        onStep:     function(d) { sourcesRoot.step(d) }
+        onActivate: function(i) { sourcesRoot.open(i) }
+        onBack:     function() { sourcesRoot.goBack() }
+    }
+}
