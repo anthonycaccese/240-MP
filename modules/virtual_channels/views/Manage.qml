@@ -60,12 +60,22 @@ FocusScope {
                                                 channelList.currentIndex + direction))
             status = ""
             refresh()
+        } else if (isFirst() && direction < 0) {
+            status = "Already first"
+        } else if (isLast() && direction > 0) {
+            status = "Already last"
         } else {
-            status = direction < 0 ? "Already first" : "Already last"
+            // It refused for some other reason -- two things sharing a dial
+            // position, or a schedule file that would not move. Saying "already
+            // first" there sends the viewer looking for the wrong thing.
+            status = "Could not move that one"
         }
     }
 
     function isBuiltIn(c) { return !!(c && c.special && c.special !== "") }
+
+    function isFirst() { return channelList.currentIndex <= 0 }
+    function isLast()  { return channelList.currentIndex >= channels.length - 1 }
 
     Component.onCompleted: {
         applyPendingCreate()
