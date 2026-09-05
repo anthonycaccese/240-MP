@@ -2901,10 +2901,24 @@ bool VirtualChannelsBackend::move_channel(int number, int direction) {
     }
 
     const QVariantList dial = list_channels();
-    int at = -1;
+    int at = -1, sharing = 0;
     for (int i = 0; i < dial.size(); ++i)
-        if (dial[i].toMap().value("number").toInt() == number) { at = i; break; }
+        if (dial[i].toMap().value("number").toInt() == number) {
+            if (at < 0) at = i;
+            ++sharing;
+        }
     if (at < 0) return false;
+
+    // Two things on one dial position: the guide or the weather station landing
+    // on the same number as a channel. Whichever is found first would be moved,
+    // which is not necessarily the one the viewer is pointing at, and the swap
+    // would leave the pair still sharing a number. Refuse and say so, rather
+    // than move the wrong one.
+    if (sharing > 1) {
+        qWarning("[VirtualChannels] dial position %d is held by %d entries; "
+                 "move refused until they are apart", number, sharing);
+        return false;
+    }
 
     const int other = at + (direction < 0 ? -1 : 1);
     if (other < 0 || other >= dial.size()) return false;
