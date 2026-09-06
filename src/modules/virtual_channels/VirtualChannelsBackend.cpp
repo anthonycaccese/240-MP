@@ -4090,15 +4090,60 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber, bool withC
     return out;
 }
 
+// One exclusion switched on or off inside an exclude object. The object is the
+// same shape wherever it hangs -- on a channel's source block, or on one block
+// of a day -- so where it came from and where it goes back are the caller's
+// business and none of this.
+//
+// Seasons are a flat list. Episodes are kept under the season they belong to,
+// so switching a whole season off does not have to know which of its episodes
+// were already off.
+static QJsonObject excludeWith(QJsonObject excl, const QString &kind,
+                               const QString &itemKey, bool excluded,
+                               const QString &seasonKey) {
+    const auto edited = [&](QStringList keys) {
+        if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
+        else          { keys.removeAll(itemKey); }
+        QJsonArray arr;
+        for (const QString &k : keys) arr.append(k);
+        return arr;
+    };
+
+    if (kind == QLatin1String("episodes")) {
+        QJsonObject bySeason = excl.value(kind).toObject();
+        const QString under = seasonKey.trimmed();
+        QStringList keys;
+        for (const QJsonValue &v : bySeason.value(under).toArray())
+            if (v.isString()) keys << v.toString();
+        const QJsonArray arr = edited(keys);
+        if (arr.isEmpty()) bySeason.remove(under);
+        else               bySeason[under] = arr;
+        if (bySeason.isEmpty()) excl.remove(kind);
+        else                    excl[kind] = bySeason;
+        return excl;
+    }
+
+    QStringList keys;
+    for (const QJsonValue &v : excl.value(kind).toArray())
+        if (v.isString()) keys << v.toString();
+    const QJsonArray arr = edited(keys);
+    if (arr.isEmpty()) excl.remove(kind);
+    else               excl[kind] = arr;
+    return excl;
+}
+
+// The two words an exclusion can be about, checked once for both callers.
+static bool isExclusionKind(const QString &kind) {
+    if (kind == QLatin1String("seasons") || kind == QLatin1String("episodes")) return true;
+    qWarning("[VirtualChannels] refused unknown exclusion kind '%s'", qPrintable(kind));
+    return false;
+}
+
 bool VirtualChannelsBackend::set_block_excluded(int channelNumber, int planIndex,
                                                int blockIndex, const QString &kind,
                                                const QString &itemKey, bool excluded,
                                                const QString &seasonKey) {
-    if (kind != QLatin1String("seasons") && kind != QLatin1String("episodes")) {
-        qWarning("[VirtualChannels] refused unknown exclusion kind '%s'", qPrintable(kind));
-        return false;
-    }
-    if (itemKey.trimmed().isEmpty()) return false;
+    if (!isExclusionKind(kind) || itemKey.trimmed().isEmpty()) return false;
 
     QJsonArray channels = readChannels();
     for (int i = 0; i < channels.size(); ++i) {
@@ -4110,39 +4155,13 @@ bool VirtualChannelsBackend::set_block_excluded(int channelNumber, int planIndex
         QJsonObject plan = plans[planIndex].toObject();
         QJsonArray blocks = plan.value(QLatin1String("blocks")).toArray();
         if (blockIndex < 0 || blockIndex >= blocks.size()) return false;
+
         QJsonObject block = blocks[blockIndex].toObject();
-        QJsonObject excl = block.value(QLatin1String("exclude")).toObject();
-
-        if (kind == QLatin1String("episodes")) {
-            // Kept under the season they belong to, so switching a whole season
-            // off does not have to know which episodes were already off.
-            QJsonObject bySeason = excl.value(kind).toObject();
-            const QString under = seasonKey.trimmed();
-            QStringList keys;
-            for (const QJsonValue &v : bySeason.value(under).toArray())
-                if (v.isString()) keys << v.toString();
-            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
-            else          { keys.removeAll(itemKey); }
-            QJsonArray arr;
-            for (const QString &k : keys) arr.append(k);
-            if (arr.isEmpty()) bySeason.remove(under);
-            else               bySeason[under] = arr;
-            if (bySeason.isEmpty()) excl.remove(kind);
-            else                    excl[kind] = bySeason;
-        } else {
-            QStringList keys;
-            for (const QJsonValue &v : excl.value(kind).toArray())
-                if (v.isString()) keys << v.toString();
-            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
-            else          { keys.removeAll(itemKey); }
-            QJsonArray arr;
-            for (const QString &k : keys) arr.append(k);
-            if (arr.isEmpty()) excl.remove(kind);
-            else               excl[kind] = arr;
-        }
-
+        const QJsonObject excl = excludeWith(block.value(QLatin1String("exclude")).toObject(),
+                                             kind, itemKey, excluded, seasonKey);
         if (excl.isEmpty()) block.remove(QLatin1String("exclude"));
         else                block[QLatin1String("exclude")] = excl;
+
         blocks[blockIndex] = block;
         plan[QLatin1String("blocks")] = blocks;
         plans[planIndex] = plan;
@@ -4889,11 +4908,7 @@ bool VirtualChannelsBackend::clear_episode_exclusions(int channelNumber,
 bool VirtualChannelsBackend::set_channel_excluded(int channelNumber, const QString &kind,
                                                   const QString &itemKey, bool excluded,
                                                   const QString &seasonKey) {
-    if (kind != QLatin1String("seasons") && kind != QLatin1String("episodes")) {
-        qWarning("[VirtualChannels] refused unknown exclusion kind '%s'", qPrintable(kind));
-        return false;
-    }
-    if (itemKey.trimmed().isEmpty()) return false;
+    if (!isExclusionKind(kind) || itemKey.trimmed().isEmpty()) return false;
 
     QJsonArray channels = readChannels();
     bool found = false;
@@ -4901,46 +4916,16 @@ bool VirtualChannelsBackend::set_channel_excluded(int channelNumber, const QStri
         QJsonObject o = channels[i].toObject();
         if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
 
-        const QString block = sourceBlockName(channelSource(channelNumber));
-        QJsonObject plex = o.value(block).toObject();
-        QJsonObject excl = plex.value(QLatin1String("exclude")).toObject();
+        // The channel's exclusions hang off its source block; a day's block
+        // keeps its own. Same object, same edit, different pocket.
+        const QString name = sourceBlockName(channelSource(channelNumber));
+        QJsonObject src = o.value(name).toObject();
+        const QJsonObject excl = excludeWith(src.value(QLatin1String("exclude")).toObject(),
+                                             kind, itemKey, excluded, seasonKey);
+        if (excl.isEmpty()) src.remove(QLatin1String("exclude"));
+        else                src[QLatin1String("exclude")] = excl;
 
-        if (kind == QLatin1String("episodes")) {
-            QJsonObject bySeason = excl.value(kind).toObject();
-            const QString under = seasonKey.trimmed().isEmpty() ? QStringLiteral("")
-                                                                : seasonKey;
-            QStringList keys;
-            for (const QJsonValue &v : bySeason.value(under).toArray())
-                if (v.isString()) keys << v.toString();
-
-            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
-            else          { keys.removeAll(itemKey); }
-
-            QJsonArray arr;
-            for (const QString &k : keys) arr.append(k);
-            if (arr.isEmpty()) bySeason.remove(under);
-            else               bySeason[under] = arr;
-            if (bySeason.isEmpty()) excl.remove(kind);
-            else                    excl[kind] = bySeason;
-        } else {
-            QStringList keys;
-            for (const QJsonValue &v : excl.value(kind).toArray())
-                if (v.isString()) keys << v.toString();
-
-            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
-            else          { keys.removeAll(itemKey); }
-
-            QJsonArray arr;
-            for (const QString &k : keys) arr.append(k);
-            if (arr.isEmpty()) excl.remove(kind);
-            else               excl[kind] = arr;
-        }
-
-        if (excl.isEmpty()) plex.remove(QLatin1String("exclude"));
-        else                plex["exclude"] = excl;
-
-        o[block] = plex;
-
+        o[name] = src;
         channels[i] = o;
         found = true;
         break;

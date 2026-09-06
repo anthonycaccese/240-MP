@@ -108,20 +108,22 @@ FocusScope {
         virtualChannelsBackend.browse_source(channelNumber, kind, parentKey)
     }
 
+    // What is switched off here, whether "here" is the channel's pool row or one
+    // block of a day. The question a tick answers is the same either way, so it
+    // is only asked once; all that differs is which pocket the answer is in.
+    readonly property var offSeasons:  blockMode ? blockOffSeasons
+                                                 : (cfg.excludedSeasons || [])
+    readonly property var offEpisodes: blockMode ? blockOffEpisodes
+                                                 : (cfg.excludedEpisodes || [])
+
     function isOn(item) {
         if (bookingMode) return bookingTitles.indexOf(item.label) >= 0
-        if (blockMode) {
-            if (kind === "seasons") return blockOffSeasons.indexOf(item.id) < 0
-            if (blockOffSeasons.indexOf(parentKey) >= 0) return false
-            return blockOffEpisodes.indexOf(item.id) < 0
-        }
         if (isExclusionLevel) {
-            var excl = (kind === "seasons") ? (cfg.excludedSeasons || [])
-                                            : (cfg.excludedEpisodes || [])
             if (!seriesSelected) return false
-            if (kind === "episodes"
-                && (cfg.excludedSeasons || []).indexOf(parentKey) >= 0) return false
-            return excl.indexOf(item.id) < 0
+            // An episode of a season that is off is off with it, whatever the
+            // episode's own list says.
+            if (kind === "episodes" && offSeasons.indexOf(parentKey) >= 0) return false
+            return (kind === "seasons" ? offSeasons : offEpisodes).indexOf(item.id) < 0
         }
         var list = cfg[listField] || []
         return list.indexOf(item.label) >= 0
@@ -306,7 +308,7 @@ FocusScope {
     function toggleEpisode(item) {
         var wasAiring = isOn(item)
         var seriesList = (cfg.match || []).slice()
-        var seasonOff = (cfg.excludedSeasons || []).indexOf(parentKey) >= 0
+        var seasonOff = offSeasons.indexOf(parentKey) >= 0
 
         if (!wasAiring) {
             // Off only because it was picked out of a season that is otherwise
