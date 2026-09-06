@@ -33,6 +33,15 @@ FocusScope {
     // narrowing a series to one episode means switching the rest of them off and
     // only the season list knows what they are.
     property var    siblingSeasons: navParams.siblingSeasons || []
+    // Narrowing one block's series rather than the channel's pool. The block
+    // already names the show, so there is no pool row to add or take away:
+    // a tick here only says whether this block airs that season.
+    property int    planIndex:     navParams.planIndex  !== undefined ? navParams.planIndex  : -1
+    property int    blockIndex:    navParams.blockIndex !== undefined ? navParams.blockIndex : -1
+    readonly property bool blockMode: planIndex >= 0 && blockIndex >= 0
+    property var    blockOffSeasons:  []
+    property var    blockOffEpisodes: []
+
     property int    bookingIndex:  navParams.bookingIndex !== undefined ? navParams.bookingIndex : -1
     readonly property bool bookingMode: bookingIndex >= 0
     readonly property string bookingField: kind === "moviegenres"      ? "genres"
@@ -54,8 +63,9 @@ FocusScope {
     // that is half of what its tick means. The other half is the exclusion list.
     readonly property string seriesName: seriesLabel !== "" ? seriesLabel
                                         : (kind === "seasons" ? heading : "")
-    readonly property bool seriesSelected:
-        seriesName !== "" && (cfg.match || []).indexOf(seriesName) >= 0
+    // A block names its series outright, so it is always drawing from it.
+    readonly property bool seriesSelected: blockMode
+        || (seriesName !== "" && (cfg.match || []).indexOf(seriesName) >= 0)
     readonly property string listField: kind === "collections"  ? "collections"
                                       : kind === "playlists"    ? "playlists"
                                       : kind === "movies"       ? "films"
@@ -71,8 +81,24 @@ FocusScope {
 
     property var bookingTitles: []
 
+    function reloadBlockExclusions() {
+        if (!blockMode) return
+        var plans = virtualChannelsBackend.channel_plans(channelNumber)
+        var blocks = planIndex < plans.length ? (plans[planIndex].blocks || []) : []
+        var blk = blockIndex < blocks.length ? blocks[blockIndex] : null
+        var excl = (blk && blk.exclude) ? blk.exclude : ({})
+        blockOffSeasons = excl.seasons || []
+        // Kept under the season each belongs to; flattened here because a tick
+        // only asks whether this episode airs, not which season it sits in.
+        var flat = []
+        var bySeason = excl.episodes || ({})
+        for (var k in bySeason) flat = flat.concat(bySeason[k] || [])
+        blockOffEpisodes = flat
+    }
+
     function reload() {
         cfg = virtualChannelsBackend.channel_source_config(channelNumber)
+        reloadBlockExclusions()
         if (bookingMode)
             bookingTitles = virtualChannelsBackend.booking_list(channelNumber, bookingIndex,
                                                                 bookingField)
@@ -84,6 +110,11 @@ FocusScope {
 
     function isOn(item) {
         if (bookingMode) return bookingTitles.indexOf(item.label) >= 0
+        if (blockMode) {
+            if (kind === "seasons") return blockOffSeasons.indexOf(item.id) < 0
+            if (blockOffSeasons.indexOf(parentKey) >= 0) return false
+            return blockOffEpisodes.indexOf(item.id) < 0
+        }
         if (isExclusionLevel) {
             var excl = (kind === "seasons") ? (cfg.excludedSeasons || [])
                                             : (cfg.excludedEpisodes || [])
@@ -100,6 +131,7 @@ FocusScope {
     // own excluded episodes under its key, so it is the one level that can say
     // so without walking the library again.
     function isPartial(item) {
+        if (blockMode) return false
         if (kind !== "seasons" || !isOn(item)) return false
         var by = cfg.excludedBySeason || ({})
         var refs = by[item.id]
@@ -147,6 +179,21 @@ FocusScope {
             }
             bookingTitles = virtualChannelsBackend.booking_list(channelNumber, bookingIndex,
                                                                bookingField)
+            status = ""
+            return
+        }
+
+        if (blockMode) {
+            // No pool row to add or remove: the block already names the show,
+            // so the tick says only whether this block airs that part of it.
+            if (!virtualChannelsBackend.set_block_excluded(
+                    channelNumber, planIndex, blockIndex, kind, item.id,
+                    /*excluded*/ isOn(item),
+                    kind === "episodes" ? parentKey : "")) {
+                status = "Could not save"
+                return
+            }
+            reloadBlockExclusions()
             status = ""
             return
         }
@@ -571,9 +618,11 @@ FocusScope {
                 ? browserRoot.partialHint()
                 : browserRoot.pickOne
                   ? "CHOOSE ONE FOR THIS BLOCK"
-                  : browserRoot.isExclusionLevel
-                    ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
-                    : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
+                  : browserRoot.blockMode
+                    ? "TICKED MEANS IT AIRS IN THIS BLOCK"
+                    : browserRoot.isExclusionLevel
+                      ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
+                      : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
         color: root.tertiaryColor
         font.family: root.globalFont
         font.pixelSize: root.sh * 0.0271

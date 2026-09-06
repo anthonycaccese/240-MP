@@ -1265,13 +1265,26 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                     break;
                 }
 
-                const QJsonObject excl =
-                    channel.value(sourceBlockName(src)).toObject()
-                           .value(QLatin1String("exclude")).toObject();
-                for (const QJsonValue &v : excl.value(QLatin1String("seasons")).toArray())
-                    if (v.isString()) job.excludeSeasons.insert(v.toString());
-                for (const QString &ep : excludedEpisodesIn(excl))
-                    job.excludeEpisodes.insert(ep);
+                // What this block does not air. Its own, where it has any --
+                // one block can run the early seasons and the next the later
+                // ones. A block that narrows nothing falls back to the
+                // channel's, so a channel that had them before it had blocks
+                // goes on airing what it was airing.
+                const QJsonObject bexcl = QJsonObject::fromVariantMap(b.exclude);
+                if (!bexcl.isEmpty()) {
+                    for (const QJsonValue &v : bexcl.value(QLatin1String("seasons")).toArray())
+                        if (v.isString()) job.excludeSeasons.insert(v.toString());
+                    for (const QString &ep : excludedEpisodesIn(bexcl))
+                        job.excludeEpisodes.insert(ep);
+                } else {
+                    const QJsonObject excl =
+                        channel.value(sourceBlockName(src)).toObject()
+                               .value(QLatin1String("exclude")).toObject();
+                    for (const QJsonValue &v : excl.value(QLatin1String("seasons")).toArray())
+                        if (v.isString()) job.excludeSeasons.insert(v.toString());
+                    for (const QString &ep : excludedEpisodesIn(excl))
+                        job.excludeEpisodes.insert(ep);
+                }
 
                 planJobs.append(job);
             }
@@ -3976,6 +3989,8 @@ QVector<DayPlan> VirtualChannelsBackend::readPlans(const QJsonObject &channel) {
             block.shuffled = bo.value(QLatin1String("order")).toString().trimmed().toLower()
                              == QLatin1String("shuffle");
 
+            block.exclude = bo.value(QLatin1String("exclude")).toObject().toVariantMap();
+
             const QString type = bo.value(QLatin1String("type")).toString().trimmed().toLower();
             if      (type == QLatin1String("collection")) block.draws = PlanBlock::Draws::Collection;
             else if (type == QLatin1String("genre"))      block.draws = PlanBlock::Draws::Genre;
@@ -4047,6 +4062,9 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber, bool withC
             m["outros"]  = QVariant(b.outros);
             m["order"]   = b.shuffled ? QStringLiteral("shuffle")
                                       : QStringLiteral("broadcast");
+            // Handed back whole, so a screen that saves the block returns it
+            // whole. The screens read what they need out of it.
+            if (!b.exclude.isEmpty()) m["exclude"] = b.exclude;
             // Counted the same way a pool row's are, so the screen that sets
             // them can say how many clips a folder holds -- and can say when it
             // holds none, which otherwise looks the same as working.
@@ -4070,6 +4088,69 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber, bool withC
         out.append(plan);
     }
     return out;
+}
+
+bool VirtualChannelsBackend::set_block_excluded(int channelNumber, int planIndex,
+                                               int blockIndex, const QString &kind,
+                                               const QString &itemKey, bool excluded,
+                                               const QString &seasonKey) {
+    if (kind != QLatin1String("seasons") && kind != QLatin1String("episodes")) {
+        qWarning("[VirtualChannels] refused unknown exclusion kind '%s'", qPrintable(kind));
+        return false;
+    }
+    if (itemKey.trimmed().isEmpty()) return false;
+
+    QJsonArray channels = readChannels();
+    for (int i = 0; i < channels.size(); ++i) {
+        QJsonObject o = channels[i].toObject();
+        if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
+
+        QJsonArray plans = o.value(QLatin1String("plans")).toArray();
+        if (planIndex < 0 || planIndex >= plans.size()) return false;
+        QJsonObject plan = plans[planIndex].toObject();
+        QJsonArray blocks = plan.value(QLatin1String("blocks")).toArray();
+        if (blockIndex < 0 || blockIndex >= blocks.size()) return false;
+        QJsonObject block = blocks[blockIndex].toObject();
+        QJsonObject excl = block.value(QLatin1String("exclude")).toObject();
+
+        if (kind == QLatin1String("episodes")) {
+            // Kept under the season they belong to, so switching a whole season
+            // off does not have to know which episodes were already off.
+            QJsonObject bySeason = excl.value(kind).toObject();
+            const QString under = seasonKey.trimmed();
+            QStringList keys;
+            for (const QJsonValue &v : bySeason.value(under).toArray())
+                if (v.isString()) keys << v.toString();
+            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
+            else          { keys.removeAll(itemKey); }
+            QJsonArray arr;
+            for (const QString &k : keys) arr.append(k);
+            if (arr.isEmpty()) bySeason.remove(under);
+            else               bySeason[under] = arr;
+            if (bySeason.isEmpty()) excl.remove(kind);
+            else                    excl[kind] = bySeason;
+        } else {
+            QStringList keys;
+            for (const QJsonValue &v : excl.value(kind).toArray())
+                if (v.isString()) keys << v.toString();
+            if (excluded) { if (!keys.contains(itemKey)) keys << itemKey; }
+            else          { keys.removeAll(itemKey); }
+            QJsonArray arr;
+            for (const QString &k : keys) arr.append(k);
+            if (arr.isEmpty()) excl.remove(kind);
+            else               excl[kind] = arr;
+        }
+
+        if (excl.isEmpty()) block.remove(QLatin1String("exclude"));
+        else                block[QLatin1String("exclude")] = excl;
+        blocks[blockIndex] = block;
+        plan[QLatin1String("blocks")] = blocks;
+        plans[planIndex] = plan;
+        o[QLatin1String("plans")] = plans;
+        channels[i] = o;
+        return writeChannels(channels);
+    }
+    return false;
 }
 
 bool VirtualChannelsBackend::set_channel_plans(int channelNumber,
@@ -4134,6 +4215,17 @@ bool VirtualChannelsBackend::set_channel_plans(int channelNumber,
             if (bm.value(QStringLiteral("order")).toString().trimmed().toLower()
                 == QLatin1String("shuffle"))
                 block["order"] = QStringLiteral("shuffle");
+            // Written through as it came: seasons as a list, episodes keyed by
+            // the season they belong to, which is the shape a pool row's have.
+            const QVariantMap bexcl = bm.value(QStringLiteral("exclude")).toMap();
+            if (!bexcl.isEmpty()) {
+                QJsonObject excl = QJsonObject::fromVariantMap(bexcl);
+                if (excl.value(QLatin1String("seasons")).toArray().isEmpty())
+                    excl.remove(QLatin1String("seasons"));
+                if (excl.value(QLatin1String("episodes")).toObject().isEmpty())
+                    excl.remove(QLatin1String("episodes"));
+                if (!excl.isEmpty()) block["exclude"] = excl;
+            }
             blocks.append(block);
         }
         plan["blocks"] = blocks;

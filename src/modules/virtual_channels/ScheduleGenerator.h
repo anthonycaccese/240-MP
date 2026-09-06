@@ -80,6 +80,16 @@ struct PlanBlock {
     // every episode out from under the mark that says where the show got to.
     bool shuffled = false;
 
+    // Seasons and episodes this block does not air, in the shape the file keeps
+    // them: seasons as a list, episodes under the season they belong to. Held
+    // as it was read rather than flattened, because a screen that saves the
+    // block back saves what it was given -- and a flattened copy handed back
+    // would lose which season each episode belonged to.
+    //
+    // A block that narrows nothing draws on the whole series. The generator
+    // never reads this: what a block gathers is settled before it runs.
+    QVariantMap exclude;
+
     bool isValid() const;
 };
 

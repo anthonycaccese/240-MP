@@ -55,6 +55,10 @@ FocusScope {
     readonly property var rows: {
         var r = ["type"]
         if (picksASource) r.push("source")
+        // Which parts of the series this block airs. Only where it names one:
+        // a collection, a genre or a film has no seasons to narrow.
+        if (block && block.type === "series" && String(block.name || "") !== "")
+            r.push("seasons")
         r.push("length")
         // A block that names one film has one thing to play, so there is no
         // order to choose. Everything else has a run to go through.
@@ -111,6 +115,16 @@ FocusScope {
         return m + "M"
     }
 
+    // How much of the series this block is not airing. Counted rather than
+    // named: the row has no room for a list, and none is a whole series.
+    function offCount() {
+        if (!block || !block.exclude) return 0
+        var n = (block.exclude.seasons || []).length
+        var bySeason = block.exclude.episodes || ({})
+        for (var k in bySeason) n += (bySeason[k] || []).length
+        return n
+    }
+
     function foldersOf(key) {
         if (!block) return []
         var v = block[key]
@@ -122,6 +136,7 @@ FocusScope {
         case "type":   return "Type"
         case "source": return block ? typeLabel(block.type).charAt(0)
                                       + typeLabel(block.type).slice(1).toLowerCase() : "Source"
+        case "seasons": return "Seasons"
         case "length": return "Length"
         case "order":  return "Order"
         case "intros": return "Intro"
@@ -151,6 +166,10 @@ FocusScope {
         switch (rows[i]) {
         case "type":   return block ? typeLabel(block.type) : ""
         case "source": return sourceLabel()
+        case "seasons": {
+            var off = offCount()
+            return off === 0 ? "ALL" : off + " OFF"
+        }
         case "length": return block ? lengthLabel(block.minutes) : ""
         case "order":  return shuffled() ? "SHUFFLED" : "IN ORDER"
         case "intros": return identLabel("intros")
@@ -173,6 +192,9 @@ FocusScope {
         case "source":  return block && block.name === ""
                                ? "Nothing yet, so this block is a break."
                                : "What this block plays."
+        case "seasons": return offCount() === 0
+                               ? "Every season of it. Open to leave some of them out of this block."
+                               : "Some of it is left out of this block. Open to say which."
         case "length":  return root.hints.change + " changes it by "
                                + editRoot.step + " minutes — one slot of the plan's grid."
         case "order":   return shuffled()
@@ -280,6 +302,20 @@ FocusScope {
             all[planIndex] = mine
             if (virtualChannelsBackend.set_channel_plans(channelNumber, all)) goBack()
             else status = "Could not remove that block"
+            return
+        }
+
+        if (r === "seasons") {
+            navigateTo("modules/virtual_channels/views/SourceBrowser.qml", {
+                moduleId:      editRoot.moduleId,
+                channelNumber: editRoot.channelNumber,
+                kind:          "seasons",
+                parentKey:     String(block.ref || ""),
+                title:         editRoot.sourceLabel(),
+                seriesLabel:   String(block.name || ""),
+                planIndex:     editRoot.planIndex,
+                blockIndex:    editRoot.blockIndex
+            }, { currentIndex: editRoot.current })
             return
         }
 

@@ -726,6 +726,87 @@ void testABlockKeepsWhatWasNotChanged() {
             "without taking the block's bumpers with it");
 }
 
+// Two blocks can run the same series and take different parts of it, so what a
+// block does not air belongs to the block. Switching a season off for one must
+// leave the other, and the channel, alone.
+void testBlockExclusions() {
+    section("Backend: a block narrows its own series, not the channel's");
+
+    Fixture fx;
+    fx.write(localChannel(3));
+    VirtualChannelsBackend b(fx.data(), fx.data());
+
+    QVariantMap early;
+    early["type"] = QStringLiteral("series");
+    early["name"] = QStringLiteral("Samurai Jack");
+    early["ref"]  = QStringLiteral("15087");
+    early["minutes"] = 60;
+
+    QVariantMap late = early;
+
+    QVariantMap day;
+    day["name"]   = QStringLiteral("WEEKDAYS");
+    day["days"]   = QVariantList{ 1, 2, 3, 4, 5 };
+    day["blocks"] = QVariantList{ early, late };
+    check(b.set_channel_plans(3, QVariantList{ day }), "two blocks of one series save");
+
+    check(b.set_block_excluded(3, 0, 0, QStringLiteral("seasons"),
+                               QStringLiteral("s3"), true),
+          "a season switches off for the first block");
+    check(b.set_block_excluded(3, 0, 0, QStringLiteral("episodes"),
+                               QStringLiteral("ep9"), true, QStringLiteral("s2")),
+          "and an episode under the season it belongs to");
+
+    QVariantList blocks = b.channel_plans(3).first().toMap()
+                            .value(QStringLiteral("blocks")).toList();
+    checkEq(blocks.size(), 2, "both blocks are still there");
+    if (blocks.size() != 2) return;
+
+    const QVariantMap firstExcl = blocks.first().toMap()
+                                    .value(QStringLiteral("exclude")).toMap();
+    checkEq(firstExcl.value(QStringLiteral("seasons")).toStringList().size(), 1,
+            "the first block has a season off");
+    checkEq(firstExcl.value(QStringLiteral("episodes")).toMap()
+                .value(QStringLiteral("s2")).toStringList().size(), 1,
+            "and an episode off, under the season it belongs to");
+    check(blocks.at(1).toMap().value(QStringLiteral("exclude")).toMap().isEmpty(),
+          "the second block is untouched");
+
+    // The channel's own exclusions are a different thing and stay empty.
+    checkEq(b.channel_source_config(3).value(QStringLiteral("excludedSeasons"))
+                .toStringList().size(), 0, "and so is the channel");
+
+    // Switching it back on removes it rather than leaving an empty husk.
+    check(b.set_block_excluded(3, 0, 0, QStringLiteral("seasons"),
+                               QStringLiteral("s3"), false),
+          "switching the season back on saves");
+    checkEq(b.channel_plans(3).first().toMap().value(QStringLiteral("blocks")).toList()
+                .first().toMap().value(QStringLiteral("exclude")).toMap()
+                .value(QStringLiteral("seasons")).toStringList().size(),
+            0, "and the season airs again");
+
+    // What the accident found: a screen that edits some other field of the
+    // block hands the whole block back. What it was not thinking about has to
+    // survive that, or narrowing a series lasts until the next unrelated edit.
+    QVariantList plans2 = b.channel_plans(3);
+    QVariantMap  day2   = plans2.first().toMap();
+    QVariantList blks2  = day2.value(QStringLiteral("blocks")).toList();
+    QVariantMap  edited = blks2.first().toMap();
+    edited["minutes"] = 90;
+    blks2[0] = edited;
+    day2["blocks"] = blks2;
+    plans2[0] = day2;
+    check(b.set_channel_plans(3, plans2), "an unrelated change to the block saves");
+    checkEq(b.channel_plans(3).first().toMap().value(QStringLiteral("blocks")).toList()
+                .first().toMap().value(QStringLiteral("exclude")).toMap()
+                .value(QStringLiteral("episodes")).toMap().size(), 1,
+            "and the episode it does not air is still not aired");
+
+    check(!b.set_block_excluded(3, 0, 9, QStringLiteral("seasons"),
+                                QStringLiteral("s1"), true),
+          "a block that is not there is refused rather than written past");
+}
+
 void testPlansRoundTrip() {
     section("Backend: plans survive being read out and handed back");
 
@@ -1028,6 +1109,7 @@ int runVirtualChannelsBackendTests() {
     testBlankBlocksGatherNothing();
     testProgrammesAreKeptOncePerBlock();
     testABlockKeepsWhatWasNotChanged();
+    testBlockExclusions();
     testPlansRoundTrip();
     testFilmPoolEntries();
     testFilmAndShowListsAreSeparate();

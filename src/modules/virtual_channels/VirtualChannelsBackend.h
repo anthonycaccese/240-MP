@@ -153,6 +153,13 @@ public:
     // thing in it and hand it back, which is how the pool editor already works.
     Q_INVOKABLE bool set_channel_plans(int channelNumber, const QVariantList &plans);
 
+    // Switch one season or episode off for a single block, rather than for the
+    // whole channel: two blocks can run the same series and take different
+    // parts of it. Same shape as a pool row's exclusions, kept on the block.
+    Q_INVOKABLE bool set_block_excluded(int channelNumber, int planIndex, int blockIndex,
+                                        const QString &kind, const QString &itemKey,
+                                        bool excluded, const QString &seasonKey = QString());
+
     Q_INVOKABLE QVariantList list_logos();
     Q_INVOKABLE QString logos_dir() const { return m_dataRoot + QStringLiteral("/logos"); }
     Q_INVOKABLE QString logo_path(const QString &file) const;
