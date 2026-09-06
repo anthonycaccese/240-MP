@@ -39,10 +39,15 @@ FocusScope {
         weatherBackend.duck_music(previewAudible, 400)
     }
 
+    // Muting silences what is playing without moving the number, so unmuting
+    // puts it back where it was rather than where it happened to be turned down
+    // to.
+    readonly property int audibleVolume: volumeOsd.muted ? 0 : masterVolume
+
     function applyVolume() {
-        if (previewLoader.item) previewLoader.item.volume = masterVolume
+        if (previewLoader.item) previewLoader.item.volume = audibleVolume
         if (weatherBackend)
-            weatherBackend.set_music_volume(masterVolume)
+            weatherBackend.set_music_volume(audibleVolume)
     }
 
     function reloadVolume() {
@@ -51,6 +56,9 @@ FocusScope {
         var v = Math.max(0, Math.min(100, parseInt(mv)))
         if (v === masterVolume) return
         masterVolume = v
+        // Pushed rather than bound: the bar writes its own level when a key is
+        // pressed, and a binding would be gone the first time it did.
+        volumeOsd.level = v
         applyVolume()
     }
     readonly property bool previewShowsPicture: previewMode !== "OFF"
@@ -263,6 +271,7 @@ FocusScope {
         var mv = appCore.get_setting(guideRoot.moduleId, "volume")
         if (mv !== undefined && mv !== null && String(mv) !== "")
             masterVolume = Math.max(0, Math.min(100, parseInt(mv)))
+        volumeOsd.level = masterVolume
         applyVolume()
         refresh()
 
@@ -286,6 +295,19 @@ FocusScope {
         }
         if (musicStartedHere && weatherBackend)
             weatherBackend.stopMusic()
+    }
+
+    // mpv is never the thing making a sound on the guide -- the preview is a
+    // QML player and the music is the weather module's -- so the volume keys
+    // are this screen's to answer.
+    VolumeOsd {
+        id: volumeOsd
+        moduleId: guideRoot.moduleId
+        z: 100
+        onAdjusted: {
+            guideRoot.masterVolume = level
+            guideRoot.applyVolume()
+        }
     }
 
     Timer { interval: 30000; running: true; repeat: true; onTriggered: guideRoot.refresh() }

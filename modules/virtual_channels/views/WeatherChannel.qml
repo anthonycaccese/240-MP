@@ -46,7 +46,7 @@ FocusScope {
         }
     }
 
-    Component.onCompleted: buildDial()
+    Component.onCompleted: { buildDial(); loadVolume() }
 
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_ChannelUp || event.key === Qt.Key_PageUp) {
@@ -57,6 +57,33 @@ FocusScope {
                    || event.key === Qt.Key_Back) {
             exitModule()
             event.accepted = true
+        }
+    }
+
+    // The weather channel's sound is the weather module's music, and mpv is not
+    // running at all here, so the volume keys are this screen's to answer.
+    property int masterVolume: 100
+
+    function loadVolume() {
+        var v = appCore.get_setting(moduleId, "volume")
+        if (v !== undefined && v !== null && String(v) !== "")
+            masterVolume = Math.max(0, Math.min(100, parseInt(v)))
+        volumeOsd.level = masterVolume
+        applyVolume()
+    }
+
+    function applyVolume() {
+        if (typeof weatherBackend === "undefined" || !weatherBackend) return
+        weatherBackend.set_music_volume(volumeOsd.muted ? 0 : masterVolume)
+    }
+
+    VolumeOsd {
+        id: volumeOsd
+        moduleId: wxRoot.moduleId
+        z: 100
+        onAdjusted: {
+            wxRoot.masterVolume = level
+            wxRoot.applyVolume()
         }
     }
 

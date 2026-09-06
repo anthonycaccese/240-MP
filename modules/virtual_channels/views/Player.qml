@@ -241,6 +241,7 @@ FocusScope {
         var v = appCore.get_setting(moduleId, "volume")
         if (v !== undefined && v !== null && String(v) !== "")
             masterVolume = Math.max(0, Math.min(100, parseInt(v)))
+        volumeOsd.level = masterVolume
         mpvController.setVolume(masterVolume)
     }
 
@@ -262,7 +263,10 @@ FocusScope {
     }
 
     function volumeArgs() {
+        // A mute set on the card carries into the programme that follows it,
+        // rather than the picture coming back at full volume.
         var args = ["--volume=" + masterVolume]
+        if (volumeOsd.muted) args.push("--mute=yes")
         if (toggleOn("normalize_volume", false))
             args.push("--af=loudnorm=I=-16:LRA=11:TP=-1.5")
         return args
@@ -616,6 +620,23 @@ FocusScope {
         return descriptor.extraUrls || []
     }
 
+    // While a programme is playing, mpv holds the volume and draws this bar
+    // itself. The rest of the time -- the card between programmes, off air,
+    // tuning, surfing the dial -- nothing is listening, and the keys did
+    // nothing at all.
+    VolumeOsd {
+        id: volumeOsd
+        moduleId: playerRoot.moduleId
+        active: playerRoot.filler || playerRoot.offAir
+                || playerRoot.tuning || playerRoot.rebuilding
+        z: 100
+        onAdjusted: {
+            playerRoot.masterVolume = level
+            // Nothing is sounding on these screens, so there is nothing to push
+            // it at; the next programme is launched with it.
+        }
+    }
+
     Component.onDestruction: virtualChannelsBackend.release_tuner()
 
     Component.onCompleted: {
@@ -674,6 +695,7 @@ FocusScope {
             }
             if (percent === playerRoot.masterVolume) return
             playerRoot.masterVolume = percent
+            volumeOsd.level = percent
             appCore.save_setting(playerRoot.moduleId, "volume", String(percent))
         }
 
