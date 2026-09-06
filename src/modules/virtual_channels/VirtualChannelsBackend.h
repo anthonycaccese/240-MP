@@ -94,6 +94,17 @@ public:
     // is testing the parser only through a whole generation.
     static QVector<vchan::DayPlan> readPlans(const QJsonObject &channel);
 
+    // The plans as the screens want them: a list of maps, each with a name,
+    // the days it runs, where it starts, and its blocks in order.
+    // "free" (the grid decides, as today) or "day_plan". A channel switched
+    // away from its plans keeps them, unread, the way it keeps its slots.
+    Q_INVOKABLE bool set_channel_schedule(int channelNumber, const QString &schedule);
+
+    Q_INVOKABLE QVariantList channel_plans(int channelNumber);
+    // Written back whole. The screens hold the list they were given, change one
+    // thing in it and hand it back, which is how the pool editor already works.
+    Q_INVOKABLE bool set_channel_plans(int channelNumber, const QVariantList &plans);
+
     Q_INVOKABLE QVariantList list_logos();
     Q_INVOKABLE QString logos_dir() const { return m_dataRoot + QStringLiteral("/logos"); }
     Q_INVOKABLE QString logo_path(const QString &file) const;
@@ -208,6 +219,7 @@ private:
     vchan::SlotSource channelSource(int channelNumber) const;
     static vchan::SlotSource sourceOf(const QJsonObject &channel);
     static bool    isMovieChannel(const QJsonObject &channel);
+    static bool    usesDayPlan(const QJsonObject &channel);
     static bool    playsAPlaylist(const QJsonObject &channel);
     static bool usesEntryPools(const QJsonObject &channel);
     static QString    sourceBlockName(vchan::SlotSource src);

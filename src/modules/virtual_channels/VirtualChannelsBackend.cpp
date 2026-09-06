@@ -1474,7 +1474,9 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
     def.order        = orderingFromString(o.value(QLatin1String("order")).toString());
     def.rotation     = rotationAt(channelNumber, nowMs());
     marksAt(channelNumber, nowMs(), &def.marks, &def.mark);
-    def.plans        = readPlans(o);
+    // Read only while the channel is set to air them. Switching away leaves the
+    // plans in the file to come back to, and airs nothing from them.
+    def.plans        = usesDayPlan(o) ? readPlans(o) : QVector<DayPlan>{};
     def.adsPerBreak  = o.value(QLatin1String("ads_per_break")).toInt(0);
     {
         const int grid = o.value(QLatin1String("grid_minutes")).toInt(0);
@@ -3868,6 +3870,138 @@ QVector<DayPlan> VirtualChannelsBackend::readPlans(const QJsonObject &channel) {
     return plans;
 }
 
+namespace {
+
+QString drawsToString(PlanBlock::Draws d) {
+    switch (d) {
+    case PlanBlock::Draws::Collection: return QStringLiteral("collection");
+    case PlanBlock::Draws::Genre:      return QStringLiteral("genre");
+    case PlanBlock::Draws::Movie:      return QStringLiteral("movie");
+    case PlanBlock::Draws::Anything:   return QStringLiteral("random");
+    case PlanBlock::Draws::Series:     break;
+    }
+    return QStringLiteral("series");
+}
+
+}  // namespace
+
+QVariantList VirtualChannelsBackend::channel_plans(int channelNumber) {
+    QVariantList out;
+    const QJsonObject o = QJsonObject::fromVariantMap(channelObject(channelNumber));
+    for (const DayPlan &p : readPlans(o)) {
+        QVariantMap plan;
+        plan["name"]     = p.name;
+        plan["startsAt"] = QStringLiteral("%1:%2")
+                               .arg(p.startsAtMinute / 60, 2, 10, QLatin1Char('0'))
+                               .arg(p.startsAtMinute % 60, 2, 10, QLatin1Char('0'));
+        plan["gridMinutes"] = p.gridMinutes;
+        plan["totalMinutes"] = p.totalMinutes();
+        QVariantList days;
+        for (int d : p.days) days.append(d);
+        plan["days"] = days;
+
+        QVariantList blocks;
+        qint64 at = qint64(p.startsAtMinute) * 60000LL;
+        for (const PlanBlock &b : p.blocks) {
+            QVariantMap m;
+            m["type"]    = drawsToString(b.draws);
+            m["name"]    = b.name;
+            m["ref"]     = b.ref;
+            m["minutes"] = b.minutes;
+            // The start each block falls on, so the screen can show a time it
+            // never has to be told.
+            const int mins = int((at / 60000LL) % (24 * 60));
+            m["startsAt"] = QStringLiteral("%1:%2")
+                                .arg(mins / 60, 2, 10, QLatin1Char('0'))
+                                .arg(mins % 60, 2, 10, QLatin1Char('0'));
+            blocks.append(m);
+            at += qint64(b.minutes) * 60000LL;
+        }
+        plan["blocks"] = blocks;
+        out.append(plan);
+    }
+    return out;
+}
+
+bool VirtualChannelsBackend::set_channel_plans(int channelNumber,
+                                               const QVariantList &plans) {
+    static const QStringList kTypes = { QStringLiteral("series"),
+                                        QStringLiteral("collection"),
+                                        QStringLiteral("genre"),
+                                        QStringLiteral("movie"),
+                                        QStringLiteral("random") };
+    QJsonArray written;
+    for (const QVariant &pv : plans) {
+        const QVariantMap pm = pv.toMap();
+
+        QJsonObject plan;
+        plan["name"] = pm.value(QStringLiteral("name")).toString().trimmed();
+        const int startsAt = minuteOfDayFromString(pm.value(QStringLiteral("startsAt")).toString());
+        plan["starts_at"] = QStringLiteral("%1:%2")
+                                .arg((startsAt >= 0 ? startsAt : 6 * 60) / 60, 2, 10, QLatin1Char('0'))
+                                .arg((startsAt >= 0 ? startsAt : 6 * 60) % 60, 2, 10, QLatin1Char('0'));
+        const int grid = pm.value(QStringLiteral("gridMinutes")).toInt();
+        plan["grid_minutes"] = (grid >= kMinGridMinutes && grid <= kMaxGridMinutes) ? grid : 30;
+
+        QJsonArray days;
+        for (const QVariant &dv : pm.value(QStringLiteral("days")).toList()) {
+            const int d = dv.toInt();
+            if (d >= 1 && d <= 7) days.append(d);
+        }
+        plan["days"] = days;
+
+        QJsonArray blocks;
+        for (const QVariant &bv : pm.value(QStringLiteral("blocks")).toList()) {
+            const QVariantMap bm = bv.toMap();
+            const QString type = bm.value(QStringLiteral("type")).toString().trimmed().toLower();
+            if (!kTypes.contains(type)) {
+                // Kept out rather than written through: a type the generator
+                // does not know would read back as a series block naming
+                // nothing, which airs as a held card for its whole length.
+                qWarning("[VirtualChannels] refused a block of unknown type '%s'",
+                         qPrintable(type));
+                continue;
+            }
+            QJsonObject block;
+            block["type"]    = type;
+            block["minutes"] = qBound(1, bm.value(QStringLiteral("minutes")).toInt(), 24 * 60);
+            const QString name = bm.value(QStringLiteral("name")).toString().trimmed();
+            const QString ref  = bm.value(QStringLiteral("ref")).toString().trimmed();
+            if (!name.isEmpty()) block["name"] = name;
+            if (!ref.isEmpty())  block["ref"]  = ref;
+            blocks.append(block);
+        }
+        plan["blocks"] = blocks;
+        written.append(plan);
+    }
+
+    QJsonArray channels = readChannels();
+    for (int i = 0; i < channels.size(); ++i) {
+        QJsonObject o = channels[i].toObject();
+        if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
+        if (written.isEmpty()) o.remove(QLatin1String("plans"));
+        else                   o[QLatin1String("plans")] = written;
+        channels[i] = o;
+        return writeChannels(channels);
+    }
+    return false;
+}
+
+bool VirtualChannelsBackend::usesDayPlan(const QJsonObject &channel) {
+    return channel.value(QLatin1String("schedule")).toString().trimmed().toLower()
+           == QLatin1String("day_plan");
+}
+
+bool VirtualChannelsBackend::set_channel_schedule(int channelNumber, const QString &schedule) {
+    QJsonArray channels = readChannels();
+    if (!writeChannelWord(channels, channelNumber, "schedule", schedule,
+                          { QStringLiteral("free"), QStringLiteral("day_plan") })) {
+        qWarning("[VirtualChannels] refused schedule '%s'", qPrintable(schedule));
+        return false;
+    }
+    return writeChannels(channels);
+}
+
 bool VirtualChannelsBackend::isMovieChannel(const QJsonObject &channel) {
     return channel.value(QLatin1String("kind")).toString().trimmed().toLower()
            == QLatin1String("movies");
@@ -4294,6 +4428,8 @@ QVariantMap VirtualChannelsBackend::channel_source_config(int channelNumber) {
     out["supportsPlaylists"] = source_supports_playlists(slotSourceToString(src));
     out["usesEntryPools"] = usesEntryPools(o);
     out["kind"]        = isMovieChannel(o) ? QStringLiteral("movies") : QStringLiteral("tv");
+    out["schedule"]    = usesDayPlan(o) ? QStringLiteral("day_plan") : QStringLiteral("free");
+    out["planCount"]   = int(readPlans(o).size());
     out["filmsFrom"]   = playsAPlaylist(o) ? QStringLiteral("playlist")
                                            : QStringLiteral("selection");
     const QStringList programmes = listOf(o, "programmes");

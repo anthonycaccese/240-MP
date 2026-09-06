@@ -555,6 +555,76 @@ void testPlansAreRead() {
              "and a picked series keeps the id it was picked by");
 }
 
+void testPlansRoundTrip() {
+    section("Backend: plans survive being read out and handed back");
+
+    Fixture fx;
+    fx.write(localChannel(3));
+    VirtualChannelsBackend b(fx.data(), fx.data());
+
+    QVariantMap cartoons;
+    cartoons["type"] = QStringLiteral("series");
+    cartoons["name"] = QStringLiteral("Batman Beyond");
+    cartoons["ref"]  = QStringLiteral("8324");
+    cartoons["minutes"] = 120;
+
+    QVariantMap film;
+    film["type"] = QStringLiteral("movie");
+    film["minutes"] = 90;
+
+    QVariantMap junk;                       // a type the generator would not know
+    junk["type"] = QStringLiteral("wallpaper");
+    junk["minutes"] = 30;
+
+    QVariantMap plan;
+    plan["name"]     = QStringLiteral("WEEKDAY");
+    plan["startsAt"] = QStringLiteral("06:00");
+    plan["gridMinutes"] = 30;
+    plan["days"]     = QVariantList{ 1, 2, 3, 4, 5 };
+    plan["blocks"]   = QVariantList{ cartoons, film, junk };
+
+    check(b.set_channel_plans(3, QVariantList{ plan }), "a plan saves");
+
+    const QVariantList back = b.channel_plans(3);
+    checkEq(back.size(), 1, "and reads back");
+    if (back.isEmpty()) return;
+
+    const QVariantMap got = back.first().toMap();
+    checkStr(got.value(QStringLiteral("name")).toString(), QStringLiteral("WEEKDAY"), "by name");
+    checkStr(got.value(QStringLiteral("startsAt")).toString(), QStringLiteral("06:00"),
+             "starting when it was told");
+    checkEq(got.value(QStringLiteral("days")).toList().size(), 5, "on five days");
+    checkEq(got.value(QStringLiteral("totalMinutes")).toInt(), 210,
+            "running as long as its blocks do");
+
+    const QVariantList blocks = got.value(QStringLiteral("blocks")).toList();
+    checkEq(blocks.size(), 2, "the block of a type nobody knows was refused");
+    checkStr(blocks.first().toMap().value(QStringLiteral("ref")).toString(),
+             QStringLiteral("8324"), "a picked series keeps the id it was picked by");
+    checkStr(blocks.first().toMap().value(QStringLiteral("startsAt")).toString(),
+             QStringLiteral("06:00"), "the first block starts when the plan does");
+    checkStr(blocks.at(1).toMap().value(QStringLiteral("startsAt")).toString(),
+             QStringLiteral("08:00"), "and the next one where the first ended");
+
+    // Reordering is the screen handing back the list it was given, swapped.
+    QVariantList reordered = blocks;
+    reordered.swapItemsAt(0, 1);
+    QVariantMap again = got;
+    again["blocks"] = reordered;
+    check(b.set_channel_plans(3, QVariantList{ again }), "a reordered plan saves");
+    const QVariantList after = b.channel_plans(3).first().toMap()
+                                 .value(QStringLiteral("blocks")).toList();
+    checkStr(after.first().toMap().value(QStringLiteral("type")).toString(),
+             QStringLiteral("movie"), "the moved block is first now");
+    checkStr(after.first().toMap().value(QStringLiteral("startsAt")).toString(),
+             QStringLiteral("06:00"), "and takes the start time with it");
+    checkStr(after.at(1).toMap().value(QStringLiteral("startsAt")).toString(),
+             QStringLiteral("07:30"), "shifting what follows onto the clock");
+
+    check(b.set_channel_plans(3, QVariantList{}), "clearing the plans saves");
+    checkEq(b.channel_plans(3).size(), 0, "and leaves the channel without any");
+}
+
 void testSourceSwitchSticks() {
     section("Backend: switching a channel's source takes effect");
 
@@ -729,6 +799,7 @@ int runVirtualChannelsBackendTests() {
     testSeriesIdsAreKept();
     testMovieChannel();
     testPlansAreRead();
+    testPlansRoundTrip();
     testFilmPoolEntries();
     testFilmAndShowListsAreSeparate();
     testFilmsFromDecidesWhatAirs();

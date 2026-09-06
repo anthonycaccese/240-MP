@@ -95,6 +95,8 @@ FocusScope {
     property int adsPerBreak: 0
     property string order: "broadcast"
     readonly property bool isMovies: cfg.kind === "movies"
+    readonly property bool onADayPlan: cfg.schedule === "day_plan"
+    readonly property int  planCount: cfg.planCount !== undefined ? cfg.planCount : 0
     readonly property bool fromPlaylist: cfg.filmsFrom === "playlist"
 
     readonly property var gridChoices: [0, 15, 30, 60]
@@ -163,7 +165,7 @@ FocusScope {
         case "slots":        return "Movie Slots"
         case "logo":         return "Logo"
         case "order":        return "Order"
-        case "timing":       return "Timing"
+        case "timing":       return "Schedule"
         case "ads":          return "Per Break"
         case "breaks":       return "Breaks"
         case "rebuild":      return building ? "Rebuilding…" : "Rebuild This Channel"
@@ -217,6 +219,8 @@ FocusScope {
                  : sourcesRoot.order === "interleaved" ? "INTERLEAVED"
                                                        : "BROADCAST"
         case "timing":
+            if (sourcesRoot.onADayPlan)
+                return sourcesRoot.planCount > 0 ? "DAY PLAN ►" : "DAY PLAN"
             return sourcesRoot.gridMinutes === 0
                    ? "FREE RUN" : "ON THE " + sourcesRoot.gridMinutes + " MIN"
         case "ads":
@@ -258,7 +262,9 @@ FocusScope {
                                  : sourcesRoot.order === "interleaved"
                                    ? "Series take turns, each keeping its own place — a short one comes round again while a long one plays on."
                                    : "Everything airs in the order it first did, oldest first, whichever show it belongs to."
-        case "timing":      return sourcesRoot.gridMinutes === 0
+        case "timing":      return sourcesRoot.onADayPlan
+                                   ? "A day laid out as blocks — this show at this hour, then that one. " + root.hints.select + " opens it."
+                                 : sourcesRoot.gridMinutes === 0
                                    ? "Free run: each program starts when the last one ended."
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
         case "ads":         return "How many things play between programs. Free run only — on a clock the gap decides."
@@ -306,11 +312,18 @@ FocusScope {
             return
         }
         if (r === "timing") {
-            var at = gridChoices.indexOf(gridMinutes)
-            if (at < 0) at = 0
-            var next = gridChoices[(at + delta + gridChoices.length) % gridChoices.length]
-            if (!virtualChannelsBackend.set_channel_grid(channelNumber, next))
-                status = "Could not change the timing"
+            // Free run, the grids, then a day plan: one more stop on a row that
+            // already asks how a channel keeps time, rather than a row of its
+            // own that every channel would have to scroll past.
+            var stops = gridChoices.concat(["day_plan"])
+            var at = sourcesRoot.onADayPlan ? gridChoices.length
+                                            : Math.max(0, gridChoices.indexOf(gridMinutes))
+            var next = stops[(at + delta + stops.length) % stops.length]
+            var ok = next === "day_plan"
+                     ? virtualChannelsBackend.set_channel_schedule(channelNumber, "day_plan")
+                     : (virtualChannelsBackend.set_channel_schedule(channelNumber, "free")
+                        && virtualChannelsBackend.set_channel_grid(channelNumber, next))
+            if (!ok) status = "Could not change the schedule"
             else { status = ""; reload() }
             return
         }
@@ -325,6 +338,32 @@ FocusScope {
     function open(i) {
         if (building) return
         var row = rows[i]
+
+        // The day plan is the one row that both cycles and opens: left and
+        // right choose how the channel keeps time, and select opens the day.
+        if (row === "timing" && sourcesRoot.onADayPlan) {
+            if (sourcesRoot.planCount === 0) {
+                // Nothing to open yet, so make the day the viewer just asked
+                // for: one block, one slot of the grid, waiting to be told what
+                // it plays.
+                var seed = [{ name: "EVERY DAY", startsAt: "06:00",
+                              gridMinutes: sourcesRoot.gridMinutes > 0 ? sourcesRoot.gridMinutes : 30,
+                              days: [1, 2, 3, 4, 5, 6, 7],
+                              blocks: [{ type: "series", name: "", ref: "", minutes: 60 }] }]
+                if (!virtualChannelsBackend.set_channel_plans(channelNumber, seed)) {
+                    status = "Could not start a day plan"
+                    return
+                }
+                reload()
+            }
+            navigateTo("modules/virtual_channels/views/PlanEdit.qml", {
+                moduleId:      sourcesRoot.moduleId,
+                channelNumber: sourcesRoot.channelNumber,
+                channelName:   sourcesRoot.channelName,
+                planIndex:     0
+            }, { currentIndex: sourcesRoot.current })
+            return
+        }
 
         if (row === "rename") {
             appCore.save_setting(moduleId, "rename_buffer", "")

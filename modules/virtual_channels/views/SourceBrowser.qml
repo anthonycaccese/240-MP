@@ -13,6 +13,10 @@ FocusScope {
     // Assigned directly by the app's router and nested in navParams by the
     // module's; this view is reachable both ways, so it reads either.
     property var navListState: navParams.navListState || ({})
+    // Set by a screen that wants one thing chosen and returned, not a list
+    // edited in place. The pick is left in `pickKey` for it to read.
+    property bool   pickOne: navParams.pickOne === true
+    property string pickKey: navParams.pickKey || "block_pick"
     // Where the viewer was before descending into a season list. The list
     // arrives asynchronously, so it is put back when the items land rather
     // than on completion, and only once.
@@ -116,6 +120,16 @@ FocusScope {
 
     function toggle(item) {
         if (channelNumber < 0) return
+
+        // Picking one thing and handing it back, rather than ticking a list.
+        // The pick goes into a setting and the screen that asked reads it on
+        // the way back, which is how naming and pool picking already work.
+        if (pickOne) {
+            appCore.save_setting(moduleId, pickKey,
+                                 String(item.label) + "\u001f" + String(item.id || ""))
+            goBack()
+            return
+        }
 
         if (bookingMode) {
             var picked = bookingTitles.slice()
