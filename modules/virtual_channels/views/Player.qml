@@ -637,7 +637,10 @@ FocusScope {
         }
     }
 
-    Component.onDestruction: virtualChannelsBackend.release_tuner()
+    // Guarded: the context property is already gone by the time the view is
+    // destroyed on the way out of the app, and reaching through it there throws
+    // a TypeError into the log on every exit.
+    Component.onDestruction: if (virtualChannelsBackend) virtualChannelsBackend.release_tuner()
 
     Component.onCompleted: {
         if (channelNumber < 0) { exitModule(); return }
