@@ -115,11 +115,19 @@ FocusScope {
     }
 
     // A block with none of its own plays the channel's, which is what the row
-    // says rather than leaving it blank and letting it read as silence.
+    // says rather than leaving it blank and letting it read as silence. Where
+    // it has one, the folder is named: "1 folder" says a thing is set without
+    // saying which, and the name is what the viewer chose it by.
     function identLabel(key) {
         var f = foldersOf(key)
         if (f.length === 0) return "CHANNEL'S"
-        return f.length === 1 ? "1 FOLDER" : f.length + " FOLDERS"
+        if (f.length > 1)   return f.length + " FOLDERS"
+        var parts = String(f[0]).split("/").filter(function (p) { return p !== "" })
+        var leaf = parts.length ? parts[parts.length - 1] : ""
+        var generic = ["intro", "intros", "outro", "outros", "idents", "bumps"]
+        var useful = (generic.indexOf(leaf.toLowerCase()) >= 0 && parts.length > 1)
+                       ? parts[parts.length - 2] : leaf
+        return useful.toUpperCase()
     }
 
     function valueFor(i) {
@@ -137,7 +145,7 @@ FocusScope {
         switch (rows[i]) {
         case "type":
             if (!block) return ""
-            if (block.type === "series")     return "One show, playing until the block's time is up. Its own bumpers come with it."
+            if (block.type === "series")     return "One show, playing until the block's time is up."
             if (block.type === "collection") return "A collection, taking turns through the shows in it."
             if (block.type === "genre")      return "Every film of this genre, so the block follows the library as it grows."
             if (block.type === "movie")      return "A film. Long enough for one, and the rest of the day starts where it ends."
@@ -159,6 +167,20 @@ FocusScope {
     }
 
     function cycles(i) { return rows[i] === "type" || rows[i] === "length" }
+
+    // Every change is one field of the block the screen is already holding, so
+    // it is applied to a copy of that block. Building a fresh object instead
+    // drops whatever the change was not thinking about, which is how a block
+    // lost its own bumpers every time its length moved by half an hour.
+    // startsAtMinute and the counts are worked out on the way out, not stored.
+    function blockWith(changes) {
+        var next = {}
+        for (var k in block)
+            if (k !== "startsAtMinute" && k !== "intros_count" && k !== "outros_count")
+                next[k] = block[k]
+        for (var c in changes) next[c] = changes[c]
+        return next
+    }
 
     // Every change is the same shape: take the plans, change one thing, hand
     // them back. The backend recomputes what each block's start time becomes.
@@ -186,12 +208,15 @@ FocusScope {
             var at = types.indexOf(block.type)
             if (at < 0) at = 0
             var next = types[(at + delta + types.length) % types.length]
+            // The name and the id go: a series' name means nothing to a genre.
+            // The bumpers stay, because they belong to the block, not to what
+            // the block happens to draw on.
             var changed = { type: next, name: "", ref: "", minutes: block.minutes }
             // A movie block is a film's worth of time unless it has been set
             // otherwise, which is what makes it a movie slot by another name.
             if (next === "movie" && block.type !== "movie")
                 changed.minutes = Math.max(block.minutes, 90)
-            writeBlock(changed)
+            writeBlock(blockWith(changed))
             return
         }
 
@@ -199,7 +224,7 @@ FocusScope {
             var mins = block.minutes + delta * step
             if (mins < step)        { status = "That is as short as a block goes"; return }
             if (mins > 24 * 60)     { status = "That is a whole day"; return }
-            writeBlock({ type: block.type, name: block.name, ref: block.ref, minutes: mins })
+            writeBlock(blockWith({ minutes: mins }))
         }
     }
 
@@ -260,8 +285,8 @@ FocusScope {
         appCore.save_setting(moduleId, "block_pick", "")
         if (raw === undefined || raw === null || String(raw) === "") return
         var parts = String(raw).split("\u001f")
-        writeBlock({ type: block.type, name: parts[0],
-                     ref: parts.length > 1 ? parts[1] : "", minutes: block.minutes })
+        writeBlock(blockWith({ name: parts[0],
+                               ref: parts.length > 1 ? parts[1] : "" }))
     }
 
     Component.onCompleted: {
@@ -384,9 +409,20 @@ FocusScope {
         }
     }
 
+    // Says what this row does, not what the screen can do: select does nothing
+    // on a row that only cycles, and offering it there is a promise the screen
+    // does not keep.
+    readonly property string rowHint: {
+        var parts = []
+        if (cycles(current)) parts.push(root.hints.change + ":CHANGE")
+        else                 parts.push(root.hints.select + ":"
+                                        + (rows[current] === "delete" ? "DELETE" : "CHOOSE"))
+        return parts.join(" ")
+    }
+
     Text {
         text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE "
-              + root.hints.change + ":CHANGE " + root.hints.select + ":SELECT"
+              + editRoot.rowHint
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

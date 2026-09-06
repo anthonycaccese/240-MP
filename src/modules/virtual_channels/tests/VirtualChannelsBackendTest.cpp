@@ -662,6 +662,54 @@ void testProgrammesAreKeptOncePerBlock() {
     checkEq(out.size(), 2, "a programme with no id is not a duplicate of another with none");
 }
 
+// The block editor holds a block, changes one field of it and hands it back.
+// Whatever it hands back is what the block becomes, so a field the editor was
+// not thinking about has to survive the round trip -- otherwise moving a
+// block's length by half an hour takes its own bumpers off it.
+void testABlockKeepsWhatWasNotChanged() {
+    section("Backend: changing one field of a block leaves the rest of it alone");
+
+    Fixture fx;
+    fx.write(localChannel(3));
+    VirtualChannelsBackend b(fx.data(), fx.data());
+
+    QVariantMap block;
+    block["type"]    = QStringLiteral("series");
+    block["name"]    = QStringLiteral("Samurai Jack");
+    block["ref"]     = QStringLiteral("15087");
+    block["minutes"] = 60;
+    block["intros"]  = QVariantList{ QStringLiteral("breaks/samurai-jack/intro") };
+    block["outros"]  = QVariantList{ QStringLiteral("breaks/samurai-jack/outro") };
+
+    QVariantMap day;
+    day["name"]        = QStringLiteral("WEEKDAYS");
+    day["gridMinutes"] = 30;
+    day["days"]        = QVariantList{ 1, 2, 3, 4, 5 };
+    day["blocks"]      = QVariantList{ block };
+    check(b.set_channel_plans(3, QVariantList{ day }), "a block with its own bumpers saves");
+
+    // What the editor does: read the block back, change the one field, save.
+    QVariantList plans = b.channel_plans(3);
+    QVariantMap  today = plans.first().toMap();
+    QVariantList blocks = today.value(QStringLiteral("blocks")).toList();
+    QVariantMap  edited = blocks.first().toMap();
+    edited["minutes"] = 90;
+    blocks[0] = edited;
+    today["blocks"] = blocks;
+    plans[0] = today;
+    check(b.set_channel_plans(3, plans), "the length change saves");
+
+    const QVariantMap after = b.channel_plans(3).first().toMap()
+                                .value(QStringLiteral("blocks")).toList().first().toMap();
+    checkEq(after.value(QStringLiteral("minutes")).toInt(), 90, "the length changed");
+    checkEq(after.value(QStringLiteral("intros")).toStringList().size(), 1,
+            "and the block still has its intro");
+    checkEq(after.value(QStringLiteral("outros")).toStringList().size(), 1,
+            "and its outro");
+    checkStr(after.value(QStringLiteral("ref")).toString(), QStringLiteral("15087"),
+             "and the id it was picked by");
+}
+
 void testPlansRoundTrip() {
     section("Backend: plans survive being read out and handed back");
 
@@ -963,6 +1011,7 @@ int runVirtualChannelsBackendTests() {
     testPlansAreRead();
     testBlankBlocksGatherNothing();
     testProgrammesAreKeptOncePerBlock();
+    testABlockKeepsWhatWasNotChanged();
     testPlansRoundTrip();
     testFilmPoolEntries();
     testFilmAndShowListsAreSeparate();
