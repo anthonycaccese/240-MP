@@ -42,6 +42,7 @@ FocusScope {
     function reload() {
         // Visibility changes on the way out too, when the backend is gone.
         if (!virtualChannelsBackend) return
+        channelPool = channelClips()
         var plans = virtualChannelsBackend.channel_plans(channelNumber) || []
         onBlocks = plans.length > 0
         if (onBlocks) {
@@ -85,9 +86,15 @@ FocusScope {
         return (f === undefined || f === null) ? [] : f
     }
 
+    // Read once when the screen loads, not from the row bindings. Every row
+    // asks what the channel's own pool holds, and answering each of them
+    // separately meant re-reading the channel file and listing its break
+    // folders once per row, on every repaint.
+    property var channelPool: ({ sources: 0, clips: 0, unknown: 0 })
+
     function channelClips() {
         // Runs from a value binding, which outlives the context property.
-        if (!virtualChannelsBackend) return { sources: 0, clips: 0 }
+        if (!virtualChannelsBackend) return { sources: 0, clips: 0, unknown: 0 }
         var list = virtualChannelsBackend.channel_pool(channelNumber, kind) || []
         var n = 0
         var unknown = 0
@@ -109,7 +116,7 @@ FocusScope {
 
     function valueFor(i) {
         if (rows[i] === "channel") {
-            var c = channelClips()
+            var c = levelsRoot.channelPool
             if (c.sources === 0) return "NONE"
             return c.clips + (c.clips === 1 ? " CLIP" : " CLIPS")
         }
@@ -119,7 +126,7 @@ FocusScope {
             // thing. And where the channel's own pool is empty, falling back to
             // it plays nothing, which is worth saying here rather than leaving
             // to be worked out from the row above.
-            var c = channelClips()
+            var c = levelsRoot.channelPool
             return (c.clips === 0 && c.unknown === 0) ? "NOTHING" : "CHANNEL'S"
         }
         if (levelsRoot.onBlocks) return "OWN"
@@ -135,7 +142,7 @@ FocusScope {
         if (!e) return ""
         var who = String(e.short !== undefined ? e.short : e.name)
         if (ownFolders(e).length === 0) {
-            var cc = channelClips()
+            var cc = levelsRoot.channelPool
             return (cc.clips === 0 && cc.unknown === 0)
                    ? who + " has no " + kindWord + " of its own, and the row above sets none either, so nothing plays."
                    : who + " plays what the row above sets."

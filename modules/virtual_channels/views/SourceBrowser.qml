@@ -447,7 +447,12 @@ FocusScope {
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.075
         anchors.leftMargin: root.sw * 0.125
-        title: browserRoot.heading
+        // Three levels in, "Season 1" on its own does not say whose. The show
+        // is already carried down here for the tick logic, so the title can say
+        // it too.
+        title: (browserRoot.kind === "episodes" && browserRoot.seriesName !== "")
+               ? browserRoot.seriesName + " — " + browserRoot.heading
+               : browserRoot.heading
     }
 
     Text {
