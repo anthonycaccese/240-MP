@@ -35,7 +35,14 @@ FocusScope {
     // is measured in, so one press is one slot and there is no arithmetic.
     readonly property int step: plan && plan.gridMinutes > 0 ? plan.gridMinutes : 30
 
-    readonly property var types: ["series", "collection", "genre", "movie", "random"]
+    // What this channel's source can actually be asked for. A folder of files
+    // has no collections and no genres, so offering them here would open a
+    // picker with nothing in it and leave a block that airs nothing.
+    property var cfg: ({})
+    readonly property var types: {
+        if (cfg.source === "local") return ["series", "movie", "random"]
+        return ["series", "collection", "genre", "movie", "random"]
+    }
 
     // A random block draws on everything the channel gathered, so it has
     // nothing of its own to pick.
@@ -58,6 +65,7 @@ FocusScope {
     focus: true
 
     function reload() {
+        cfg   = virtualChannelsBackend.channel_source_config(channelNumber)
         plans = virtualChannelsBackend.channel_plans(channelNumber)
         if (current >= rowCount) current = rowCount - 1
         if (current < 0) current = 0
@@ -205,6 +213,9 @@ FocusScope {
         var r = rows[current]
 
         if (r === "type") {
+            // A block set to a type this source does not offer -- left behind
+            // by a source change -- is still shown, and stepping moves off it
+            // rather than sticking.
             var at = types.indexOf(block.type)
             if (at < 0) at = 0
             var next = types[(at + delta + types.length) % types.length]

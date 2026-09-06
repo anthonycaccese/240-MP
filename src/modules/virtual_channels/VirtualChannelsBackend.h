@@ -391,6 +391,12 @@ private:
     struct PendingItem { QString absPath; QString rel; vchan::SlotKind kind;
                          int apptIndex = -1;
                          int pack = -1;
+                         // Which block of a day plan this was gathered for. The
+                         // server paths carry it on the job; a local file is
+                         // read off disk here, so it has to be carried too --
+                         // without it every block on a local channel gathers
+                         // nothing it can find again, and airs the card.
+                         int planBlock = -1;
                          // Known only for library items. A folder of clips has
                          // none of this and falls back to its directory name.
                          QString series = {};

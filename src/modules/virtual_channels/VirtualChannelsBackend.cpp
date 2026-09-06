@@ -1555,10 +1555,11 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
     m_genCursor = 0;
     const QString absRoot = QFileInfo(m_mediaRoot).canonicalFilePath();
     const auto enqueue = [&](const QStringList &dirs, SlotKind kind,
-                             int apptIndex = -1, int pack = -1) {
+                             int apptIndex = -1, int pack = -1, int planBlock = -1) {
         for (const QString &d : dirs)
             for (const QString &rel : mediaFilesUnder(d))
-                m_genQueue.push_back({ QDir(absRoot).filePath(rel), rel, kind, apptIndex, pack });
+                m_genQueue.push_back({ QDir(absRoot).filePath(rel), rel, kind,
+                                       apptIndex, pack, planBlock });
     };
     m_localLibrary.setMediaRoot(m_mediaRoot);
     // The between-build check lists series/ and movies/ only, so it cannot see
@@ -1622,6 +1623,7 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                     for (const vchan::LocalEpisode &ep : eps)
                         m_genQueue.push_back({ QDir(absRoot).filePath(ep.ref), ep.ref,
                                                job.pool, job.apptIndex, job.pack,
+                                               job.planBlock,
                                                display, showAir, ep.season, ep.number });
                 }
                 for (const QString &film : job.titles) {
@@ -1642,13 +1644,15 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
                     }
                     m_genQueue.push_back({ QDir(absRoot).filePath(ref), ref,
                                            job.pool, job.apptIndex, job.pack,
+                                           job.planBlock,
                                            QString(), filmAir, -1, -1 });
                 }
                 for (const QString &rel : std::as_const(refs))
                     m_genQueue.push_back({ QDir(absRoot).filePath(rel), rel,
-                                           job.pool, job.apptIndex, job.pack });
+                                           job.pool, job.apptIndex, job.pack,
+                                           job.planBlock });
             } else {
-                enqueue({ job.library }, job.pool, job.apptIndex, job.pack);
+                enqueue({ job.library }, job.pool, job.apptIndex, job.pack, job.planBlock);
             }
             break;
         case SlotSource::Plex:
@@ -1750,6 +1754,7 @@ void VirtualChannelsBackend::onGenerationTick() {
             continue;
         }
         if (hasPack && p.kind == SlotKind::Programme) m.pack = p.pack;
+        m.planBlock = p.planBlock;
 
         switch (p.kind) {
         case SlotKind::Programme:  m_genDef.programmes.append(m);  break;

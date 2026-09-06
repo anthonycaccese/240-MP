@@ -759,6 +759,69 @@ int runScheduleGeneratorTests() {
                  "and the short series picks up at its own separate place");
     }
 
+    // A channel is rebuilt every night for as long as it exists. Each build
+    // starts from the marks the last one left, so the question is whether the
+    // marks stay accurate over many of them: a series must carry on across the
+    // join, wrap once at the end, and never skip or repeat in between.
+    section("plans: a block carries on across build after build after build");
+    {
+        const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));
+
+        ChannelDef d = basicDef();
+        d.horizonHours = 1.0;                 // two half hours per build
+        d.programmes.clear();
+        for (int ep = 1; ep <= 12; ++ep) {
+            MediaItem m = item(QStringLiteral("jack-%1.mkv").arg(ep), 30 * 60000);
+            m.series = "SAMURAI JACK"; m.seasonNo = 1; m.episodeNo = ep;
+            m.planBlock = 1;
+            d.programmes.append(m);
+        }
+        // The block covers the whole day, so each build lands inside it.
+        PlanBlock only; only.id = 1; only.name = "SAMURAI JACK"; only.minutes = 24 * 60;
+        DayPlan plan;
+        plan.name = "EVERY DAY";
+        plan.blocks = { only };
+        d.plans = { plan };
+
+        QStringList seen;
+        qint64 at = base.toMSecsSinceEpoch();
+        for (int build = 0; build < 6; ++build) {
+            const QVector<Slot> s = generateSlots(d, at);
+            QStringList thisBuild;
+            for (const Slot &x : s)
+                if (x.kind == SlotKind::Programme) thisBuild << x.ref;
+            if (thisBuild.isEmpty()) { check(false, "every build airs something"); break; }
+
+            seen += thisBuild;
+            // What the backend does between builds: the mark becomes the last
+            // programme that aired, and the clock moves to the end of the run.
+            d.marks.clear();
+            d.marks.insert(QStringLiteral("samurai jack"), thisBuild.last());
+            at += qint64(thisBuild.size()) * 30 * 60000LL;
+        }
+
+        checkEq(seen.size(), 12, "six builds of two half hours air twelve programmes");
+
+        // Twelve episodes, twelve slots: each should have aired exactly once
+        // before any of them comes round again.
+        QStringList distinct = seen;
+        distinct.removeDuplicates();
+        checkEq(distinct.size(), 12, "and each episode aired once before any repeated");
+        checkStr(seen.value(0),  QStringLiteral("jack-1.mkv"),  "starting at the first");
+        checkStr(seen.value(11), QStringLiteral("jack-12.mkv"), "and ending at the last");
+
+        // One more build, now that the mark sits on the final episode: it wraps
+        // rather than stopping or sticking.
+        d.marks.clear();
+        d.marks.insert(QStringLiteral("samurai jack"), QStringLiteral("jack-12.mkv"));
+        const QVector<Slot> wrapped = generateSlots(d, at);
+        QStringList after;
+        for (const Slot &x : wrapped)
+            if (x.kind == SlotKind::Programme) after << x.ref;
+        checkStr(after.value(0), QStringLiteral("jack-1.mkv"),
+                 "a mark on the last episode comes round to the first");
+    }
+
     section("generate: a mark on the first episode still advances");
     {
         ChannelDef d = basicDef();
