@@ -346,10 +346,14 @@ FocusScope {
                 // Nothing to open yet, so make the day the viewer just asked
                 // for: one block, one slot of the grid, waiting to be told what
                 // it plays.
-                var seed = [{ name: "EVERY DAY", startsAt: "06:00",
-                              gridMinutes: sourcesRoot.gridMinutes > 0 ? sourcesRoot.gridMinutes : 30,
-                              days: [1, 2, 3, 4, 5, 6, 7],
-                              blocks: [{ type: "series", name: "", ref: "", minutes: 60 }] }]
+                // Three days to plan, and all of them empty: a day with no
+                // blocks in it is a day of breaks, which is what a channel
+                // that has just been switched over should air.
+                var seed = [
+                    { name: "WEEKDAYS", gridMinutes: 30, days: [1, 2, 3, 4, 5], blocks: [] },
+                    { name: "SATURDAY", gridMinutes: 30, days: [6],             blocks: [] },
+                    { name: "SUNDAY",   gridMinutes: 30, days: [7],             blocks: [] }
+                ]
                 if (!virtualChannelsBackend.set_channel_plans(channelNumber, seed)) {
                     status = "Could not start a day plan"
                     return

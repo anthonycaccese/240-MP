@@ -428,7 +428,7 @@ int runScheduleGeneratorTests() {
 
     section("generate: a planned channel airs each block from its own source");
     {
-        const QDateTime base(QDate(2026, 9, 7), QTime(6, 0));    // Monday 06:00
+        const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));    // Monday, midnight
 
         ChannelDef d = basicDef();
         d.horizonHours = 4.0;
@@ -450,7 +450,6 @@ int runScheduleGeneratorTests() {
         PlanBlock news;     news.id     = 2; news.name     = "NEWS";     news.minutes     = 60;
         DayPlan plan;
         plan.name = "WEEKDAY";
-        plan.startsAtMinute = 6 * 60;
         plan.blocks = { cartoons, news };
         d.plans = { plan };
 
@@ -478,7 +477,7 @@ int runScheduleGeneratorTests() {
 
     section("generate: a block whose source gathered nothing holds the card");
     {
-        const QDateTime base(QDate(2026, 9, 7), QTime(6, 0));
+        const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));
 
         ChannelDef d = basicDef();
         d.horizonHours = 3.0;
@@ -493,7 +492,6 @@ int runScheduleGeneratorTests() {
         PlanBlock empty; empty.id = 2; empty.name = "GONE";  empty.minutes = 60;
         DayPlan plan;
         plan.name = "WEEKDAY";
-        plan.startsAtMinute = 6 * 60;
         plan.blocks = { good, empty };
         d.plans = { plan };
 
@@ -501,12 +499,14 @@ int runScheduleGeneratorTests() {
         check(!s.isEmpty(), "the channel still builds");
         check(contiguous(s), "with no hole where the empty block was");
 
-        // The empty hour is held, and the block after it still starts on time.
-        bool alphaAfterTheGap = false;
-        const qint64 twoHoursIn = base.addSecs(7200).toMSecsSinceEpoch();
+        // The empty hour is held by the card, and nothing airs inside it.
+        const qint64 secondHour = base.addSecs(3600).toMSecsSinceEpoch();
+        const qint64 thirdHour  = base.addSecs(7200).toMSecsSinceEpoch();
+        bool airedInTheEmptyHour = false;
         for (const Slot &x : s)
-            if (x.kind == SlotKind::Programme && x.start >= twoHoursIn) alphaAfterTheGap = true;
-        check(alphaAfterTheGap, "and the plan comes round again on the clock");
+            if (x.kind == SlotKind::Programme
+                && x.start >= secondHour && x.start < thirdHour) airedInTheEmptyHour = true;
+        check(!airedInTheEmptyHour, "and nothing airs during a block with nothing in it");
     }
 
     section("plans: a day is laid out as an ordered stack, with no gaps");
@@ -517,13 +517,12 @@ int runScheduleGeneratorTests() {
 
         DayPlan weekday;
         weekday.name = "WEEKDAY";
-        weekday.startsAtMinute = 6 * 60;
         weekday.blocks = { cartoons, reruns, film };
 
         check(weekday.isValid(), "a plan with blocks in it is valid");
         checkEq(weekday.totalMinutes(), 510, "and knows how long it runs");
 
-        const QDateTime from(QDate(2026, 9, 7), QTime(6, 0));       // a Monday
+        const QDateTime from(QDate(2026, 9, 7), QTime(0, 0));       // a Monday, midnight
         const QVector<PlanSpan> spans =
             planSpans({ weekday }, from.toMSecsSinceEpoch(),
                       from.addSecs(12 * 3600).toMSecsSinceEpoch());
@@ -532,7 +531,7 @@ int runScheduleGeneratorTests() {
         checkStr(spans.first().block.name, QStringLiteral("CARTOONS"),
                  "the first block starts the day");
         checkEq(spans.first().start, from.toMSecsSinceEpoch(),
-                "at the hour the plan says");
+                "at midnight, which is where every day begins");
 
         // Contiguous by construction: this is the property the whole model
         // rests on, so it is the one worth asserting.
@@ -545,12 +544,11 @@ int runScheduleGeneratorTests() {
                 "a block runs for exactly the minutes it was given");
     }
 
-    section("plans: the blocks repeat rather than leaving the day short");
+    section("plans: what the blocks do not reach is left uncovered");
     {
         PlanBlock only; only.name = "ONE SHOW"; only.minutes = 120;
         DayPlan plan;
         plan.name = "SHORT";
-        plan.startsAtMinute = 0;
         plan.blocks = { only };
 
         const QDateTime from(QDate(2026, 9, 7), QTime(0, 0));
@@ -558,11 +556,13 @@ int runScheduleGeneratorTests() {
             planSpans({ plan }, from.toMSecsSinceEpoch(),
                       from.addSecs(12 * 3600).toMSecsSinceEpoch());
 
-        check(spans.size() >= 6, "two hours of plan covers twelve hours of clock");
-        bool allTheSame = true;
-        for (const PlanSpan &s : spans)
-            if (s.block.name != QLatin1String("ONE SHOW")) allTheSame = false;
-        check(allTheSame, "by coming round again, not by stretching");
+        checkEq(spans.size(), 1, "two hours of plan is two hours of plan");
+        checkEq(spans.first().end - spans.first().start, qint64(120 * 60000),
+                "running exactly as long as it was given");
+        // The rest of the day is nobody's, and a stretch nobody claimed is no
+        // content -- the card holds it, which the generator does on its own.
+        check(spans.first().end < from.addSecs(12 * 3600).toMSecsSinceEpoch(),
+              "and the rest of the day is left for the card");
     }
 
     section("plans: a day nobody planned for is left alone");
@@ -571,15 +571,14 @@ int runScheduleGeneratorTests() {
         DayPlan weekend;
         weekend.name = "WEEKEND";
         weekend.days = { 6, 7 };                       // Saturday and Sunday
-        weekend.startsAtMinute = 9 * 60;
         weekend.blocks = { b };
 
-        const QDateTime monday(QDate(2026, 9, 7), QTime(10, 0));
+        const QDateTime monday(QDate(2026, 9, 7), QTime(0, 0));
         check(planSpans({ weekend }, monday.toMSecsSinceEpoch(),
                         monday.addSecs(6 * 3600).toMSecsSinceEpoch()).isEmpty(),
               "a weekend plan lays nothing across a Monday");
 
-        const QDateTime saturday(QDate(2026, 9, 12), QTime(10, 0));
+        const QDateTime saturday(QDate(2026, 9, 12), QTime(0, 0));
         check(!planSpans({ weekend }, saturday.toMSecsSinceEpoch(),
                          saturday.addSecs(6 * 3600).toMSecsSinceEpoch()).isEmpty(),
               "and covers the Saturday it was written for");
@@ -594,23 +593,23 @@ int runScheduleGeneratorTests() {
         check(!empty.isValid(), "a plan with no blocks is not valid");
         checkEq(planSpans({ empty }, 1000, 2000).size(), 0, "and lays out nothing");
 
-        PlanBlock nameless;                    // a series block naming no series
-        nameless.minutes = 60;
-        check(!nameless.isValid(), "a series block with no series is not valid");
+        PlanBlock blank;                       // added, not yet told what it plays
+        blank.minutes = 60;
+        check(blank.isValid(), "a block with nothing chosen is still a block");
 
         PlanBlock zero; zero.name = "X"; zero.minutes = 0;
-        check(!zero.isValid(), "nor is a block of no length");
+        check(!zero.isValid(), "a block of no length is not");
 
-        DayPlan onlyBad;
-        onlyBad.name = "BAD";
-        onlyBad.blocks = { nameless, zero };
-        checkEq(planSpans({ onlyBad }, 1000, 2000).size(), 0,
-                "a plan of nothing but unusable blocks lays out nothing");
-
-        const QDateTime from(QDate(2026, 9, 7), QTime(6, 0));
-        checkEq(planSpans({ onlyBad }, from.toMSecsSinceEpoch(),
-                          from.addSecs(48 * 3600).toMSecsSinceEpoch()).size(), 0,
-                "over two days as well, without hanging");
+        DayPlan justBlank;
+        justBlank.name = "BLANK";
+        justBlank.blocks = { blank, zero };
+        const QDateTime from(QDate(2026, 9, 7), QTime(0, 0));
+        const QVector<PlanSpan> spans =
+            planSpans({ justBlank }, from.toMSecsSinceEpoch(),
+                      from.addSecs(48 * 3600).toMSecsSinceEpoch());
+        checkEq(spans.size(), 2, "an hour of no content on each of two days");
+        check(spans.first().block.name.isEmpty(),
+              "which is what a block nobody has filled in looks like");
     }
 
     section("generate: broadcast holds its place when the pool changes");

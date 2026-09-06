@@ -89,11 +89,10 @@ qint64 airedAtMs(const QString &isoDate, const QVariant &yearValue) {
 }
 
 bool PlanBlock::isValid() const {
-    if (minutes <= 0) return false;
-    // A block that names nothing can still be valid: Movie draws on the
-    // channel's films and Anything on everything it has.
-    if (draws == Draws::Movie || draws == Draws::Anything) return true;
-    return !name.trimmed().isEmpty() || !ref.trimmed().isEmpty();
+    // Length is all a block needs. One with nothing chosen is not a mistake to
+    // be dropped -- it says No Content, and holds the card for its length,
+    // which is how a day gets built a piece at a time.
+    return minutes > 0;
 }
 
 bool DayPlan::airsOn(int qtDayOfWeek) const {
@@ -131,40 +130,27 @@ QVector<PlanSpan> planSpans(const QVector<DayPlan> &plans, qint64 fromMs, qint64
         }
         if (!plan) { day = day.addDays(1); continue; }
 
-        // Wall clock, not arithmetic: the day a plan owns runs from its hour to
-        // the same hour tomorrow, which is 23 or 25 hours across a daylight
-        // saving change. Adding a flat 24 hours would slide the whole plan by
-        // an hour twice a year and leave an hour uncovered on one of them.
-        const QDateTime dayStart =
-            QDateTime(day, QTime(0, 0)).addSecs(plan->startsAtMinute * 60);
-        const QDateTime nextStart =
-            QDateTime(day.addDays(1), QTime(0, 0)).addSecs(plan->startsAtMinute * 60);
-        qint64 at = dayStart.toMSecsSinceEpoch();
-        const qint64 dayEnd = nextStart.toMSecsSinceEpoch();
+        // A day begins at midnight and its blocks are laid once, in order.
+        // Whatever they do not reach is not covered, and a stretch no block
+        // covers is no content -- the card holds it, the same as a block with
+        // nothing chosen in it. Read off the clock rather than by adding a flat
+        // twenty-four hours, which would slide a day by an hour twice a year.
+        qint64 at = QDateTime(day, QTime(0, 0)).toMSecsSinceEpoch();
+        const qint64 dayEnd = QDateTime(day.addDays(1), QTime(0, 0)).toMSecsSinceEpoch();
 
-        // The blocks repeat until the day is used up, so a plan does not have
-        // to account for all twenty-four hours to be useful.
-        int guard = 0;
-        while (at < dayEnd && spans.size() < kMaxSlotsPerChannel) {
-            bool placedAny = false;
-            for (const PlanBlock &b : plan->blocks) {
-                if (!b.isValid()) continue;
-                const qint64 end = qMin(at + qint64(b.minutes) * 60000LL, dayEnd);
-                if (end <= at) break;
-                if (end > fromMs && at < toMs) {
-                    PlanSpan s;
-                    s.start = at;
-                    s.end   = end;
-                    s.block = b;
-                    spans.append(s);
-                }
-                at = end;
-                placedAny = true;
-                if (at >= dayEnd) break;
+        for (const PlanBlock &b : plan->blocks) {
+            if (!b.isValid()) continue;
+            if (at >= dayEnd || spans.size() >= kMaxSlotsPerChannel) break;
+            const qint64 end = qMin(at + qint64(b.minutes) * 60000LL, dayEnd);
+            if (end <= at) break;
+            if (end > fromMs && at < toMs) {
+                PlanSpan s;
+                s.start = at;
+                s.end   = end;
+                s.block = b;
+                spans.append(s);
             }
-            // Nothing in the plan could be placed; stop rather than spin.
-            if (!placedAny) break;
-            if (++guard > 512) break;
+            at = end;
         }
         day = day.addDays(1);
     }

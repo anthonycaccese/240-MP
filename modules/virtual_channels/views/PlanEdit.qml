@@ -29,8 +29,14 @@ FocusScope {
     readonly property var plan: plans.length > planIndex ? plans[planIndex] : null
     readonly property var blocks: plan ? (plan.blocks || []) : []
 
-    readonly property int addIndex:  blocks.length
-    readonly property int rowCount:  blocks.length + 1
+    // Row zero is the day being shown. Left and right page between them, which
+    // is the same rule every other row follows: left and right change the row
+    // you are on.
+    readonly property int planRow:  0
+    readonly property int addIndex: blocks.length + 1
+    readonly property int rowCount: blocks.length + 2
+
+    function blockAt(i) { return (i > planRow && i < addIndex) ? blocks[i - 1] : null }
 
     focus: true
 
@@ -48,30 +54,50 @@ FocusScope {
         return m + "M"
     }
 
+    // A block nobody has filled in yet is not a mistake: it says so, and holds
+    // the card for its length.
     function sourceLabel(b) {
-        if (b.type === "movie")      return b.name !== "" ? b.name.toUpperCase() : "ANY MOVIE"
-        if (b.type === "random")     return "ANYTHING"
-        if (b.name === "")           return "NOTHING PICKED"
+        if (b.type === "movie")  return b.name !== "" ? b.name.toUpperCase() : "ANY MOVIE"
+        if (b.type === "random") return "ANYTHING"
+        if (b.name === "")       return "NO CONTENT"
         return b.name.toUpperCase()
     }
 
+    function clockLabel(mins) {
+        var h = Math.floor(mins / 60)
+        var m = mins % 60
+        var suffix = h < 12 ? "AM" : "PM"
+        var hh = h % 12
+        if (hh === 0) hh = 12
+        return hh + ":" + (m < 10 ? "0" + m : m) + " " + suffix
+    }
+
     function labelFor(i) {
+        if (i === planRow)  return plan ? plan.name : "Day"
         if (i === addIndex) return "Add A Block"
-        var b = blocks[i]
-        return b.startsAt + "  " + sourceLabel(b)
+        var b = blockAt(i)
+        return b ? clockLabel(b.startsAtMinute) + "  " + sourceLabel(b) : ""
     }
 
     function valueFor(i) {
+        if (i === planRow)
+            return plans.length > 1 ? "◄ " + (planIndex + 1) + " OF " + plans.length + " ►" : ""
         if (i === addIndex) return ""
-        return lengthLabel(blocks[i].minutes)
+        var b = blockAt(i)
+        return b ? lengthLabel(b.minutes) : ""
     }
 
     function helpFor(i) {
+        if (i === planRow)
+            return plans.length > 1
+                   ? root.hints.change + " shows another day. A day with no blocks is all breaks."
+                   : "The day this plan covers."
         if (i === addIndex)
-            return "A new half hour at the end of the day. Open it to say what it plays."
-        var b = blocks[i]
+            return "A new block at the end of the day. Open it to say what it plays."
+        var b = blockAt(i)
+        if (!b) return ""
         if (b.type !== "movie" && b.type !== "random" && b.name === "")
-            return "Nothing picked, so this block holds the card. Open it to choose what it plays."
+            return "Nothing in it yet, so this is a break. Open it to say what it plays."
         return root.hints.change + " moves it up and down the day · "
                + root.hints.select + " opens it"
     }
@@ -80,8 +106,15 @@ FocusScope {
     // Every start time below the moved block follows from the new order, so
     // nothing has to be recalculated here.
     function move(delta) {
+        if (current === planRow) {
+            if (plans.length < 2) return
+            planIndex = (planIndex + delta + plans.length) % plans.length
+            status = ""
+            return
+        }
         if (current >= addIndex) { status = "That is not a block"; return }
-        var to = current + delta
+        var from = current - 1
+        var to = from + delta
         if (to < 0 || to >= blocks.length) {
             status = delta < 0 ? "Already first" : "Already last"
             return
@@ -89,8 +122,8 @@ FocusScope {
         var all = plans.slice()
         var mine = all[planIndex]
         var list = (mine.blocks || []).slice()
-        var held = list[current]
-        list[current] = list[to]
+        var held = list[from]
+        list[from] = list[to]
         list[to] = held
         mine.blocks = list
         all[planIndex] = mine
@@ -99,7 +132,7 @@ FocusScope {
             return
         }
         status = ""
-        current = to
+        current = to + 1
         reload()
     }
 
@@ -107,7 +140,8 @@ FocusScope {
         var all = plans.slice()
         var mine = all[planIndex]
         var list = (mine.blocks || []).slice()
-        list.push({ type: "series", name: "", ref: "", minutes: plan ? plan.gridMinutes : 30 })
+        list.push({ type: "series", name: "", ref: "",
+                    minutes: plan && plan.gridMinutes > 0 ? plan.gridMinutes : 30 })
         mine.blocks = list
         all[planIndex] = mine
         if (!virtualChannelsBackend.set_channel_plans(channelNumber, all)) {
@@ -115,7 +149,7 @@ FocusScope {
             return
         }
         reload()
-        current = blocks.length - 1
+        current = blocks.length
         openBlock(current)
     }
 
@@ -125,11 +159,12 @@ FocusScope {
             channelNumber: planRoot.channelNumber,
             channelName:   planRoot.channelName,
             planIndex:     planRoot.planIndex,
-            blockIndex:    i
+            blockIndex:    i - 1
         }, { currentIndex: i })
     }
 
     function open(i) {
+        if (i === planRow)  return
         if (i === addIndex) { addBlock(); return }
         openBlock(i)
     }
@@ -188,11 +223,10 @@ FocusScope {
         text: {
             if (!planRoot.plan) return ""
             var mins = planRoot.plan.totalMinutes || 0
-            if (mins <= 0) return "NOTHING AIRS YET"
+            if (mins <= 0) return "NOTHING PLANNED YET"
             var full = 24 * 60
-            if (mins >= full) return planRoot.lengthLabel(mins) + " — FILLS THE DAY"
-            var times = Math.floor(full / mins)
-            return planRoot.lengthLabel(mins) + " — COMES ROUND " + times + "× A DAY"
+            if (mins >= full) return "FILLS THE DAY"
+            return planRoot.lengthLabel(mins) + " PLANNED · REST IS A BREAK"
         }
     }
 
@@ -225,6 +259,7 @@ FocusScope {
             height: root.sh * 0.07
             readonly property bool selected: index === planRoot.current
             readonly property bool isAction: index >= planRoot.addIndex
+                                         || index === planRoot.planRow
 
             Rectangle {
                 anchors.fill: parent

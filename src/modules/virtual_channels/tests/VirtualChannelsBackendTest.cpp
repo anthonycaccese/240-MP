@@ -508,15 +508,15 @@ void testPlansAreRead() {
     noLength["name"] = QStringLiteral("Nothing");
     noLength["minutes"] = 0;
 
-    QJsonObject nameless;                       // a series block naming no series
-    nameless["type"] = QStringLiteral("series");
-    nameless["minutes"] = 60;
+    QJsonObject blank;                          // added, not yet told what it plays
+    blank["type"] = QStringLiteral("series");
+    blank["minutes"] = 60;
 
     QJsonArray blocks;
     blocks.append(good);
     blocks.append(film);
     blocks.append(noLength);
-    blocks.append(nameless);
+    blocks.append(blank);
 
     QJsonObject plan;
     plan["name"]      = QStringLiteral("WEEKDAY");
@@ -542,10 +542,10 @@ void testPlansAreRead() {
     if (read.isEmpty()) return;
 
     checkStr(read.first().name, QStringLiteral("WEEKDAY"), "by name");
-    checkEq(read.first().startsAtMinute, 6 * 60, "starting when it says");
     checkEq(read.first().days.size(), 5, "on the days it names");
-    checkEq(read.first().blocks.size(), 2, "and only the two blocks that can air");
-    checkEq(read.first().totalMinutes(), 210, "adding up to what they run for");
+    checkEq(read.first().blocks.size(), 3,
+            "the block of no length is dropped; the blank one is kept as no content");
+    checkEq(read.first().totalMinutes(), 270, "adding up to what they run for");
 
     check(read.first().blocks[0].id != read.first().blocks[1].id,
           "each block has its own id, which is how its programmes find it again");
@@ -578,7 +578,6 @@ void testPlansRoundTrip() {
 
     QVariantMap plan;
     plan["name"]     = QStringLiteral("WEEKDAY");
-    plan["startsAt"] = QStringLiteral("06:00");
     plan["gridMinutes"] = 30;
     plan["days"]     = QVariantList{ 1, 2, 3, 4, 5 };
     plan["blocks"]   = QVariantList{ cartoons, film, junk };
@@ -591,8 +590,6 @@ void testPlansRoundTrip() {
 
     const QVariantMap got = back.first().toMap();
     checkStr(got.value(QStringLiteral("name")).toString(), QStringLiteral("WEEKDAY"), "by name");
-    checkStr(got.value(QStringLiteral("startsAt")).toString(), QStringLiteral("06:00"),
-             "starting when it was told");
     checkEq(got.value(QStringLiteral("days")).toList().size(), 5, "on five days");
     checkEq(got.value(QStringLiteral("totalMinutes")).toInt(), 210,
             "running as long as its blocks do");
@@ -601,10 +598,10 @@ void testPlansRoundTrip() {
     checkEq(blocks.size(), 2, "the block of a type nobody knows was refused");
     checkStr(blocks.first().toMap().value(QStringLiteral("ref")).toString(),
              QStringLiteral("8324"), "a picked series keeps the id it was picked by");
-    checkStr(blocks.first().toMap().value(QStringLiteral("startsAt")).toString(),
-             QStringLiteral("06:00"), "the first block starts when the plan does");
-    checkStr(blocks.at(1).toMap().value(QStringLiteral("startsAt")).toString(),
-             QStringLiteral("08:00"), "and the next one where the first ended");
+    checkEq(blocks.first().toMap().value(QStringLiteral("startsAtMinute")).toInt(), 0,
+            "the first block starts at midnight, where every day starts");
+    checkEq(blocks.at(1).toMap().value(QStringLiteral("startsAtMinute")).toInt(), 120,
+            "and the next one where the first ended");
 
     // Reordering is the screen handing back the list it was given, swapped.
     QVariantList reordered = blocks;
@@ -616,10 +613,10 @@ void testPlansRoundTrip() {
                                  .value(QStringLiteral("blocks")).toList();
     checkStr(after.first().toMap().value(QStringLiteral("type")).toString(),
              QStringLiteral("movie"), "the moved block is first now");
-    checkStr(after.first().toMap().value(QStringLiteral("startsAt")).toString(),
-             QStringLiteral("06:00"), "and takes the start time with it");
-    checkStr(after.at(1).toMap().value(QStringLiteral("startsAt")).toString(),
-             QStringLiteral("07:30"), "shifting what follows onto the clock");
+    checkEq(after.first().toMap().value(QStringLiteral("startsAtMinute")).toInt(), 0,
+            "and takes midnight with it");
+    checkEq(after.at(1).toMap().value(QStringLiteral("startsAtMinute")).toInt(), 90,
+            "shifting what follows onto the clock");
 
     check(b.set_channel_plans(3, QVariantList{}), "clearing the plans saves");
     checkEq(b.channel_plans(3).size(), 0, "and leaves the channel without any");

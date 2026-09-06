@@ -69,8 +69,17 @@ FocusScope {
     function sourceLabel() {
         if (!block) return ""
         if (block.type === "movie")  return block.name !== "" ? block.name.toUpperCase() : "ANY MOVIE"
-        if (block.name === "")       return "NOTHING PICKED"
+        if (block.name === "")       return "NO CONTENT"
         return block.name.toUpperCase()
+    }
+
+    function clockLabel(mins) {
+        var h = Math.floor(mins / 60)
+        var m = mins % 60
+        var suffix = h < 12 ? "AM" : "PM"
+        var hh = h % 12
+        if (hh === 0) hh = 12
+        return hh + ":" + (m < 10 ? "0" + m : m) + " " + suffix
     }
 
     function lengthLabel(mins) {
@@ -110,7 +119,9 @@ FocusScope {
             if (block.type === "genre")      return "Every film of this genre, so the block follows the library as it grows."
             if (block.type === "movie")      return "A film. Long enough for one, and the rest of the day starts where it ends."
             return "Anything this channel has gathered."
-        case "source":  return "What this block plays."
+        case "source":  return block && block.name === ""
+                               ? "Nothing yet, so this block is a break."
+                               : "What this block plays."
         case "length":  return root.hints.change + " changes it by "
                                + editRoot.step + " minutes — one slot of the plan's grid."
         case "delete":  return "Remove this block. The day closes up behind it."
@@ -249,8 +260,9 @@ FocusScope {
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.075
         anchors.leftMargin: root.sw * 0.125
-        title: editRoot.block ? (editRoot.block.startsAt + " — " + editRoot.sourceLabel())
-                              : "Block"
+        title: editRoot.block
+               ? (editRoot.clockLabel(editRoot.block.startsAtMinute) + " — " + editRoot.sourceLabel())
+               : "Block"
     }
 
     ListView {

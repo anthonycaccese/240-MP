@@ -3831,8 +3831,9 @@ QVector<DayPlan> VirtualChannelsBackend::readPlans(const QJsonObject &channel) {
         }
         const int grid = po.value(QLatin1String("grid_minutes")).toInt(30);
         plan.gridMinutes = (grid >= kMinGridMinutes && grid <= kMaxGridMinutes) ? grid : 30;
-        const int startsAt = minuteOfDayFromString(po.value(QLatin1String("starts_at")).toString());
-        plan.startsAtMinute = startsAt >= 0 ? startsAt : 6 * 60;
+        // No start time: a day begins at midnight, and what the blocks do not
+        // reach is no content.
+        plan.startsAtMinute = 0;
 
         for (const QJsonValue &bv : po.value(QLatin1String("blocks")).toArray()) {
             if (!bv.isObject()) continue;
@@ -3890,10 +3891,7 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber) {
     const QJsonObject o = QJsonObject::fromVariantMap(channelObject(channelNumber));
     for (const DayPlan &p : readPlans(o)) {
         QVariantMap plan;
-        plan["name"]     = p.name;
-        plan["startsAt"] = QStringLiteral("%1:%2")
-                               .arg(p.startsAtMinute / 60, 2, 10, QLatin1Char('0'))
-                               .arg(p.startsAtMinute % 60, 2, 10, QLatin1Char('0'));
+        plan["name"]        = p.name;
         plan["gridMinutes"] = p.gridMinutes;
         plan["totalMinutes"] = p.totalMinutes();
         QVariantList days;
@@ -3901,7 +3899,7 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber) {
         plan["days"] = days;
 
         QVariantList blocks;
-        qint64 at = qint64(p.startsAtMinute) * 60000LL;
+        qint64 at = 0;
         for (const PlanBlock &b : p.blocks) {
             QVariantMap m;
             m["type"]    = drawsToString(b.draws);
@@ -3911,9 +3909,7 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber) {
             // The start each block falls on, so the screen can show a time it
             // never has to be told.
             const int mins = int((at / 60000LL) % (24 * 60));
-            m["startsAt"] = QStringLiteral("%1:%2")
-                                .arg(mins / 60, 2, 10, QLatin1Char('0'))
-                                .arg(mins % 60, 2, 10, QLatin1Char('0'));
+            m["startsAtMinute"] = mins;
             blocks.append(m);
             at += qint64(b.minutes) * 60000LL;
         }
@@ -3936,10 +3932,6 @@ bool VirtualChannelsBackend::set_channel_plans(int channelNumber,
 
         QJsonObject plan;
         plan["name"] = pm.value(QStringLiteral("name")).toString().trimmed();
-        const int startsAt = minuteOfDayFromString(pm.value(QStringLiteral("startsAt")).toString());
-        plan["starts_at"] = QStringLiteral("%1:%2")
-                                .arg((startsAt >= 0 ? startsAt : 6 * 60) / 60, 2, 10, QLatin1Char('0'))
-                                .arg((startsAt >= 0 ? startsAt : 6 * 60) % 60, 2, 10, QLatin1Char('0'));
         const int grid = pm.value(QStringLiteral("gridMinutes")).toInt();
         plan["grid_minutes"] = (grid >= kMinGridMinutes && grid <= kMaxGridMinutes) ? grid : 30;
 
