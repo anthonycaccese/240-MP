@@ -426,6 +426,89 @@ int runScheduleGeneratorTests() {
                  "a rebuild carries on after the film it last aired");
     }
 
+    section("generate: a planned channel airs each block from its own source");
+    {
+        const QDateTime base(QDate(2026, 9, 7), QTime(6, 0));    // Monday 06:00
+
+        ChannelDef d = basicDef();
+        d.horizonHours = 4.0;
+        d.programmes.clear();
+
+        // Two shows, each gathered for a different block.
+        for (int ep = 1; ep <= 6; ++ep) {
+            MediaItem m = item(QStringLiteral("cart-%1.mkv").arg(ep), 30 * 60000);
+            m.series = "CARTOONS"; m.seasonNo = 1; m.episodeNo = ep; m.planBlock = 1;
+            d.programmes.append(m);
+        }
+        for (int ep = 1; ep <= 6; ++ep) {
+            MediaItem m = item(QStringLiteral("news-%1.mkv").arg(ep), 30 * 60000);
+            m.series = "NEWS"; m.seasonNo = 1; m.episodeNo = ep; m.planBlock = 2;
+            d.programmes.append(m);
+        }
+
+        PlanBlock cartoons; cartoons.id = 1; cartoons.name = "CARTOONS"; cartoons.minutes = 60;
+        PlanBlock news;     news.id     = 2; news.name     = "NEWS";     news.minutes     = 60;
+        DayPlan plan;
+        plan.name = "WEEKDAY";
+        plan.startsAtMinute = 6 * 60;
+        plan.blocks = { cartoons, news };
+        d.plans = { plan };
+
+        const QVector<Slot> s = generateSlots(d, base.toMSecsSinceEpoch());
+        check(!s.isEmpty(), "a planned channel builds a timeline");
+        check(contiguous(s), "with no hole in it");
+
+        QStringList aired;
+        for (const Slot &x : s)
+            if (x.kind == SlotKind::Programme) aired << x.ref;
+
+        check(aired.size() >= 4, "and airs several programmes");
+        check(aired.value(0).startsWith("cart"), "the first block airs its own show");
+        check(aired.value(1).startsWith("cart"), "for the whole hour it was given");
+        check(aired.value(2).startsWith("news"), "then the next block airs its own");
+        check(aired.value(3).startsWith("news"), "for its hour");
+
+        // The block boundary is the plan's, not whatever the episodes add up to.
+        qint64 firstNews = 0;
+        for (const Slot &x : s)
+            if (x.kind == SlotKind::Programme && x.ref.startsWith("news")) { firstNews = x.start; break; }
+        checkEq(firstNews, base.addSecs(3600).toMSecsSinceEpoch(),
+                "and starts on the hour the plan put it on");
+    }
+
+    section("generate: a block whose source gathered nothing holds the card");
+    {
+        const QDateTime base(QDate(2026, 9, 7), QTime(6, 0));
+
+        ChannelDef d = basicDef();
+        d.horizonHours = 3.0;
+        d.programmes.clear();
+        for (int ep = 1; ep <= 4; ++ep) {
+            MediaItem m = item(QStringLiteral("a-%1.mkv").arg(ep), 30 * 60000);
+            m.series = "ALPHA"; m.seasonNo = 1; m.episodeNo = ep; m.planBlock = 1;
+            d.programmes.append(m);
+        }
+
+        PlanBlock good;  good.id  = 1; good.name = "ALPHA"; good.minutes = 60;
+        PlanBlock empty; empty.id = 2; empty.name = "GONE";  empty.minutes = 60;
+        DayPlan plan;
+        plan.name = "WEEKDAY";
+        plan.startsAtMinute = 6 * 60;
+        plan.blocks = { good, empty };
+        d.plans = { plan };
+
+        const QVector<Slot> s = generateSlots(d, base.toMSecsSinceEpoch());
+        check(!s.isEmpty(), "the channel still builds");
+        check(contiguous(s), "with no hole where the empty block was");
+
+        // The empty hour is held, and the block after it still starts on time.
+        bool alphaAfterTheGap = false;
+        const qint64 twoHoursIn = base.addSecs(7200).toMSecsSinceEpoch();
+        for (const Slot &x : s)
+            if (x.kind == SlotKind::Programme && x.start >= twoHoursIn) alphaAfterTheGap = true;
+        check(alphaAfterTheGap, "and the plan comes round again on the clock");
+    }
+
     section("plans: a day is laid out as an ordered stack, with no gaps");
     {
         PlanBlock cartoons; cartoons.name = "CARTOONS"; cartoons.minutes = 180;

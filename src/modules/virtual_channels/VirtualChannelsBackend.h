@@ -89,6 +89,11 @@ public:
     // order, a selection is shuffled.
     Q_INVOKABLE bool set_channel_films_from(int channelNumber, const QString &from);
 
+    // A channel's day plans, as written. Public because it reads a channel
+    // object and returns plans -- it touches nothing else, and the alternative
+    // is testing the parser only through a whole generation.
+    static QVector<vchan::DayPlan> readPlans(const QJsonObject &channel);
+
     Q_INVOKABLE QVariantList list_logos();
     Q_INVOKABLE QString logos_dir() const { return m_dataRoot + QStringLiteral("/logos"); }
     Q_INVOKABLE QString logo_path(const QString &file) const;
@@ -270,6 +275,9 @@ private:
         // The picked series' own ids on their source. Preferred over the name:
         // a show renamed on the server keeps its id.
         QStringList showIds;
+        // Which block of a day plan this job gathers for, so the generator can
+        // tell afterwards which stretch each programme belongs to.
+        int planBlock = -1;
         QSet<QString> excludeSeasons;
         QSet<QString> excludeEpisodes;
         vchan::SlotSource src = vchan::SlotSource::Plex;

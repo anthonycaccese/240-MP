@@ -20,6 +20,10 @@ struct MediaItem {
     QString    desc;
     QString    art;
     int        pack = -1;
+    // Which block of a day plan this was gathered for, where a channel has
+    // plans. Tagged the same way `pack` tags break-pack membership, because the
+    // generator cannot tell by looking which collection an episode came from.
+    int        planBlock = -1;
     // When this first aired, as epoch ms; 0 when nothing could be learned.
     // Sources fall back from an episode's own date to its season's or show's
     // year, so "unknown" means the library really has nothing.
@@ -53,6 +57,9 @@ struct PlanBlock {
     // What the stretch draws on. The interface calls this the block's Type.
     enum class Draws { Series, Collection, Genre, Movie, Anything };
 
+    // Set when the channel is read, and unique across its plans: it is how a
+    // programme gathered for this block finds its way back to it.
+    int     id = -1;
     Draws   draws = Draws::Series;
     // The series, collection or genre named. Empty for Movie and Anything,
     // which draw on the channel's films and on everything respectively.

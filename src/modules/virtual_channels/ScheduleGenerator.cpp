@@ -373,14 +373,78 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         }
     };
 
+    // A day plan draws each stretch from the block it belongs to. The pool is
+    // grouped per block rather than per channel, because the same series can
+    // sit in two blocks and each has to keep its own turn -- and grouped by
+    // series within a block, so a block holding a collection takes turns
+    // through it the way an interleaved channel does.
+    struct BlockPool {
+        QVector<QVector<int>> groups;
+        QVector<QString>      keys;
+        QVector<int>          resume;
+        QVector<int>          taken;
+        qint64                turn = 0;
+    };
+    QHash<int, BlockPool> blockPools;
+    int activeBlock = -1;
+
+    if (!def.plans.isEmpty()) {
+        for (int i = 0; i < progCount; ++i) {
+            const int id = programmes[i].planBlock;
+            if (id < 0) continue;
+            BlockPool &bp = blockPools[id];
+            const QString name = programmes[i].series.trimmed();
+            const QString key  = name.isEmpty() ? unnamedSeriesKey() : name.toLower();
+            int at = bp.keys.indexOf(key);
+            if (at < 0) {
+                at = bp.keys.size();
+                bp.keys.append(key);
+                bp.groups.append(QVector<int>{});
+            }
+            bp.groups[at].append(i);
+        }
+        for (auto it = blockPools.begin(); it != blockPools.end(); ++it) {
+            BlockPool &bp = it.value();
+            bp.resume.fill(0, bp.groups.size());
+            bp.taken.fill(0, bp.groups.size());
+            for (int g = 0; g < bp.groups.size(); ++g) {
+                std::sort(bp.groups[g].begin(), bp.groups[g].end(), airedBefore);
+                // The series keeps one place wherever it airs, so moving a
+                // block around never restarts it.
+                const QString mark = def.marks.value(bp.keys[g]);
+                if (mark.isEmpty()) continue;
+                for (int k = 0; k < bp.groups[g].size(); ++k)
+                    if (programmes[bp.groups[g][k]].ref == mark) { bp.resume[g] = k + 1; break; }
+            }
+        }
+    }
+
+    const auto blockHasProgrammes = [&](int id) {
+        const auto it = blockPools.constFind(id);
+        return it != blockPools.constEnd() && !it->groups.isEmpty();
+    };
+
     const auto advanceProgramme = [&]() {
-        if (def.order == Ordering::Interleaved)
+        if (activeBlock >= 0) {
+            BlockPool &bp = blockPools[activeBlock];
+            if (!bp.groups.isEmpty()) {
+                ++bp.taken[int(bp.turn % bp.groups.size())];
+                ++bp.turn;
+            }
+        } else if (def.order == Ordering::Interleaved) {
             ++taken[int(rotation % groups.size())];
+        }
         ++placedHere;
         ++rotation;
     };
 
     const auto peekProgramme = [&]() -> const MediaItem & {
+        if (activeBlock >= 0) {
+            const BlockPool &bp = blockPools[activeBlock];
+            const int g = int(bp.turn % bp.groups.size());
+            const QVector<int> &turn = bp.groups[g];
+            return programmes[turn[(bp.resume[g] + bp.taken[g]) % turn.size()]];
+        }
         if (def.order == Ordering::Interleaved) {
             // One episode of each series in turn, then round again. Each series
             // holds its own place and wraps on its own, so a short run repeats
@@ -637,15 +701,41 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
 
     if (def.gridMinutes > 0) t = markAtOrBefore(startMs);
 
-    for (const Anchor &a : anchors) {
-        if (out.size() >= kMaxSlotsPerChannel) break;
-        if (a.start > t) fill(a.start, /*padRemainder*/ true);
-        if (t > a.start) continue;
+    if (!def.plans.isEmpty()) {
+        // A planned channel lays its day out block by block. Each stretch is
+        // filled from the block that owns it, and padded to its end, so the
+        // next block starts on the clock the plan put it on.
+        const QVector<PlanSpan> spans = planSpans(def.plans, startMs, horizonEnd);
+        for (const PlanSpan &sp : spans) {
+            if (out.size() >= kMaxSlotsPerChannel) break;
+            const qint64 until = qMin(sp.end, horizonEnd);
+            if (until <= t) continue;
+            if (sp.start > t) {
+                // A stretch no plan covers: the card holds it rather than the
+                // channel reading as off air.
+                activeBlock = -1;
+                placeFiller(qMin(sp.start, horizonEnd) - t);
+            }
+            // A block whose source gathered nothing is held by the card too,
+            // for exactly as long as the plan gave it.
+            activeBlock = blockHasProgrammes(sp.block.id) ? sp.block.id : -1;
+            if (activeBlock < 0) placeFiller(until - t);
+            else                 fill(until, /*padRemainder*/ true);
+            if (t < until) placeFiller(until - t);
+        }
+        activeBlock = -1;
+        if (t < horizonEnd) placeFiller(horizonEnd - t);
+    } else {
+        for (const Anchor &a : anchors) {
+            if (out.size() >= kMaxSlotsPerChannel) break;
+            if (a.start > t) fill(a.start, /*padRemainder*/ true);
+            if (t > a.start) continue;
 
-        t = a.start;
-        place(a.item, SlotKind::Programme);
+            t = a.start;
+            place(a.item, SlotKind::Programme);
+        }
+        fill(horizonEnd, /*padRemainder*/ false);
     }
-    fill(horizonEnd, /*padRemainder*/ false);
 
     if (endRotation) *endRotation = rotation;
     return out;

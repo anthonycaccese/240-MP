@@ -487,6 +487,74 @@ void testFilmsFromDecidesWhatAirs() {
             "and the film is offered again, exactly as it was");
 }
 
+void testPlansAreRead() {
+    section("Backend: a channel's day plans are read, and bad rows dropped");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+
+    QJsonObject good;
+    good["type"]    = QStringLiteral("series");
+    good["name"]    = QStringLiteral("Batman Beyond");
+    good["ref"]     = QStringLiteral("8324");
+    good["minutes"] = 120;
+
+    QJsonObject film;
+    film["type"]    = QStringLiteral("movie");
+    film["minutes"] = 90;
+
+    QJsonObject noLength;                       // a block of no length
+    noLength["type"] = QStringLiteral("series");
+    noLength["name"] = QStringLiteral("Nothing");
+    noLength["minutes"] = 0;
+
+    QJsonObject nameless;                       // a series block naming no series
+    nameless["type"] = QStringLiteral("series");
+    nameless["minutes"] = 60;
+
+    QJsonArray blocks;
+    blocks.append(good);
+    blocks.append(film);
+    blocks.append(noLength);
+    blocks.append(nameless);
+
+    QJsonObject plan;
+    plan["name"]      = QStringLiteral("WEEKDAY");
+    plan["starts_at"] = QStringLiteral("06:00");
+    plan["blocks"]    = blocks;
+    QJsonArray days;
+    for (int d = 1; d <= 5; ++d) days.append(d);
+    plan["days"] = days;
+
+    QJsonObject empty;                          // a plan with nothing in it
+    empty["name"] = QStringLiteral("EMPTY");
+    empty["blocks"] = QJsonArray();
+
+    QJsonArray plans;
+    plans.append(plan);
+    plans.append(empty);
+    ch["plans"] = plans;
+    fx.write(ch);
+
+    const QVector<vchan::DayPlan> read = VirtualChannelsBackend::readPlans(ch);
+
+    checkEq(read.size(), 1, "the empty plan is dropped, the usable one kept");
+    if (read.isEmpty()) return;
+
+    checkStr(read.first().name, QStringLiteral("WEEKDAY"), "by name");
+    checkEq(read.first().startsAtMinute, 6 * 60, "starting when it says");
+    checkEq(read.first().days.size(), 5, "on the days it names");
+    checkEq(read.first().blocks.size(), 2, "and only the two blocks that can air");
+    checkEq(read.first().totalMinutes(), 210, "adding up to what they run for");
+
+    check(read.first().blocks[0].id != read.first().blocks[1].id,
+          "each block has its own id, which is how its programmes find it again");
+    check(read.first().blocks[1].draws == vchan::PlanBlock::Draws::Movie,
+          "a movie block is read as one");
+    checkStr(read.first().blocks[0].ref, QStringLiteral("8324"),
+             "and a picked series keeps the id it was picked by");
+}
+
 void testSourceSwitchSticks() {
     section("Backend: switching a channel's source takes effect");
 
@@ -660,6 +728,7 @@ int runVirtualChannelsBackendTests() {
     testIdentsSurviveASeriesRewrite();
     testSeriesIdsAreKept();
     testMovieChannel();
+    testPlansAreRead();
     testFilmPoolEntries();
     testFilmAndShowListsAreSeparate();
     testFilmsFromDecidesWhatAirs();

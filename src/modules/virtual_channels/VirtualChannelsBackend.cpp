@@ -1123,6 +1123,60 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
         }
     }
 
+    // A channel with plans is told what to air by its blocks, so each one asks
+    // for what it names. The pool rows are not read: the plan replaces them,
+    // and reading both would air shows no row on the screen accounts for.
+    if (!def.plans.isEmpty()) {
+        const SlotSource src = sourceOf(channel);
+        QVector<PoolJob> planJobs;
+        for (const DayPlan &plan : std::as_const(def.plans)) {
+            for (const PlanBlock &b : plan.blocks) {
+                if (b.draws == PlanBlock::Draws::Anything) continue;   // everything already gathered
+
+                PoolJob job;
+                job.pool      = SlotKind::Programme;
+                job.src       = src;
+                job.planBlock = b.id;
+                job.anyFilm   = false;
+                job.wants     = MediaServerSource::Request::Wants::Episodes;
+
+                switch (b.draws) {
+                case PlanBlock::Draws::Series:
+                    job.match << b.name;
+                    if (!b.ref.isEmpty()) job.showIds << b.ref;
+                    break;
+                case PlanBlock::Draws::Collection:
+                    job.collections << b.name;
+                    if (isMovieChannel(channel))
+                        job.wants = MediaServerSource::Request::Wants::Films;
+                    break;
+                case PlanBlock::Draws::Genre:
+                    job.genres << b.name;
+                    job.wants = MediaServerSource::Request::Wants::Films;
+                    break;
+                case PlanBlock::Draws::Movie:
+                    job.wants = MediaServerSource::Request::Wants::Films;
+                    if (b.name.isEmpty()) job.anyFilm = true;
+                    else                  job.titles << b.name;
+                    break;
+                case PlanBlock::Draws::Anything:
+                    break;
+                }
+
+                const QJsonObject excl =
+                    channel.value(sourceBlockName(src)).toObject()
+                           .value(QLatin1String("exclude")).toObject();
+                for (const QJsonValue &v : excl.value(QLatin1String("seasons")).toArray())
+                    if (v.isString()) job.excludeSeasons.insert(v.toString());
+                for (const QString &ep : excludedEpisodesIn(excl))
+                    job.excludeEpisodes.insert(ep);
+
+                planJobs.append(job);
+            }
+        }
+        return planJobs;
+    }
+
     bool haveProgrammes = false;
     for (const PoolJob &j : std::as_const(jobs))
         if (j.pool == SlotKind::Programme) { haveProgrammes = true; break; }
@@ -1218,8 +1272,10 @@ void VirtualChannelsBackend::appendToPool(const PoolJob &job,
     switch (job.pool) {
     case SlotKind::Programme: {
         QVector<MediaItem> tagged = items;
-        if (job.pack >= 0 && job.pack < m_genDef.packs.size())
-            for (MediaItem &m : tagged) m.pack = job.pack;
+        for (MediaItem &m : tagged) {
+            if (job.pack >= 0 && job.pack < m_genDef.packs.size()) m.pack = job.pack;
+            m.planBlock = job.planBlock;
+        }
         m_genDef.programmes.append(tagged);
         return;
     }
@@ -1418,6 +1474,7 @@ void VirtualChannelsBackend::regenerate(int channelNumber) {
     def.order        = orderingFromString(o.value(QLatin1String("order")).toString());
     def.rotation     = rotationAt(channelNumber, nowMs());
     marksAt(channelNumber, nowMs(), &def.marks, &def.mark);
+    def.plans        = readPlans(o);
     def.adsPerBreak  = o.value(QLatin1String("ads_per_break")).toInt(0);
     {
         const int grid = o.value(QLatin1String("grid_minutes")).toInt(0);
@@ -3752,6 +3809,63 @@ bool VirtualChannelsBackend::usesEntryPools(const QJsonObject &o) {
     for (const QJsonValue &v : o.value(QLatin1String("programmes")).toArray())
         if (v.isObject()) return true;
     return false;
+}
+
+// A channel's day plans, as written. A plan or a block the file cannot make
+// sense of is dropped rather than refused: one bad row must not cost a viewer
+// the whole schedule.
+QVector<DayPlan> VirtualChannelsBackend::readPlans(const QJsonObject &channel) {
+    QVector<DayPlan> plans;
+    int nextId = 1;
+    for (const QJsonValue &pv : channel.value(QLatin1String("plans")).toArray()) {
+        if (!pv.isObject()) continue;
+        const QJsonObject po = pv.toObject();
+
+        DayPlan plan;
+        plan.name = po.value(QLatin1String("name")).toString();
+        for (const QJsonValue &dv : po.value(QLatin1String("days")).toArray()) {
+            const int d = dv.toInt(-1);
+            if (d >= 1 && d <= 7) plan.days.append(d);
+        }
+        const int grid = po.value(QLatin1String("grid_minutes")).toInt(30);
+        plan.gridMinutes = (grid >= kMinGridMinutes && grid <= kMaxGridMinutes) ? grid : 30;
+        const int startsAt = minuteOfDayFromString(po.value(QLatin1String("starts_at")).toString());
+        plan.startsAtMinute = startsAt >= 0 ? startsAt : 6 * 60;
+
+        for (const QJsonValue &bv : po.value(QLatin1String("blocks")).toArray()) {
+            if (!bv.isObject()) continue;
+            const QJsonObject bo = bv.toObject();
+
+            PlanBlock block;
+            block.id      = nextId++;
+            block.name    = bo.value(QLatin1String("name")).toString().trimmed();
+            block.ref     = bo.value(QLatin1String("ref")).toString().trimmed();
+            block.minutes = bo.value(QLatin1String("minutes")).toInt(0);
+
+            const QString type = bo.value(QLatin1String("type")).toString().trimmed().toLower();
+            if      (type == QLatin1String("collection")) block.draws = PlanBlock::Draws::Collection;
+            else if (type == QLatin1String("genre"))      block.draws = PlanBlock::Draws::Genre;
+            else if (type == QLatin1String("movie"))      block.draws = PlanBlock::Draws::Movie;
+            else if (type == QLatin1String("random")
+                     || type == QLatin1String("anything")) block.draws = PlanBlock::Draws::Anything;
+            else                                           block.draws = PlanBlock::Draws::Series;
+
+            if (!block.isValid()) {
+                qWarning("[VirtualChannels] dropping an unusable block in plan '%s'",
+                         qPrintable(plan.name));
+                continue;
+            }
+            plan.blocks.append(block);
+        }
+
+        if (!plan.isValid()) {
+            qWarning("[VirtualChannels] dropping plan '%s': nothing in it airs",
+                     qPrintable(plan.name));
+            continue;
+        }
+        plans.append(plan);
+    }
+    return plans;
 }
 
 bool VirtualChannelsBackend::isMovieChannel(const QJsonObject &channel) {
