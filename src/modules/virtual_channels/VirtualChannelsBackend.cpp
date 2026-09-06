@@ -1142,6 +1142,17 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
     if (!def.plans.isEmpty()) {
         const SlotSource src = sourceOf(channel);
         QVector<PoolJob> planJobs;
+
+        // A block's own bumpers are gathered like anything else, so the jobs
+        // that fetch them have to exist before the non-programme jobs are
+        // taken -- they are non-programme jobs themselves.
+        QHash<int, int> packOfBlock;
+        for (const DayPlan &plan : std::as_const(def.plans))
+            for (const PlanBlock &b : plan.blocks) {
+                const int pack = packForFolders(b.intros, b.outros, b.name);
+                if (pack >= 0) packOfBlock.insert(b.id, pack);
+            }
+
         // Everything but the programmes is still gathered: the channel's
         // breaks, and the clips a show's own bumpers point at. Only what airs
         // is the plan's to decide.
@@ -1150,6 +1161,12 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
         for (const DayPlan &plan : std::as_const(def.plans)) {
             for (const PlanBlock &b : plan.blocks) {
                 if (b.draws == PlanBlock::Draws::Anything) continue;   // everything already gathered
+                // A block with nothing chosen in it is a break: the card holds
+                // its time and it asks the server for nothing. Asking for a
+                // show with no name matches nothing, and a programme pool that
+                // draws nothing fails the whole channel -- so one blank block
+                // would take the other twenty off the air.
+                if (b.draws != PlanBlock::Draws::Movie && b.name.trimmed().isEmpty()) continue;
 
                 PoolJob job;
                 job.pool      = SlotKind::Programme;
@@ -1160,7 +1177,7 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                 // and out as itself. A channel written before blocks carried
                 // their own keeps working: the bumpers set against that show on
                 // its pool row are still found by name.
-                job.pack      = packForFolders(b.intros, b.outros, b.name);
+                job.pack      = packOfBlock.value(b.id, -1);
                 if (job.pack < 0)
                     job.pack  = packByName.value(b.name.trimmed().toLower(), -1);
                 job.wants     = MediaServerSource::Request::Wants::Episodes;
@@ -1755,21 +1772,35 @@ void VirtualChannelsBackend::onGenerationTick() {
     serverApptNext();
 }
 
+// One episode can reach the pool by more than one road -- picked as a series
+// and again inside a collection that holds the same show. A pool holding it
+// twice airs it twice as often as everything beside it, and the second copy
+// sits one place along, so a rebuild resuming after the first lands straight
+// back on it. The first arrival wins.
+//
+// Once per block, though, not once per channel: two blocks that draw on the
+// same collection each need their own copy, and a channel-wide sweep would
+// give every episode to whichever block asked first and leave the other
+// holding nothing -- which airs as the card, for as long as the block runs.
+// Nothing on a free-run channel belongs to a block, so there it is unchanged.
+QVector<MediaItem>
+VirtualChannelsBackend::keepEachProgrammeOnce(const QVector<MediaItem> &programmes) {
+    QSet<QString> seen;
+    QVector<MediaItem> once;
+    once.reserve(programmes.size());
+    for (const MediaItem &m : programmes) {
+        if (m.ref.isEmpty()) { once.append(m); continue; }
+        const QString key = QString::number(m.planBlock) + QLatin1Char('\x1f') + m.ref;
+        if (seen.contains(key)) continue;
+        seen.insert(key);
+        once.append(m);
+    }
+    return once;
+}
+
 void VirtualChannelsBackend::finishLocalGeneration() {
-    // One episode can reach the pool by more than one road -- picked as a
-    // series and again inside a collection that holds the same show. A pool
-    // holding it twice airs it twice as often as everything beside it, and
-    // the second copy sits one place along, so a rebuild resuming after the
-    // first lands straight back on it. The first arrival wins.
     {
-        QSet<QString> seen;
-        QVector<MediaItem> once;
-        once.reserve(m_genDef.programmes.size());
-        for (const MediaItem &m : std::as_const(m_genDef.programmes)) {
-            if (!m.ref.isEmpty() && seen.contains(m.ref)) continue;
-            if (!m.ref.isEmpty()) seen.insert(m.ref);
-            once.append(m);
-        }
+        const QVector<MediaItem> once = keepEachProgrammeOnce(m_genDef.programmes);
         if (once.size() != m_genDef.programmes.size())
             qInfo("[VirtualChannels] channel %d: %lld programme(s) reached the pool "
                   "more than once and were kept once",

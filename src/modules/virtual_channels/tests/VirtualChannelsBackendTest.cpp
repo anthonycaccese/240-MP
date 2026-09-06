@@ -568,6 +568,100 @@ void testPlansAreRead() {
              "and a picked series keeps the id it was picked by");
 }
 
+// A day is laid out with gaps in it -- a block put there to hold the morning
+// so the lineup starts in the evening. Such a block names nothing, and asking
+// a server for a show with no name matches nothing. A programme pool that
+// draws nothing fails the whole channel, so one held morning would take the
+// whole evening off the air with it.
+void testBlankBlocksGatherNothing() {
+    section("Backend: a block with nothing in it asks the server for nothing");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["schedule"] = QStringLiteral("day_plan");
+
+    QJsonObject held;                       // holds the morning, plays nothing
+    held["type"]    = QStringLiteral("series");
+    held["minutes"] = 1080;
+
+    QJsonObject show;
+    show["type"]    = QStringLiteral("series");
+    show["name"]    = QStringLiteral("Samurai Jack");
+    show["ref"]     = QStringLiteral("15087");
+    show["minutes"] = 60;
+
+    QJsonObject anyFilm;                    // a movie block names no film on purpose
+    anyFilm["type"]    = QStringLiteral("movie");
+    anyFilm["minutes"] = 150;
+
+    QJsonArray blocks;
+    blocks.append(held);
+    blocks.append(show);
+    blocks.append(anyFilm);
+
+    QJsonObject plan;
+    plan["name"]   = QStringLiteral("SATURDAY");
+    plan["days"]   = QJsonArray{ 6 };
+    plan["blocks"] = blocks;
+    ch["plans"]    = QJsonArray{ plan };
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+    vchan::ChannelDef def;
+    def.plans = VirtualChannelsBackend::readPlans(ch);
+    const QVector<VirtualChannelsBackend::PoolJob> jobs = b.readPools(ch, def);
+
+    int programmes = 0, named = 0, films = 0;
+    for (const VirtualChannelsBackend::PoolJob &j : jobs) {
+        if (j.pool != vchan::SlotKind::Programme) continue;
+        ++programmes;
+        if (j.anyFilm) ++films;
+        for (const QString &m : j.match) if (!m.trimmed().isEmpty()) ++named;
+        for (const QString &m : j.match)
+            check(!m.trimmed().isEmpty(), "no job asks for a show with no name");
+    }
+    checkEq(programmes, 2, "the held block asks for nothing; the show and the film still do");
+    checkEq(named, 1, "one job names a show");
+    checkEq(films, 1, "and one takes any film, which is what a movie block with no film means");
+}
+
+// An episode picked twice over should air once -- but two blocks that draw on
+// the same collection are not the same road twice. Sweeping the channel would
+// hand every episode to whichever block asked first and leave the other with
+// nothing to play, which airs as the card for as long as that block runs.
+void testProgrammesAreKeptOncePerBlock() {
+    section("Backend: a programme is kept once, and once per block");
+
+    const auto ep = [](const QString &ref, int block) {
+        vchan::MediaItem m;
+        m.ref  = ref;
+        m.planBlock = block;
+        return m;
+    };
+
+    QVector<vchan::MediaItem> in;
+    in << ep(QStringLiteral("101"), -1) << ep(QStringLiteral("101"), -1)
+       << ep(QStringLiteral("102"), -1);
+    QVector<vchan::MediaItem> out = VirtualChannelsBackend::keepEachProgrammeOnce(in);
+    checkEq(out.size(), 2, "on a channel with no blocks, the second copy goes");
+
+    in.clear();
+    in << ep(QStringLiteral("101"), 1) << ep(QStringLiteral("102"), 1)
+       << ep(QStringLiteral("101"), 2) << ep(QStringLiteral("102"), 2);
+    out = VirtualChannelsBackend::keepEachProgrammeOnce(in);
+    checkEq(out.size(), 4, "two blocks drawing the same collection each keep their own");
+
+    in.clear();
+    in << ep(QStringLiteral("101"), 3) << ep(QStringLiteral("101"), 3);
+    out = VirtualChannelsBackend::keepEachProgrammeOnce(in);
+    checkEq(out.size(), 1, "but one block still holds it only once");
+
+    in.clear();
+    in << ep(QString(), 1) << ep(QString(), 1);
+    out = VirtualChannelsBackend::keepEachProgrammeOnce(in);
+    checkEq(out.size(), 2, "a programme with no id is not a duplicate of another with none");
+}
+
 void testPlansRoundTrip() {
     section("Backend: plans survive being read out and handed back");
 
@@ -867,6 +961,8 @@ int runVirtualChannelsBackendTests() {
     testSeriesIdsAreKept();
     testMovieChannel();
     testPlansAreRead();
+    testBlankBlocksGatherNothing();
+    testProgrammesAreKeptOncePerBlock();
     testPlansRoundTrip();
     testFilmPoolEntries();
     testFilmAndShowListsAreSeparate();

@@ -94,6 +94,42 @@ public:
     // is testing the parser only through a whole generation.
     static QVector<vchan::DayPlan> readPlans(const QJsonObject &channel);
 
+    // The channel's programmes with each one kept once -- once per block on a
+    // channel laid out in blocks. Public so the rule can be tested on a list
+    // rather than through a whole generation.
+    static QVector<vchan::MediaItem>
+    keepEachProgrammeOnce(const QVector<vchan::MediaItem> &programmes);
+
+    struct PoolJob {
+        vchan::SlotKind pool = vchan::SlotKind::Programme;
+        int  apptIndex = -1;
+        int  pack = -1;
+        vchan::MediaServerSource::Request::Wants wants =
+            vchan::MediaServerSource::Request::Wants::Episodes;
+
+        QString library;
+        QStringList titles;
+        QStringList genres;
+        QStringList collections;
+        QStringList playlists;
+        bool anyFilm = true;
+        QStringList match;
+        // The picked series' own ids on their source. Preferred over the name:
+        // a show renamed on the server keeps its id.
+        QStringList showIds;
+        // Which block of a day plan this job gathers for, so the generator can
+        // tell afterwards which stretch each programme belongs to.
+        int planBlock = -1;
+        QSet<QString> excludeSeasons;
+        QSet<QString> excludeEpisodes;
+        vchan::SlotSource src = vchan::SlotSource::Plex;
+    };
+    // What a channel asks its source for, worked out from its pools and its
+    // blocks. Public for the same reason readPlans is: it reads a channel
+    // object and returns jobs, and the alternative is testing it only through
+    // a whole generation against a live server.
+    QVector<PoolJob> readPools(const QJsonObject &channel, vchan::ChannelDef &def) const;
+
     // The plans as the screens want them: a list of maps, each with a name,
     // the days it runs, where it starts, and its blocks in order.
     // "free" (the grid decides, as today) or "day_plan". A channel switched
@@ -270,34 +306,9 @@ private:
     QStringList m_pgSeasons;
     QVector<vchan::MediaItem> m_pgEpisodes;
 
-    struct PoolJob {
-        vchan::SlotKind pool = vchan::SlotKind::Programme;
-        int  apptIndex = -1;
-        int  pack = -1;
-        vchan::MediaServerSource::Request::Wants wants =
-            vchan::MediaServerSource::Request::Wants::Episodes;
-
-        QString library;
-        QStringList titles;
-        QStringList genres;
-        QStringList collections;
-        QStringList playlists;
-        bool anyFilm = true;
-        QStringList match;
-        // The picked series' own ids on their source. Preferred over the name:
-        // a show renamed on the server keeps its id.
-        QStringList showIds;
-        // Which block of a day plan this job gathers for, so the generator can
-        // tell afterwards which stretch each programme belongs to.
-        int planBlock = -1;
-        QSet<QString> excludeSeasons;
-        QSet<QString> excludeEpisodes;
-        vchan::SlotSource src = vchan::SlotSource::Plex;
-    };
     static bool bookingWants(const PoolJob &job, const QString &title,
                              const QStringList &genres = QStringList());
     void appendToPool(const PoolJob &job, const QVector<vchan::MediaItem> &items);
-    QVector<PoolJob> readPools(const QJsonObject &channel, vchan::ChannelDef &def) const;
     static QVector<QPair<vchan::SlotKind, const char *>> poolFields();
     QVector<PoolJob> m_pgApptJobs;
     int              m_pgApptCursor = 0;
