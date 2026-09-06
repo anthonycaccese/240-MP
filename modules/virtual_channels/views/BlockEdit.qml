@@ -39,6 +39,10 @@ FocusScope {
     // has no collections and no genres, so offering them here would open a
     // picker with nothing in it and leave a block that airs nothing.
     property var cfg: ({})
+    // Plex calls a film's genres its categories, the same as every other screen
+    // that offers them.
+    readonly property string genreWordOne: cfg.source === "plex" ? "Category" : "Genre"
+
     readonly property var types: {
         if (cfg.source === "local") return ["series", "movie", "random"]
         return ["series", "collection", "genre", "movie", "random"]
@@ -77,7 +81,7 @@ FocusScope {
 
     function typeLabel(t) {
         if (t === "collection") return "COLLECTION"
-        if (t === "genre")      return "GENRE"
+        if (t === "genre")      return genreWordOne.toUpperCase()
         if (t === "movie")      return "MOVIE"
         if (t === "random")     return "RANDOM"
         return "SERIES"
@@ -161,7 +165,9 @@ FocusScope {
             if (!block) return ""
             if (block.type === "series")     return "One show, playing until the block's time is up."
             if (block.type === "collection") return "A collection, taking turns through the shows in it."
-            if (block.type === "genre")      return "Every film of this genre, so the block follows the library as it grows."
+            if (block.type === "genre")      return "Every film of this "
+                                                    + genreWordOne.toLowerCase()
+                                                    + ", so the block follows the library as it grows."
             if (block.type === "movie")      return "A film. Long enough for one, and the rest of the day starts where it ends."
             return "Anything this channel has gathered."
         case "source":  return block && block.name === ""

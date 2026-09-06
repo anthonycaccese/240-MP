@@ -30,7 +30,11 @@ FocusScope {
     property var match: []
     property int criteria: 0
     property string source: "plex"
-    readonly property string genreWord: source === "plex" ? "Categories" : "Genres"
+    // Plex calls a film's genres its categories, so on Plex this screen does
+    // too. Both forms are spelled out: taking the last letter off "Categories"
+    // gives "Categorie", which is what one of them used to read as.
+    readonly property string genreWord:    source === "plex" ? "Categories" : "Genres"
+    readonly property string genreWordOne: source === "plex" ? "Category"   : "Genre"
     property string folder: ""
     property string status: ""
     property bool armedToDelete: false
@@ -106,7 +110,9 @@ FocusScope {
         if (criteria === 0) return anyFilm ? "ANY MOVIE" : "NOTHING YET"
         var bits = []
         if (films > 0)            bits.push(countText(films, "MOVIE", "MOVIES"))
-        if (genres.length > 0)    bits.push(countText(genres.length, "GENRE", "GENRES"))
+        if (genres.length > 0)    bits.push(countText(genres.length,
+                                                      genreWordOne.toUpperCase(),
+                                                      genreWord.toUpperCase()))
         if (collections.length > 0) bits.push(countText(collections.length, "SET", "SETS"))
         if (playlists.length > 0)   bits.push(countText(playlists.length, "LIST", "LISTS"))
         if (match.length > 0)     bits.push(match.join(" / ").toUpperCase())
@@ -159,7 +165,7 @@ FocusScope {
         case "anyfilm":     return editRoot.anyFilm ? "ON" : "OFF"
         case "films":       return editRoot.countText(editRoot.films, "MOVIE", "MOVIES")
         case "genres":      return editRoot.countText(editRoot.genres.length,
-                                                       editRoot.genreWord.toUpperCase().slice(0, -1),
+                                                       editRoot.genreWordOne.toUpperCase(),
                                                        editRoot.genreWord.toUpperCase())
         case "collections": return editRoot.countText(editRoot.collections.length, "SET", "SETS")
         case "playlists":   return editRoot.countText(editRoot.playlists.length, "LIST", "LISTS")
@@ -184,7 +190,7 @@ FocusScope {
                                  + ". Movies picked by name, plus anything in the folder below.")
                               : ("Draws on: " + editRoot.poolSummary()
                                  + ". Pick movies by name; anything ticked anywhere can air.")
-        case "genres": return "Draw on a whole " + (editRoot.source === "plex" ? "category" : "genre")
+        case "genres": return "Draw on a whole " + editRoot.genreWordOne.toLowerCase()
                               + " — every horror movie, say — rather than named titles."
         case "collections": return "Draw on a collection. Smart collections work too — everything in it becomes eligible."
         case "playlists":   return "Draw on a playlist. Smart playlists work too — everything in it becomes eligible."

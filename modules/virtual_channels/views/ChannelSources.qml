@@ -117,6 +117,12 @@ FocusScope {
     readonly property int  planCount: cfg.planCount !== undefined ? cfg.planCount : 0
     readonly property bool fromPlaylist: cfg.filmsFrom === "playlist"
 
+    // Plex calls a film's genres its categories. The screens follow whichever
+    // source the channel is on, so what the viewer reads here is what they read
+    // on the server they picked it from.
+    readonly property string genreWord:    cfg.source === "plex" ? "Categories" : "Genres"
+    readonly property string genreWordOne: cfg.source === "plex" ? "Category"   : "Genre"
+
     readonly property var gridChoices: [0, 15, 30, 60]
 
     function reload() {
@@ -186,7 +192,7 @@ FocusScope {
         case "kind":         return "Type"
         case "filmsfrom":    return "Films From"
         case "films":        return "Films"
-        case "genres":       return "Genres"
+        case "genres":       return sourcesRoot.genreWord
         case "series":       return "Series"
         case "collections":  return "Collections"
         case "playlists":    return "Playlists"
@@ -217,7 +223,7 @@ FocusScope {
             var g = countOf("genres")
             if (g === 0) return "NONE"
             return g === 1 ? String((cfg.genres || [])[0]).toUpperCase()
-                           : g + " GENRES"
+                           : g + " " + sourcesRoot.genreWord.toUpperCase()
         }
         case "series": {
             var n = countOf("match")
@@ -286,9 +292,12 @@ FocusScope {
                                    : "A channel of programs from series. Films go in Movie Slots, at a time you choose."
         case "filmsfrom":   return sourcesRoot.fromPlaylist
                                    ? "A playlist kept on " + server + ", aired in the order you put it in. Change it there and this channel follows on its next rebuild."
-                                   : "Films you pick, by name, by genre, or a collection at a time. They air shuffled."
+                                   : "Films you pick, by name, by "
+                                     + sourcesRoot.genreWordOne.toLowerCase()
+                                     + ", or a collection at a time. They air shuffled."
         case "films":       return "Films picked one at a time from " + server + "."
-        case "genres":      return "Every film on " + server + " of these genres. Add a genre and the channel follows the library as it grows."
+        case "genres":      return "Every film on " + server + " of these "
+                                   + sourcesRoot.genreWord.toLowerCase() + ". Add one and the channel follows the library as it grows."
         case "logo":        return "The mark this channel flies in the corner. Its size and position are under Channel Logo in Channels settings."
         case "order":       return sourcesRoot.order === "shuffle"
                                    ? "Series take turns, and everything plays once before anything repeats."
