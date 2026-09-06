@@ -136,7 +136,11 @@ public:
     // away from its plans keeps them, unread, the way it keeps its slots.
     Q_INVOKABLE bool set_channel_schedule(int channelNumber, const QString &schedule);
 
-    Q_INVOKABLE QVariantList channel_plans(int channelNumber);
+    // withCounts walks the media folder to count each block's own bumper
+    // clips. Only the screen that shows the count asks for it: the screen
+    // that lays out a day re-reads the plans on every move, and counting
+    // on each of those is a directory listing per block for nothing.
+    Q_INVOKABLE QVariantList channel_plans(int channelNumber, bool withCounts = false);
     // Written back whole. The screens hold the list they were given, change one
     // thing in it and hand it back, which is how the pool editor already works.
     Q_INVOKABLE bool set_channel_plans(int channelNumber, const QVariantList &plans);

@@ -89,7 +89,10 @@ FocusScope {
             r.push("slots")
             r.push("order")
         }
-        if (sourcesRoot.gridMinutes === 0 || onADayPlan) r.push("ads")
+        // How much plays between programmes is only this row's to say when
+        // nothing else is deciding it. On a clock the gap decides, whether
+        // the channel is on blocks or not.
+        if (sourcesRoot.gridMinutes === 0) r.push("ads")
         r.push("breaks")
         r.push("logo")
         r.push("rebuild")
@@ -163,6 +166,16 @@ FocusScope {
         return total
     }
 
+    // Clips a server holds, which cannot be counted without asking it.
+    function interstitialFromServer() {
+        var total = 0
+        for (var i = 0; i < interstitials.length; i++) {
+            var n = interstitials[i].server
+            total += (n === undefined ? 0 : n)
+        }
+        return total
+    }
+
     function excludedCount() {
         return (cfg.excludedSeasons || []).length + (cfg.excludedEpisodes || []).length
     }
@@ -225,9 +238,12 @@ FocusScope {
         case "breaks": {
             var n = sourcesRoot.interstitialCount()
             if (n > 0) return n + " CLIPS"
-            var src = sourcesRoot.interstitialSources()
-            return src === 0 ? "NONE"
-                             : src + (src === 1 ? " SOURCE" : " SOURCES")
+            // Nothing counted. If a server holds some, they could not be
+            // counted from here; if not, the folders really are empty, and
+            // saying how many of them there are would read as content.
+            if (sourcesRoot.interstitialFromServer() > 0)
+                return sourcesRoot.interstitialSources() + " SOURCES"
+            return sourcesRoot.interstitialSources() === 0 ? "NONE" : "0 CLIPS"
         }
         case "order":
             return sourcesRoot.order === "shuffle" ? "SHUFFLE"
@@ -265,6 +281,8 @@ FocusScope {
         case "slots":       return "Movies at fixed times, each drawing on its own set of movies."
         case "kind":        return sourcesRoot.isMovies
                                    ? "A channel of films, one after another. No movie slots: every program is already a film."
+                                 : sourcesRoot.onADayPlan
+                                   ? "A channel of programs from series. A film goes in a block of its own."
                                    : "A channel of programs from series. Films go in Movie Slots, at a time you choose."
         case "filmsfrom":   return sourcesRoot.fromPlaylist
                                    ? "A playlist kept on " + server + ", aired in the order you put it in. Change it there and this channel follows on its next rebuild."
@@ -282,7 +300,7 @@ FocusScope {
                                  : sourcesRoot.gridMinutes === 0
                                    ? "Free run: each program starts when the last one ended."
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
-        case "ads":         return "How many things play between programs. Free run only — on a clock the gap decides."
+        case "ads":         return "How many things play between programs, after the outro."
         case "breaks":      return "What plays between programs: intros, bumps, commercials and outros."
         case "rebuild":     return "Build the schedule so source changes actually air."
         case "rename":      return "Change what this channel is called."

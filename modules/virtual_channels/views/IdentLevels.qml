@@ -90,8 +90,15 @@ FocusScope {
         if (!virtualChannelsBackend) return { sources: 0, clips: 0 }
         var list = virtualChannelsBackend.channel_pool(channelNumber, kind) || []
         var n = 0
-        for (var i = 0; i < list.length; i++) if (list[i].count >= 0) n += list[i].count
-        return { sources: list.length, clips: n }
+        var unknown = 0
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].count >= 0) n += list[i].count
+            else                    unknown++
+        }
+        // `unknown` is what a server holds, which cannot be counted from here.
+        // Without it, a folder that turned out to be empty and a server that
+        // has not been asked look identical, and only one of them plays.
+        return { sources: list.length, clips: n, unknown: unknown }
     }
 
     function labelFor(i) {
@@ -107,7 +114,14 @@ FocusScope {
             return c.clips + (c.clips === 1 ? " CLIP" : " CLIPS")
         }
         var e = showAt(i)
-        if (ownFolders(e).length === 0) return "USES DEFAULT"
+        if (ownFolders(e).length === 0) {
+            // The same words the screens behind this one use for the same
+            // thing. And where the channel's own pool is empty, falling back to
+            // it plays nothing, which is worth saying here rather than leaving
+            // to be worked out from the row above.
+            var c = channelClips()
+            return (c.clips === 0 && c.unknown === 0) ? "NOTHING" : "CHANNEL'S"
+        }
         if (levelsRoot.onBlocks) return "OWN"
         var n = e[levelsRoot.kind + "_count"]
         if (n === undefined || n === null || n < 0) return "OWN"
@@ -120,9 +134,13 @@ FocusScope {
         var e = showAt(i)
         if (!e) return ""
         var who = String(e.short !== undefined ? e.short : e.name)
-        return ownFolders(e).length === 0
-               ? who + " uses the default above."
-               : who + " has its own " + kindWord + ", so the default is not used for it."
+        if (ownFolders(e).length === 0) {
+            var cc = channelClips()
+            return (cc.clips === 0 && cc.unknown === 0)
+                   ? who + " has no " + kindWord + " of its own, and the row above sets none either, so nothing plays."
+                   : who + " plays what the row above sets."
+        }
+        return who + " has its own " + kindWord + ", so the default is not used for it."
     }
 
     function cycles(i) { return false }

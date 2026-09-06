@@ -19,6 +19,12 @@ Item {
     property var secondaryFor: function(i) { return "" }
 
     property string status: ""
+    // A result belongs to the row that produced it. It sits in the same place
+    // as the help, so leaving it up means every row after it explains nothing;
+    // moving away puts the help back, and coming back shows the result again.
+    property int statusRow: -1
+    onStatusChanged: statusRow = current
+    readonly property bool showingStatus: status !== "" && statusRow === current
     property bool busy: false
     property string emptyText: ""
 
@@ -206,7 +212,7 @@ Item {
         clip: true
 
         Text {
-            text: optionList.status !== "" ? optionList.status
+            text: optionList.showingStatus ? optionList.status
                                            : optionList.helpFor(optionList.current)
             color: root.primaryColor
             font.family: root.globalFont

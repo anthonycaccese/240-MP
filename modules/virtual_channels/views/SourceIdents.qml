@@ -39,7 +39,7 @@ FocusScope {
 
     function reload() {
         if (onABlock) {
-            var plans = virtualChannelsBackend.channel_plans(channelNumber)
+            var plans = virtualChannelsBackend.channel_plans(channelNumber, true)
             var blocks = (planIndex < plans.length ? (plans[planIndex].blocks || []) : [])
             entry = blockIndex < blocks.length ? blocks[blockIndex] : ({})
             return
@@ -96,9 +96,12 @@ FocusScope {
         return ""
     }
 
+    // Used inside a sentence, where the help bar wraps, so the name is not cut
+    // short: a title trailing off mid-clause reads as a fault rather than as
+    // a title that happens to be long.
     function shortName() {
-        var n = String(entryName)
-        return n === "" ? "this source" : (n.length > 22 ? n.substring(0, 22) + "…" : n)
+        var n = String(entryName).trim()
+        return n === "" ? "this source" : n
     }
 
     function cycles(i) { return false }

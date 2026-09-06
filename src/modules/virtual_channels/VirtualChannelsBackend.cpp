@@ -3373,7 +3373,11 @@ QVariantList VirtualChannelsBackend::channel_interstitials(int channelNumber) {
                                {"count", count},
                                // A server's clips are not on disk to be counted,
                                // so they are reported as sources instead of
-                               // vanishing from the total.
+                               // vanishing from the total. Reported on their own
+                               // as well, because a folder that holds nothing is
+                               // a counted nothing, and saying "a source" of it
+                               // reads as content that is not there.
+                               {"server", fromServer},
                                {"sources", folders.size() + fromServer}});
     }
     return out;
@@ -3952,7 +3956,7 @@ QString drawsToString(PlanBlock::Draws d) {
 
 }  // namespace
 
-QVariantList VirtualChannelsBackend::channel_plans(int channelNumber) {
+QVariantList VirtualChannelsBackend::channel_plans(int channelNumber, bool withCounts) {
     QVariantList out;
     const QJsonObject o = QJsonObject::fromVariantMap(channelObject(channelNumber));
     for (const DayPlan &p : readPlans(o)) {
@@ -3974,6 +3978,18 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber) {
             m["minutes"] = b.minutes;
             m["intros"]  = QVariant(b.intros);
             m["outros"]  = QVariant(b.outros);
+            // Counted the same way a pool row's are, so the screen that sets
+            // them can say how many clips a folder holds -- and can say when it
+            // holds none, which otherwise looks the same as working.
+            const auto clipsIn = [this](const QStringList &folders) {
+                int n = 0;
+                for (const QString &f : folders) n += mediaFilesUnder(f).size();
+                return n;
+            };
+            if (withCounts) {
+                m["intros_count"] = b.intros.isEmpty() ? -1 : clipsIn(b.intros);
+                m["outros_count"] = b.outros.isEmpty() ? -1 : clipsIn(b.outros);
+            }
             // The start each block falls on, so the screen can show a time it
             // never has to be told.
             const int mins = int((at / 60000LL) % (24 * 60));
