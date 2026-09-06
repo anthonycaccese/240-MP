@@ -426,6 +426,110 @@ int runScheduleGeneratorTests() {
                  "a rebuild carries on after the film it last aired");
     }
 
+    section("plans: a day is laid out as an ordered stack, with no gaps");
+    {
+        PlanBlock cartoons; cartoons.name = "CARTOONS"; cartoons.minutes = 180;
+        PlanBlock reruns;   reruns.name   = "RERUNS";   reruns.minutes   = 240;
+        PlanBlock film;     film.draws = PlanBlock::Draws::Movie; film.minutes = 90;
+
+        DayPlan weekday;
+        weekday.name = "WEEKDAY";
+        weekday.startsAtMinute = 6 * 60;
+        weekday.blocks = { cartoons, reruns, film };
+
+        check(weekday.isValid(), "a plan with blocks in it is valid");
+        checkEq(weekday.totalMinutes(), 510, "and knows how long it runs");
+
+        const QDateTime from(QDate(2026, 9, 7), QTime(6, 0));       // a Monday
+        const QVector<PlanSpan> spans =
+            planSpans({ weekday }, from.toMSecsSinceEpoch(),
+                      from.addSecs(12 * 3600).toMSecsSinceEpoch());
+
+        check(!spans.isEmpty(), "the plan lays against the clock");
+        checkStr(spans.first().block.name, QStringLiteral("CARTOONS"),
+                 "the first block starts the day");
+        checkEq(spans.first().start, from.toMSecsSinceEpoch(),
+                "at the hour the plan says");
+
+        // Contiguous by construction: this is the property the whole model
+        // rests on, so it is the one worth asserting.
+        bool contiguousSpans = true;
+        for (int i = 1; i < spans.size(); ++i)
+            if (spans[i].start != spans[i - 1].end) contiguousSpans = false;
+        check(contiguousSpans, "and every block starts where the last one ended");
+
+        checkEq(spans[1].start - spans[0].start, qint64(180 * 60000),
+                "a block runs for exactly the minutes it was given");
+    }
+
+    section("plans: the blocks repeat rather than leaving the day short");
+    {
+        PlanBlock only; only.name = "ONE SHOW"; only.minutes = 120;
+        DayPlan plan;
+        plan.name = "SHORT";
+        plan.startsAtMinute = 0;
+        plan.blocks = { only };
+
+        const QDateTime from(QDate(2026, 9, 7), QTime(0, 0));
+        const QVector<PlanSpan> spans =
+            planSpans({ plan }, from.toMSecsSinceEpoch(),
+                      from.addSecs(12 * 3600).toMSecsSinceEpoch());
+
+        check(spans.size() >= 6, "two hours of plan covers twelve hours of clock");
+        bool allTheSame = true;
+        for (const PlanSpan &s : spans)
+            if (s.block.name != QLatin1String("ONE SHOW")) allTheSame = false;
+        check(allTheSame, "by coming round again, not by stretching");
+    }
+
+    section("plans: a day nobody planned for is left alone");
+    {
+        PlanBlock b; b.name = "WEEKEND FILM"; b.minutes = 120;
+        DayPlan weekend;
+        weekend.name = "WEEKEND";
+        weekend.days = { 6, 7 };                       // Saturday and Sunday
+        weekend.startsAtMinute = 9 * 60;
+        weekend.blocks = { b };
+
+        const QDateTime monday(QDate(2026, 9, 7), QTime(10, 0));
+        check(planSpans({ weekend }, monday.toMSecsSinceEpoch(),
+                        monday.addSecs(6 * 3600).toMSecsSinceEpoch()).isEmpty(),
+              "a weekend plan lays nothing across a Monday");
+
+        const QDateTime saturday(QDate(2026, 9, 12), QTime(10, 0));
+        check(!planSpans({ weekend }, saturday.toMSecsSinceEpoch(),
+                         saturday.addSecs(6 * 3600).toMSecsSinceEpoch()).isEmpty(),
+              "and covers the Saturday it was written for");
+    }
+
+    section("plans: what cannot be laid out yields nothing rather than spinning");
+    {
+        checkEq(planSpans({}, 1000, 2000).size(), 0, "no plans at all");
+
+        DayPlan empty;
+        empty.name = "EMPTY";
+        check(!empty.isValid(), "a plan with no blocks is not valid");
+        checkEq(planSpans({ empty }, 1000, 2000).size(), 0, "and lays out nothing");
+
+        PlanBlock nameless;                    // a series block naming no series
+        nameless.minutes = 60;
+        check(!nameless.isValid(), "a series block with no series is not valid");
+
+        PlanBlock zero; zero.name = "X"; zero.minutes = 0;
+        check(!zero.isValid(), "nor is a block of no length");
+
+        DayPlan onlyBad;
+        onlyBad.name = "BAD";
+        onlyBad.blocks = { nameless, zero };
+        checkEq(planSpans({ onlyBad }, 1000, 2000).size(), 0,
+                "a plan of nothing but unusable blocks lays out nothing");
+
+        const QDateTime from(QDate(2026, 9, 7), QTime(6, 0));
+        checkEq(planSpans({ onlyBad }, from.toMSecsSinceEpoch(),
+                          from.addSecs(48 * 3600).toMSecsSinceEpoch()).size(), 0,
+                "over two days as well, without hanging");
+    }
+
     section("generate: broadcast holds its place when the pool changes");
     {
         ChannelDef d = basicDef();

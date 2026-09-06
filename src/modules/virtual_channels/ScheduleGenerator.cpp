@@ -88,6 +88,92 @@ qint64 airedAtMs(const QString &isoDate, const QVariant &yearValue) {
     return 0;
 }
 
+bool PlanBlock::isValid() const {
+    if (minutes <= 0) return false;
+    // A block that names nothing can still be valid: Movie draws on the
+    // channel's films and Anything on everything it has.
+    if (draws == Draws::Movie || draws == Draws::Anything) return true;
+    return !name.trimmed().isEmpty() || !ref.trimmed().isEmpty();
+}
+
+bool DayPlan::airsOn(int qtDayOfWeek) const {
+    return days.isEmpty() || days.contains(qtDayOfWeek);
+}
+
+int DayPlan::totalMinutes() const {
+    int total = 0;
+    for (const PlanBlock &b : blocks)
+        if (b.isValid()) total += b.minutes;
+    return total;
+}
+
+bool DayPlan::isValid() const {
+    if (startsAtMinute < 0 || startsAtMinute >= 24 * 60) return false;
+    return totalMinutes() > 0;
+}
+
+QVector<PlanSpan> planSpans(const QVector<DayPlan> &plans, qint64 fromMs, qint64 toMs) {
+    QVector<PlanSpan> spans;
+    if (plans.isEmpty() || toMs <= fromMs) return spans;
+
+    // Start a day early: the day whose plan begins before `fromMs` is the one
+    // airing at `fromMs`, so a channel tuned at two in the morning gets the
+    // plan that started the previous teatime rather than nothing.
+    QDate day = QDateTime::fromMSecsSinceEpoch(fromMs).date().addDays(-1);
+    const QDate lastDay = QDateTime::fromMSecsSinceEpoch(toMs).date().addDays(1);
+
+    while (day <= lastDay && spans.size() < kMaxSlotsPerChannel) {
+        const DayPlan *plan = nullptr;
+        for (const DayPlan &p : plans) {
+            if (!p.isValid() || !p.airsOn(day.dayOfWeek())) continue;
+            plan = &p;
+            break;
+        }
+        if (!plan) { day = day.addDays(1); continue; }
+
+        // Wall clock, not arithmetic: the day a plan owns runs from its hour to
+        // the same hour tomorrow, which is 23 or 25 hours across a daylight
+        // saving change. Adding a flat 24 hours would slide the whole plan by
+        // an hour twice a year and leave an hour uncovered on one of them.
+        const QDateTime dayStart =
+            QDateTime(day, QTime(0, 0)).addSecs(plan->startsAtMinute * 60);
+        const QDateTime nextStart =
+            QDateTime(day.addDays(1), QTime(0, 0)).addSecs(plan->startsAtMinute * 60);
+        qint64 at = dayStart.toMSecsSinceEpoch();
+        const qint64 dayEnd = nextStart.toMSecsSinceEpoch();
+
+        // The blocks repeat until the day is used up, so a plan does not have
+        // to account for all twenty-four hours to be useful.
+        int guard = 0;
+        while (at < dayEnd && spans.size() < kMaxSlotsPerChannel) {
+            bool placedAny = false;
+            for (const PlanBlock &b : plan->blocks) {
+                if (!b.isValid()) continue;
+                const qint64 end = qMin(at + qint64(b.minutes) * 60000LL, dayEnd);
+                if (end <= at) break;
+                if (end > fromMs && at < toMs) {
+                    PlanSpan s;
+                    s.start = at;
+                    s.end   = end;
+                    s.block = b;
+                    spans.append(s);
+                }
+                at = end;
+                placedAny = true;
+                if (at >= dayEnd) break;
+            }
+            // Nothing in the plan could be placed; stop rather than spin.
+            if (!placedAny) break;
+            if (++guard > 512) break;
+        }
+        day = day.addDays(1);
+    }
+
+    std::sort(spans.begin(), spans.end(),
+              [](const PlanSpan &a, const PlanSpan &b) { return a.start < b.start; });
+    return spans;
+}
+
 Ordering orderingFromString(const QString &s) {
     const QString v = s.trimmed().toLower();
     if (v == QLatin1String("shuffle"))     return Ordering::Shuffle;

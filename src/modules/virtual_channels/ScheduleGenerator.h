@@ -44,6 +44,52 @@ struct BreakPack {
 // rather than the viewer -- the sources screen has no ordering row.
 enum class Ordering { Broadcast, Shuffle, Interleaved, AsListed };
 
+// One stretch of a day plan: what it draws on, and for how long.
+//
+// Called a PlanBlock rather than a Block because ChannelSchedule::Block already
+// means a programme with the breaks around it -- a different thing, on the same
+// screen, in the same module.
+struct PlanBlock {
+    // What the stretch draws on. The interface calls this the block's Type.
+    enum class Draws { Series, Collection, Genre, Movie, Anything };
+
+    Draws   draws = Draws::Series;
+    // The series, collection or genre named. Empty for Movie and Anything,
+    // which draw on the channel's films and on everything respectively.
+    QString name;
+    QString ref;              // the source's own id for it, where the picker knew one
+    int     minutes = 30;
+
+    bool isValid() const;
+};
+
+// A day, as an ordered stack of blocks. The blocks are contiguous by
+// construction -- each starts where the last ended -- so a plan cannot be
+// written with a gap or an overlap in it.
+struct DayPlan {
+    QString name;
+    QVector<int> days;        // Qt day numbers, 1 = Monday
+    int gridMinutes   = 30;
+    int startsAtMinute = 6 * 60;
+    QVector<PlanBlock> blocks;
+
+    bool isValid() const;
+    bool airsOn(int qtDayOfWeek) const;
+    int  totalMinutes() const;
+};
+
+// Where one block lands once a plan is laid against the clock.
+struct PlanSpan {
+    qint64 start = 0;
+    qint64 end   = 0;
+    PlanBlock block;
+};
+
+// Lay every plan a channel has against a stretch of clock, in order. A day the
+// plans do not cover yields nothing for that day, so a channel with a partial
+// week still airs its pool the rest of the time rather than going dark.
+QVector<PlanSpan> planSpans(const QVector<DayPlan> &plans, qint64 fromMs, qint64 toMs);
+
 struct Appointment {
     QString name;
     QVector<int> days;
@@ -69,6 +115,10 @@ struct ChannelDef {
     int adsPerBreak = 0;
 
     qint64  rotation = 0;
+
+    // A channel with plans lays its day out from them instead of airing its
+    // pool loose. Empty means every channel that exists today, unchanged.
+    QVector<DayPlan> plans;
 
     // Where each series had got to, as the ref of the last episode it aired,
     // keyed by lowercased series name. Interleaved resumes every series from
