@@ -967,6 +967,9 @@ QVector<QPair<SlotKind, const char *>> VirtualChannelsBackend::poolFields() {
 QVector<VirtualChannelsBackend::PoolJob>
 VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) const {
     QVector<PoolJob> jobs;
+    // A show's own bumpers are set on its pool row, and a block that airs that
+    // show should play them. Kept by name so a plan can find them again.
+    QHash<QString, int> packByName;
 
     const auto packFor = [&](const QJsonObject &o, const QString &label) -> int {
         const QJsonArray in  = o.value(QLatin1String("intros")).toArray();
@@ -1019,6 +1022,7 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                                           ? o.value(QLatin1String("folder")).toString()
                                           : o.value(QLatin1String("name")).toString();
                 job.pack = packFor(o, label);
+                if (job.pack >= 0) packByName.insert(label.trimmed().toLower(), job.pack);
             }
             job.src = slotSourceFromString(o.value(QLatin1String("src")).toString());
             if (job.src == SlotSource::Local) {
@@ -1129,6 +1133,11 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
     if (!def.plans.isEmpty()) {
         const SlotSource src = sourceOf(channel);
         QVector<PoolJob> planJobs;
+        // Everything but the programmes is still gathered: the channel's
+        // breaks, and the clips a show's own bumpers point at. Only what airs
+        // is the plan's to decide.
+        for (const PoolJob &j : std::as_const(jobs))
+            if (j.pool != SlotKind::Programme) planJobs.append(j);
         for (const DayPlan &plan : std::as_const(def.plans)) {
             for (const PlanBlock &b : plan.blocks) {
                 if (b.draws == PlanBlock::Draws::Anything) continue;   // everything already gathered
@@ -1138,6 +1147,10 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                 job.src       = src;
                 job.planBlock = b.id;
                 job.anyFilm   = false;
+                // The bumpers set against this show on its pool row, so a
+                // Samurai Jack block plays the Samurai Jack bumper without
+                // anything being said twice.
+                job.pack      = packByName.value(b.name.trimmed().toLower(), -1);
                 job.wants     = MediaServerSource::Request::Wants::Episodes;
 
                 switch (b.draws) {

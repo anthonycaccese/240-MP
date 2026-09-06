@@ -475,6 +475,68 @@ int runScheduleGeneratorTests() {
                 "and starts on the hour the plan put it on");
     }
 
+    section("generate: a block plays the bumpers set against its show");
+    {
+        const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));
+
+        ChannelDef d = basicDef();
+        d.horizonHours = 2.0;
+        d.programmes.clear();
+
+        // Two shows, each with its own bumper, the way a channel of cartoons
+        // sets them: the bumper belongs to the show, not to the hour.
+        d.packs = { BreakPack{ "JACK", { item("jack-bump.mkv", 5000) }, {} },
+                    BreakPack{ "GUNDAM", { item("gundam-bump.mkv", 5000) }, {} } };
+
+        for (int ep = 1; ep <= 4; ++ep) {
+            MediaItem m = item(QStringLiteral("jack-%1.mkv").arg(ep), 20 * 60000);
+            m.series = "SAMURAI JACK"; m.seasonNo = 1; m.episodeNo = ep;
+            m.planBlock = 1; m.pack = 0;
+            d.programmes.append(m);
+        }
+        for (int ep = 1; ep <= 4; ++ep) {
+            MediaItem m = item(QStringLiteral("gundam-%1.mkv").arg(ep), 20 * 60000);
+            m.series = "GUNDAM"; m.seasonNo = 1; m.episodeNo = ep;
+            m.planBlock = 2; m.pack = 1;
+            d.programmes.append(m);
+        }
+
+        PlanBlock jack;   jack.id   = 1; jack.name = "SAMURAI JACK"; jack.minutes = 60;
+        PlanBlock gundam; gundam.id = 2; gundam.name = "GUNDAM";     gundam.minutes = 60;
+        DayPlan plan;
+        plan.name = "WEEKDAYS";
+        plan.blocks = { jack, gundam };
+        d.plans = { plan };
+
+        const QVector<Slot> s = generateSlots(d, base.toMSecsSinceEpoch());
+        check(contiguous(s), "the day is whole");
+
+        // Each block's bumper airs inside that block and nowhere else. Measured
+        // against the hour the plan drew, not against the first episode: a
+        // bumper plays ahead of the programme it introduces.
+        const qint64 secondHour = base.addSecs(3600).toMSecsSinceEpoch();
+        bool sawGundam = false;
+        for (const Slot &x : s)
+            if (x.kind == SlotKind::Programme && x.ref.startsWith("gundam-")) sawGundam = true;
+        check(sawGundam, "the second block airs");
+
+        bool jackBumpInJacksHour = false, gundamBumpInGundamsHour = false;
+        bool bumpInTheWrongHour = false;
+        for (const Slot &x : s) {
+            if (x.kind != SlotKind::Intro) continue;
+            const bool firstHour = x.start < secondHour;
+            if (x.ref == QLatin1String("jack-bump.mkv")) {
+                if (firstHour) jackBumpInJacksHour = true; else bumpInTheWrongHour = true;
+            }
+            if (x.ref == QLatin1String("gundam-bump.mkv")) {
+                if (!firstHour) gundamBumpInGundamsHour = true; else bumpInTheWrongHour = true;
+            }
+        }
+        check(jackBumpInJacksHour,      "the first block plays its show's bumper");
+        check(gundamBumpInGundamsHour,  "the second block plays its own");
+        check(!bumpInTheWrongHour,      "and neither plays in the other's hour");
+    }
+
     section("generate: a block whose source gathered nothing holds the card");
     {
         const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));
