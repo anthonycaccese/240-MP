@@ -759,6 +759,64 @@ int runScheduleGeneratorTests() {
                  "and the short series picks up at its own separate place");
     }
 
+    // A shuffled block plays the same episodes in a different order -- but the
+    // same different order every build, because the mark that says where a show
+    // got to is an index into that order. A fresh shuffle each night would move
+    // every episode out from under it.
+    section("plans: a shuffled block is shuffled, and stays shuffled");
+    {
+        const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));
+
+        const auto build = [&](bool shuffled, const QHash<QString, QString> &marks) {
+            ChannelDef d = basicDef();
+            d.seed = 4242;
+            d.horizonHours = 6.0;
+            d.marks = marks;
+            d.programmes.clear();
+            for (int ep = 1; ep <= 12; ++ep) {
+                MediaItem m = item(QStringLiteral("jack-%1.mkv").arg(ep), 30 * 60000);
+                m.series = "SAMURAI JACK"; m.seasonNo = 1; m.episodeNo = ep;
+                m.planBlock = 1;
+                d.programmes.append(m);
+            }
+            PlanBlock only;
+            only.id = 1; only.name = "SAMURAI JACK"; only.minutes = 24 * 60;
+            only.shuffled = shuffled;
+            DayPlan plan;
+            plan.name = "EVERY DAY";
+            plan.blocks = { only };
+            d.plans = { plan };
+
+            QStringList aired;
+            for (const Slot &x : generateSlots(d, base.toMSecsSinceEpoch()))
+                if (x.kind == SlotKind::Programme) aired << x.ref;
+            return aired;
+        };
+
+        const QStringList inOrder  = build(false, {});
+        const QStringList shuffled = build(true,  {});
+
+        checkEq(inOrder.size(), 12, "the in-order block airs twelve");
+        checkEq(shuffled.size(), 12, "and so does the shuffled one");
+        checkStr(inOrder.value(0), QStringLiteral("jack-1.mkv"), "in order starts at episode one");
+        check(inOrder != shuffled, "the shuffled block airs them in a different order");
+
+        QStringList distinct = shuffled;
+        distinct.removeDuplicates();
+        checkEq(distinct.size(), 12, "and airs each of them exactly once");
+
+        const QStringList again = build(true, {});
+        check(again == shuffled, "the same shuffle comes back on the next build");
+
+        // Resuming: the mark names an episode, and the shuffled run carries on
+        // from wherever that episode sits in the shuffle.
+        QHash<QString, QString> marks;
+        marks.insert(QStringLiteral("samurai jack"), shuffled.value(3));
+        const QStringList resumed = build(true, marks);
+        checkStr(resumed.value(0), shuffled.value(4),
+                 "a shuffled block picks up at the episode after its mark");
+    }
+
     // A channel is rebuilt every night for as long as it exists. Each build
     // starts from the marks the last one left, so the question is whether the
     // marks stay accurate over many of them: a series must carry on across the

@@ -3913,6 +3913,8 @@ QVector<DayPlan> VirtualChannelsBackend::readPlans(const QJsonObject &channel) {
                 if (!f.toString().trimmed().isEmpty()) block.intros << f.toString().trimmed();
             for (const QJsonValue &f : bo.value(QLatin1String("outros")).toArray())
                 if (!f.toString().trimmed().isEmpty()) block.outros << f.toString().trimmed();
+            block.shuffled = bo.value(QLatin1String("order")).toString().trimmed().toLower()
+                             == QLatin1String("shuffle");
 
             const QString type = bo.value(QLatin1String("type")).toString().trimmed().toLower();
             if      (type == QLatin1String("collection")) block.draws = PlanBlock::Draws::Collection;
@@ -3983,6 +3985,8 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber, bool withC
             m["minutes"] = b.minutes;
             m["intros"]  = QVariant(b.intros);
             m["outros"]  = QVariant(b.outros);
+            m["order"]   = b.shuffled ? QStringLiteral("shuffle")
+                                      : QStringLiteral("broadcast");
             // Counted the same way a pool row's are, so the screen that sets
             // them can say how many clips a folder holds -- and can say when it
             // holds none, which otherwise looks the same as working.
@@ -4065,6 +4069,11 @@ bool VirtualChannelsBackend::set_channel_plans(int channelNumber,
             const QJsonArray outros = folders("outros");
             if (!intros.isEmpty()) block["intros"] = intros;
             if (!outros.isEmpty()) block["outros"] = outros;
+            // Written only when it is not the default, so a plan file stays
+            // readable and a block that runs in order says nothing about it.
+            if (bm.value(QStringLiteral("order")).toString().trimmed().toLower()
+                == QLatin1String("shuffle"))
+                block["order"] = QStringLiteral("shuffle");
             blocks.append(block);
         }
         plan["blocks"] = blocks;

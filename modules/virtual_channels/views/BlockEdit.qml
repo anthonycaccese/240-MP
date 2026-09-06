@@ -52,6 +52,10 @@ FocusScope {
         var r = ["type"]
         if (picksASource) r.push("source")
         r.push("length")
+        // A block that names one film has one thing to play, so there is no
+        // order to choose. Everything else has a run to go through.
+        if (!(block && block.type === "movie" && String(block.name || "") !== ""))
+            r.push("order")
         // A block is played in and out as itself, or falls back to the
         // channel's. This is the only place that override is set, because the
         // block is the only thing on a planned channel that names a show.
@@ -115,6 +119,7 @@ FocusScope {
         case "source": return block ? typeLabel(block.type).charAt(0)
                                       + typeLabel(block.type).slice(1).toLowerCase() : "Source"
         case "length": return "Length"
+        case "order":  return "Order"
         case "intros": return "Intro"
         case "outros": return "Outro"
         case "delete": return armedToDelete ? "Press Again To Delete" : "Delete This Block"
@@ -143,6 +148,7 @@ FocusScope {
         case "type":   return block ? typeLabel(block.type) : ""
         case "source": return sourceLabel()
         case "length": return block ? lengthLabel(block.minutes) : ""
+        case "order":  return shuffled() ? "SHUFFLED" : "IN ORDER"
         case "intros": return identLabel("intros")
         case "outros": return identLabel("outros")
         }
@@ -163,6 +169,9 @@ FocusScope {
                                : "What this block plays."
         case "length":  return root.hints.change + " changes it by "
                                + editRoot.step + " minutes — one slot of the plan's grid."
+        case "order":   return shuffled()
+                               ? "Episodes come in a shuffled order. The same shuffle every build, so a rebuild does not start the show over."
+                               : "Episodes come in the order they first aired, carrying on from where the show got to."
         case "intros":  return foldersOf("intros").length === 0
                                ? "Plays into this block. Set one to play this show in as itself."
                                : "Plays into this block, instead of the channel's."
@@ -174,7 +183,13 @@ FocusScope {
         return ""
     }
 
-    function cycles(i) { return rows[i] === "type" || rows[i] === "length" }
+    function shuffled() {
+        return block ? String(block.order || "") === "shuffle" : false
+    }
+
+    function cycles(i) {
+        return rows[i] === "type" || rows[i] === "length" || rows[i] === "order"
+    }
 
     // Every change is one field of the block the screen is already holding, so
     // it is applied to a copy of that block. Building a fresh object instead
@@ -228,6 +243,11 @@ FocusScope {
             if (next === "movie" && block.type !== "movie")
                 changed.minutes = Math.max(block.minutes, 90)
             writeBlock(blockWith(changed))
+            return
+        }
+
+        if (r === "order") {
+            writeBlock(blockWith({ order: shuffled() ? "broadcast" : "shuffle" }))
             return
         }
 

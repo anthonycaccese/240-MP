@@ -708,6 +708,22 @@ void testABlockKeepsWhatWasNotChanged() {
             "and its outro");
     checkStr(after.value(QStringLiteral("ref")).toString(), QStringLiteral("15087"),
              "and the id it was picked by");
+    checkStr(after.value(QStringLiteral("order")).toString(), QStringLiteral("broadcast"),
+             "a block runs in the order things aired unless it is told otherwise");
+
+    // And the order survives the same round trip, both ways.
+    QVariantMap shuffledBlock = after;
+    shuffledBlock["order"] = QStringLiteral("shuffle");
+    QVariantMap day2 = b.channel_plans(3).first().toMap();
+    day2["blocks"] = QVariantList{ shuffledBlock };
+    check(b.set_channel_plans(3, QVariantList{ day2 }), "asking for a shuffle saves");
+
+    const QVariantMap shuffledAfter = b.channel_plans(3).first().toMap()
+                                        .value(QStringLiteral("blocks")).toList().first().toMap();
+    checkStr(shuffledAfter.value(QStringLiteral("order")).toString(),
+             QStringLiteral("shuffle"), "and reads back as a shuffle");
+    checkEq(shuffledAfter.value(QStringLiteral("intros")).toStringList().size(), 1,
+            "without taking the block's bumpers with it");
 }
 
 void testPlansRoundTrip() {

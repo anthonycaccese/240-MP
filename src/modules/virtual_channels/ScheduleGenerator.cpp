@@ -370,6 +370,10 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     // place rather than each keeping one. A place belongs to the series, not to
     // the block that happens to be airing it, so the second block carries on
     // from where the first left off instead of repeating it.
+    //
+    // Two blocks share a place only if they run the show the same way round: a
+    // place is an index into an order, and the shuffled order is not the aired
+    // one. A block of each keeps its own.
     struct BlockPool {
         QVector<QVector<int>> groups;
         QVector<QString>      keys;
@@ -378,7 +382,32 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     QHash<int, BlockPool> blockPools;
     QHash<QString, int>   seriesResume;   // where the mark left each series
     QHash<QString, int>   seriesTaken;    // how many of it this build has aired
+    const auto placeKey = [](const QString &seriesKey, bool shuffled) {
+        return shuffled ? seriesKey + QLatin1String("\x1e~") : seriesKey;
+    };
     int activeBlock = -1;
+
+    // Which blocks were asked for a shuffle. Read off the plans rather than off
+    // the programmes, because a block that gathered nothing still has to be
+    // known about when the next one is laid.
+    QHash<int, bool> blockShuffles;
+    for (const DayPlan &p : def.plans)
+        for (const PlanBlock &b : p.blocks)
+            blockShuffles.insert(b.id, b.shuffled);
+
+    // A shuffle that is the same every build. Qt's own string hash is seeded
+    // per process, so an episode would sit in a different place each time and
+    // the mark saying where a show got to would point at the wrong one; this is
+    // plain FNV-1a over the ref and the channel's seed, which is not.
+    const auto shuffleKey = [&def](const QString &ref) {
+        quint64 h = 1469598103934665603ULL ^ quint64(def.seed);
+        const QByteArray bytes = ref.toUtf8();
+        for (const char c : bytes) {
+            h ^= quint64(static_cast<unsigned char>(c));
+            h *= 1099511628211ULL;
+        }
+        return h;
+    };
 
     if (!def.plans.isEmpty()) {
         for (int i = 0; i < progCount; ++i) {
@@ -397,19 +426,30 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         }
         for (auto it = blockPools.begin(); it != blockPools.end(); ++it) {
             BlockPool &bp = it.value();
+            const bool shuffled = blockShuffles.value(it.key(), false);
             for (int g = 0; g < bp.groups.size(); ++g) {
-                std::sort(bp.groups[g].begin(), bp.groups[g].end(), airedBefore);
+                if (shuffled)
+                    std::sort(bp.groups[g].begin(), bp.groups[g].end(),
+                              [&](int a, int b) {
+                                  const quint64 ha = shuffleKey(programmes[a].ref);
+                                  const quint64 hb = shuffleKey(programmes[b].ref);
+                                  if (ha != hb) return ha < hb;
+                                  return programmes[a].ref < programmes[b].ref;
+                              });
+                else
+                    std::sort(bp.groups[g].begin(), bp.groups[g].end(), airedBefore);
                 // The series keeps one place wherever it airs, so moving a
                 // block around never restarts it. Worked out once per series:
                 // a second block holding the same show reads the same place.
-                if (seriesResume.contains(bp.keys[g])) continue;
+                const QString place = placeKey(bp.keys[g], shuffled);
+                if (seriesResume.contains(place)) continue;
                 int at = 0;
                 const QString mark = def.marks.value(bp.keys[g]);
                 if (!mark.isEmpty()) {
                     for (int k = 0; k < bp.groups[g].size(); ++k)
                         if (programmes[bp.groups[g][k]].ref == mark) { at = k + 1; break; }
                 }
-                seriesResume.insert(bp.keys[g], at);
+                seriesResume.insert(place, at);
             }
         }
     }
@@ -423,7 +463,8 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         if (activeBlock >= 0) {
             BlockPool &bp = blockPools[activeBlock];
             if (!bp.groups.isEmpty()) {
-                ++seriesTaken[bp.keys[int(bp.turn % bp.groups.size())]];
+                ++seriesTaken[placeKey(bp.keys[int(bp.turn % bp.groups.size())],
+                                       blockShuffles.value(activeBlock, false))];
                 ++bp.turn;
             }
         } else if (def.order == Ordering::Interleaved) {
@@ -438,7 +479,9 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             const BlockPool &bp = blockPools[activeBlock];
             const int g = int(bp.turn % bp.groups.size());
             const QVector<int> &turn = bp.groups[g];
-            const int at = seriesResume.value(bp.keys[g]) + seriesTaken.value(bp.keys[g]);
+            const QString place = placeKey(bp.keys[g],
+                                           blockShuffles.value(activeBlock, false));
+            const int at = seriesResume.value(place) + seriesTaken.value(place);
             return programmes[turn[at % turn.size()]];
         }
         if (def.order == Ordering::Interleaved) {

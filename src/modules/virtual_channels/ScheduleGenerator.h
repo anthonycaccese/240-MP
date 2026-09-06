@@ -74,6 +74,12 @@ struct PlanBlock {
     QStringList intros;
     QStringList outros;
 
+    // Whether the block takes each show's episodes in the order they aired or
+    // in a shuffled one. The shuffle is worked out from the channel's seed, so
+    // it is the same shuffle every build: a fresh one each time would move
+    // every episode out from under the mark that says where the show got to.
+    bool shuffled = false;
+
     bool isValid() const;
 };
 
