@@ -194,13 +194,34 @@ FocusScope {
         tickCountdown()
     }
 
+    // A wait is counted in the largest unit that still says something useful.
+    // "In 794 minutes" is arithmetic the viewer has to do; past an hour or so
+    // the hour it starts is what they actually want to know.
     function tickCountdown() {
         if (nextUpAtMs <= 0) { countdownText = ""; return }
         var left = Math.round((nextUpAtMs - Date.now()) / 1000)
         if (left <= 0)  { countdownText = "Any moment now"; return }
         if (left < 60)  { countdownText = "In " + left + " seconds"; return }
+
         var mins = Math.round(left / 60)
-        countdownText = "In " + mins + (mins === 1 ? " minute" : " minutes")
+        if (mins < 60) {
+            countdownText = "In " + mins + (mins === 1 ? " minute" : " minutes")
+            return
+        }
+        if (mins < 3 * 60) {
+            var h = Math.floor(mins / 60)
+            var m = mins % 60
+            countdownText = "In " + h + (h === 1 ? " hour" : " hours")
+                            + (m > 0 ? " " + m + (m === 1 ? " minute" : " minutes") : "")
+            return
+        }
+        var when = new Date(nextUpAtMs)
+        var hh = when.getHours()
+        var mm = when.getMinutes()
+        var suffix = hh < 12 ? "AM" : "PM"
+        var h12 = hh % 12
+        if (h12 === 0) h12 = 12
+        countdownText = "At " + h12 + ":" + (mm < 10 ? "0" + mm : mm) + " " + suffix
     }
 
     function loadTuningScreen() {
