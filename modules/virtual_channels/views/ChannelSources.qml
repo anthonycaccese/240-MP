@@ -61,27 +61,31 @@ FocusScope {
 
         r.push("timing")
 
-        if (cfg.source === "local") {
-            // Local files are a library like any other source: the two things a
-            // media folder can hold, straight off this screen. There is no
-            // intermediate list, and no offer to add from a server the channel
-            // is not sourced from.
-            // Films are not a pool: they are booked into Movie Slots, which is
-            // the row below. A flat list of films would air them as ordinary
-            // programmes and duplicate that mechanism.
-            r.push("series")
-        } else if (cfg.source !== undefined) {
-            r.push("series")
-            // Films on a TV channel are not offered, but if a channel has them
-            // -- from being a film channel once -- they air, so they are shown.
-            if (countOf("films") > 0)  r.push("films")
-            if (countOf("genres") > 0) r.push("genres")
-            r.push("collections")
-            if (cfg.supportsPlaylists) r.push("playlists")
-        }
-        // Blocks say when everything airs, so booking a film to a time and
-        // choosing an order are both the plan's to decide.
+        // On blocks, each block names what it plays and carries its own
+        // bumpers, so the pools are not read at all -- offering them here would
+        // be a second place to say what airs, and the quieter of the two would
+        // be the one that lied.
         if (!onADayPlan) {
+            if (cfg.source === "local") {
+                // Local files are a library like any other source: the two things a
+                // media folder can hold, straight off this screen. There is no
+                // intermediate list, and no offer to add from a server the channel
+                // is not sourced from.
+                // Films are not a pool: they are booked into Movie Slots, which is
+                // the row below. A flat list of films would air them as ordinary
+                // programmes and duplicate that mechanism.
+                r.push("series")
+            } else if (cfg.source !== undefined) {
+                r.push("series")
+                // Films on a TV channel are not offered, but if a channel has them
+                // -- from being a film channel once -- they air, so they are shown.
+                if (countOf("films") > 0)  r.push("films")
+                if (countOf("genres") > 0) r.push("genres")
+                r.push("collections")
+                if (cfg.supportsPlaylists) r.push("playlists")
+            }
+            // Blocks say when everything airs, so booking a film to a time and
+            // choosing an order are both the plan's to decide.
             r.push("slots")
             r.push("order")
         }

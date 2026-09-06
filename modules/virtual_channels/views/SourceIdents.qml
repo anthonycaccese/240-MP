@@ -15,6 +15,11 @@ FocusScope {
     property string pool:          navParams.pool          || "programmes"
     property int    entryIndex:    navParams.entryIndex !== undefined ? navParams.entryIndex : -1
     property string entryName:     navParams.entryName     || ""
+    // A planned channel has no pool rows, so what carries its own bumpers is a
+    // block. Same screen, same two pools, read and written a different way.
+    property int    planIndex:     navParams.planIndex  !== undefined ? navParams.planIndex  : -1
+    property int    blockIndex:    navParams.blockIndex !== undefined ? navParams.blockIndex : -1
+    readonly property bool onABlock: planIndex >= 0 && blockIndex >= 0
     // Which pool this screen edits. Set by the list it was opened from, so a
     // setting never appears on two screens at once.
     property string kind:          navParams.kind          || "intros"
@@ -33,6 +38,12 @@ FocusScope {
     property bool armedToClear: false
 
     function reload() {
+        if (onABlock) {
+            var plans = virtualChannelsBackend.channel_plans(channelNumber)
+            var blocks = (planIndex < plans.length ? (plans[planIndex].blocks || []) : [])
+            entry = blockIndex < blocks.length ? blocks[blockIndex] : ({})
+            return
+        }
         var list = virtualChannelsBackend.channel_pool(channelNumber, pool)
         entry = (entryIndex >= 0 && entryIndex < list.length) ? list[entryIndex] : ({})
     }
@@ -99,6 +110,24 @@ FocusScope {
     }
 
     function save(next) {
+        if (onABlock) {
+            var plans = virtualChannelsBackend.channel_plans(channelNumber)
+            if (planIndex >= plans.length) { status = "That day is no longer there"; return }
+            var day = plans[planIndex]
+            var blocks = (day.blocks || []).slice()
+            if (blockIndex >= blocks.length) { status = "That block is no longer there"; return }
+            blocks[blockIndex] = next
+            day.blocks = blocks
+            plans[planIndex] = day
+            if (!virtualChannelsBackend.set_channel_plans(channelNumber, plans)) {
+                status = "Could not save that change"
+                return
+            }
+            status = "Saved — rebuild to air the change"
+            reload()
+            clampCurrent()
+            return
+        }
         var list = virtualChannelsBackend.channel_pool(channelNumber, pool)
         if (entryIndex < 0 || entryIndex >= list.length) {
             status = "That source is no longer there"

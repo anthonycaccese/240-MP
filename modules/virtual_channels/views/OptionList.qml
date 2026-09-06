@@ -41,6 +41,24 @@ Item {
         return parts.join(" ")
     }
 
+    // The same jump the source browser has, so a long list behaves the same
+    // whichever screen it is on. Pressing the letter again moves to the next
+    // row under it, and round to the first again at the end.
+    function initialOf(i) {
+        var t = String(labelFor(i)).trim().toUpperCase()
+        return t.length === 0 ? "" : t.charAt(0)
+    }
+
+    function jumpTo(letter) {
+        if (count === 0) return false
+        var from = initialOf(current) === letter ? current + 1 : 0
+        for (var n = 0; n < count; n++) {
+            var i = (from + n) % count
+            if (initialOf(i) === letter) { current = i; return true }
+        }
+        return false
+    }
+
     function clampCurrent() {
         if (current >= count) current = Math.max(0, count - 1)
     }
@@ -67,6 +85,9 @@ Item {
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (!opens(current) && cycles(current)) optionList.step(1)
             else                                    optionList.activate(current)
+        } else if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
+                   || (event.key >= Qt.Key_0 && event.key <= Qt.Key_9)) {
+            optionList.jumpTo(String.fromCharCode(event.key))
         }
         event.accepted = true
     }

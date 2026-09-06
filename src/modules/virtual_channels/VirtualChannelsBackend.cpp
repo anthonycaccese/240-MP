@@ -971,16 +971,15 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
     // show should play them. Kept by name so a plan can find them again.
     QHash<QString, int> packByName;
 
-    const auto packFor = [&](const QJsonObject &o, const QString &label) -> int {
-        const QJsonArray in  = o.value(QLatin1String("intros")).toArray();
-        const QJsonArray out = o.value(QLatin1String("outros")).toArray();
+    const auto packForFolders = [&](const QStringList &in, const QStringList &out,
+                                    const QString &label) -> int {
         if (in.isEmpty() && out.isEmpty()) return -1;
 
         const int index = int(def.packs.size());
         def.packs.append(BreakPack{ label, {}, {} });
-        const auto add = [&](const QJsonArray &from, SlotKind kind) {
-            for (const QJsonValue &f : from) {
-                const QString folder = f.toString().trimmed();
+        const auto add = [&](const QStringList &from, SlotKind kind) {
+            for (const QString &raw : from) {
+                const QString folder = raw.trimmed();
                 if (folder.isEmpty()) continue;
                 PoolJob j;
                 j.pool    = kind;
@@ -994,6 +993,16 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
         add(in,  SlotKind::Intro);
         add(out, SlotKind::Outro);
         return index;
+    };
+
+    const auto packFor = [&](const QJsonObject &o, const QString &label) -> int {
+        const auto listOf = [&o](const char *key) {
+            QStringList out;
+            for (const QJsonValue &f : o.value(QLatin1String(key)).toArray())
+                out << f.toString();
+            return out;
+        };
+        return packForFolders(listOf("intros"), listOf("outros"), label);
     };
 
     for (const auto &field : poolFields()) {
@@ -1147,10 +1156,13 @@ VirtualChannelsBackend::readPools(const QJsonObject &channel, ChannelDef &def) c
                 job.src       = src;
                 job.planBlock = b.id;
                 job.anyFilm   = false;
-                // The bumpers set against this show on its pool row, so a
-                // Samurai Jack block plays the Samurai Jack bumper without
-                // anything being said twice.
-                job.pack      = packByName.value(b.name.trimmed().toLower(), -1);
+                // The block's own bumpers, so a Samurai Jack block is played in
+                // and out as itself. A channel written before blocks carried
+                // their own keeps working: the bumpers set against that show on
+                // its pool row are still found by name.
+                job.pack      = packForFolders(b.intros, b.outros, b.name);
+                if (job.pack < 0)
+                    job.pack  = packByName.value(b.name.trimmed().toLower(), -1);
                 job.wants     = MediaServerSource::Request::Wants::Episodes;
 
                 switch (b.draws) {
@@ -3857,6 +3869,10 @@ QVector<DayPlan> VirtualChannelsBackend::readPlans(const QJsonObject &channel) {
             block.name    = bo.value(QLatin1String("name")).toString().trimmed();
             block.ref     = bo.value(QLatin1String("ref")).toString().trimmed();
             block.minutes = bo.value(QLatin1String("minutes")).toInt(0);
+            for (const QJsonValue &f : bo.value(QLatin1String("intros")).toArray())
+                if (!f.toString().trimmed().isEmpty()) block.intros << f.toString().trimmed();
+            for (const QJsonValue &f : bo.value(QLatin1String("outros")).toArray())
+                if (!f.toString().trimmed().isEmpty()) block.outros << f.toString().trimmed();
 
             const QString type = bo.value(QLatin1String("type")).toString().trimmed().toLower();
             if      (type == QLatin1String("collection")) block.draws = PlanBlock::Draws::Collection;
@@ -3874,8 +3890,14 @@ QVector<DayPlan> VirtualChannelsBackend::readPlans(const QJsonObject &channel) {
             plan.blocks.append(block);
         }
 
-        if (!plan.isValid()) {
-            qWarning("[VirtualChannels] dropping plan '%s': nothing in it airs",
+        // A plan with no blocks is a day of breaks, not a broken plan: it is
+        // what every day looks like until the first block is added, and the
+        // screen that adds them cannot show a day it is never handed. Dropping
+        // it here also loses it on the next save, because that screen writes
+        // back the days it was given. Only a plan that airs on no day at all
+        // goes, since nothing can reach it to put a day on it.
+        if (plan.days.isEmpty()) {
+            qWarning("[VirtualChannels] dropping plan '%s': it airs on no day",
                      qPrintable(plan.name));
             continue;
         }
@@ -3919,6 +3941,8 @@ QVariantList VirtualChannelsBackend::channel_plans(int channelNumber) {
             m["name"]    = b.name;
             m["ref"]     = b.ref;
             m["minutes"] = b.minutes;
+            m["intros"]  = QVariant(b.intros);
+            m["outros"]  = QVariant(b.outros);
             // The start each block falls on, so the screen can show a time it
             // never has to be told.
             const int mins = int((at / 60000LL) % (24 * 60));
@@ -3974,6 +3998,21 @@ bool VirtualChannelsBackend::set_channel_plans(int channelNumber,
             const QString ref  = bm.value(QStringLiteral("ref")).toString().trimmed();
             if (!name.isEmpty()) block["name"] = name;
             if (!ref.isEmpty())  block["ref"]  = ref;
+            // A block's own bumpers. Written only when it has some, so a block
+            // that falls back to the channel's says nothing rather than saying
+            // nothing at length.
+            const auto folders = [&bm](const char *key) {
+                QJsonArray out;
+                for (const QVariant &fv : bm.value(QLatin1String(key)).toList()) {
+                    const QString f = fv.toString().trimmed();
+                    if (!f.isEmpty()) out.append(f);
+                }
+                return out;
+            };
+            const QJsonArray intros = folders("intros");
+            const QJsonArray outros = folders("outros");
+            if (!intros.isEmpty()) block["intros"] = intros;
+            if (!outros.isEmpty()) block["outros"] = outros;
             blocks.append(block);
         }
         plan["blocks"] = blocks;

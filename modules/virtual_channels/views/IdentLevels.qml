@@ -33,13 +33,43 @@ FocusScope {
     }
     readonly property int rowCount: rows.length
 
+    // A planned channel has no pool rows: what names a show, and so what can
+    // carry its own bumpers, is a block. Listing those keeps this the one
+    // screen that answers "who overrides the intro" whichever kind of channel
+    // it is asked about.
+    property bool onBlocks: false
+
     function reload() {
         // Visibility changes on the way out too, when the backend is gone.
         if (!virtualChannelsBackend) return
-        // Only programmes can carry their own, so only they are listed. A show
-        // with nothing of its own still appears: seeing that it falls back is
-        // the point of the screen.
-        shows = virtualChannelsBackend.channel_pool(channelNumber, "programmes") || []
+        var plans = virtualChannelsBackend.channel_plans(channelNumber) || []
+        onBlocks = plans.length > 0
+        if (onBlocks) {
+            var flat = []
+            for (var p = 0; p < plans.length; p++) {
+                var day = plans[p].name || ""
+                var list = plans[p].blocks || []
+                for (var b = 0; b < list.length; b++) {
+                    var blk = list[b]
+                    // A block with nothing chosen in it plays no show, so there
+                    // is nothing to play in or out.
+                    if (String(blk.name || "") === "" && blk.type !== "movie") continue
+                    var shown = String(blk.name || "") === "" ? "ANY MOVIE" : String(blk.name)
+                    flat.push({
+                        name: shown + "  ·  " + day,
+                        short: shown,
+                        planIndex: p, blockIndex: b,
+                        intros: blk.intros || [], outros: blk.outros || []
+                    })
+                }
+            }
+            shows = flat
+        } else {
+            // Only programmes can carry their own, so only they are listed. A show
+            // with nothing of its own still appears: seeing that it falls back is
+            // the point of the screen.
+            shows = virtualChannelsBackend.channel_pool(channelNumber, "programmes") || []
+        }
         if (current >= rows.length) current = Math.max(0, rows.length - 1)
     }
 
@@ -78,6 +108,7 @@ FocusScope {
         }
         var e = showAt(i)
         if (ownFolders(e).length === 0) return "USES DEFAULT"
+        if (levelsRoot.onBlocks) return "OWN"
         var n = e[levelsRoot.kind + "_count"]
         if (n === undefined || n === null || n < 0) return "OWN"
         return n + (n === 1 ? " CLIP" : " CLIPS")
@@ -88,9 +119,10 @@ FocusScope {
             return "The " + kindWord + " every show uses unless it has its own below."
         var e = showAt(i)
         if (!e) return ""
+        var who = String(e.short !== undefined ? e.short : e.name)
         return ownFolders(e).length === 0
-               ? String(e.name) + " uses the default above."
-               : String(e.name) + " has its own " + kindWord + ", so the default is not used for it."
+               ? who + " uses the default above."
+               : who + " has its own " + kindWord + ", so the default is not used for it."
     }
 
     function cycles(i) { return false }
@@ -109,6 +141,18 @@ FocusScope {
         var idx = parseInt(rows[i].substring(5))
         var e = shows[idx]
         if (!e) return
+        if (levelsRoot.onBlocks) {
+            navigateTo("modules/virtual_channels/views/SourceIdents.qml", {
+                moduleId:      levelsRoot.moduleId,
+                channelNumber: levelsRoot.channelNumber,
+                channelName:   levelsRoot.channelName,
+                planIndex:     e.planIndex,
+                blockIndex:    e.blockIndex,
+                entryName:     String(e.name),
+                kind:          levelsRoot.kind
+            }, { currentIndex: levelsRoot.current })
+            return
+        }
         if (ownFolders(e).length === 0) {
             appCore.save_setting(levelsRoot.moduleId, "pool_buffer", "")
             navigateTo("modules/virtual_channels/views/SourcePick.qml", {

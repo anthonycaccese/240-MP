@@ -73,15 +73,18 @@ FocusScope {
     }
 
     function labelFor(i) {
-        if (i === planRow)  return plan ? plan.name : "Day"
+        if (i === planRow)  return "Day"
         if (i === addIndex) return "Add A Block"
         var b = blockAt(i)
         return b ? clockLabel(b.startsAtMinute) + "  " + sourceLabel(b) : ""
     }
 
     function valueFor(i) {
-        if (i === planRow)
-            return plans.length > 1 ? "◄ " + (planIndex + 1) + " OF " + plans.length + " ►" : ""
+        if (i === planRow) {
+            if (!plan) return ""
+            var name = plan.name !== "" ? plan.name.toUpperCase() : "DAY"
+            return plans.length > 1 ? "◄ " + name + " ►" : name
+        }
         if (i === addIndex) return ""
         var b = blockAt(i)
         return b ? lengthLabel(b.minutes) : ""
@@ -90,8 +93,8 @@ FocusScope {
     function helpFor(i) {
         if (i === planRow)
             return plans.length > 1
-                   ? root.hints.change + " shows another day. A day with no blocks is all breaks."
-                   : "The day this plan covers."
+                   ? root.hints.change + " picks which day you are laying out. A day with no blocks is all breaks."
+                   : "The day these blocks cover."
         if (i === addIndex)
             return "A new block at the end of the day. Open it to say what it plays."
         var b = blockAt(i)
@@ -153,6 +156,10 @@ FocusScope {
         openBlock(current)
     }
 
+    // Which day is being laid out is this screen's own state, so it has to
+    // travel with the list position. Without it, coming back from a block lands
+    // on the first day -- and the next block added would go onto a day nobody
+    // chose, which is a wrong that says nothing as it happens.
     function openBlock(i) {
         navigateTo("modules/virtual_channels/views/BlockEdit.qml", {
             moduleId:      planRoot.moduleId,
@@ -160,7 +167,7 @@ FocusScope {
             channelName:   planRoot.channelName,
             planIndex:     planRoot.planIndex,
             blockIndex:    i - 1
-        }, { currentIndex: i })
+        }, { currentIndex: i, planIndex: planRoot.planIndex })
     }
 
     function open(i) {
@@ -170,7 +177,9 @@ FocusScope {
     }
 
     Component.onCompleted: {
+        if (navListState.planIndex !== undefined) planIndex = navListState.planIndex
         reload()
+        if (planIndex >= plans.length) planIndex = 0
         if (navListState.currentIndex !== undefined)
             current = Math.min(navListState.currentIndex, rowCount - 1)
     }

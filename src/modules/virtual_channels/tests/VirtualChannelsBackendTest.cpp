@@ -526,20 +526,33 @@ void testPlansAreRead() {
     for (int d = 1; d <= 5; ++d) days.append(d);
     plan["days"] = days;
 
-    QJsonObject empty;                          // a plan with nothing in it
-    empty["name"] = QStringLiteral("EMPTY");
-    empty["blocks"] = QJsonArray();
+    QJsonObject dayless;                        // airs on no day, so nothing reaches it
+    dayless["name"] = QStringLiteral("NOWHERE");
+    dayless["blocks"] = QJsonArray();
+
+    QJsonObject fresh;                          // a day added but not yet filled in
+    fresh["name"] = QStringLiteral("SUNDAY");
+    fresh["blocks"] = QJsonArray();
+    QJsonArray sunday;
+    sunday.append(7);
+    fresh["days"] = sunday;
 
     QJsonArray plans;
     plans.append(plan);
-    plans.append(empty);
+    plans.append(dayless);
+    plans.append(fresh);
     ch["plans"] = plans;
     fx.write(ch);
 
     const QVector<vchan::DayPlan> read = VirtualChannelsBackend::readPlans(ch);
 
-    checkEq(read.size(), 1, "the empty plan is dropped, the usable one kept");
-    if (read.isEmpty()) return;
+    checkEq(read.size(), 2, "the plan airing on no day is dropped, the other two kept");
+    if (read.size() < 2) return;
+
+    checkStr(read.last().name, QStringLiteral("SUNDAY"),
+             "a day with no blocks yet survives being read, so the screen can show it");
+    checkEq(read.last().blocks.size(), 0, "with nothing in it");
+    checkEq(read.last().totalMinutes(), 0, "and nothing to run");
 
     checkStr(read.first().name, QStringLiteral("WEEKDAY"), "by name");
     checkEq(read.first().days.size(), 5, "on the days it names");
@@ -620,6 +633,64 @@ void testPlansRoundTrip() {
 
     check(b.set_channel_plans(3, QVariantList{}), "clearing the plans saves");
     checkEq(b.channel_plans(3).size(), 0, "and leaves the channel without any");
+
+    // Switching a channel to blocks seeds three empty days. If reading them
+    // back dropped the empty ones, the screen would never see them -- and the
+    // first save it made would write back only the day it could see, taking
+    // the other two off the channel.
+    QVariantMap weekdays;
+    weekdays["name"] = QStringLiteral("WEEKDAYS");
+    weekdays["gridMinutes"] = 30;
+    weekdays["days"] = QVariantList{ 1, 2, 3, 4, 5 };
+    weekdays["blocks"] = QVariantList{};
+
+    QVariantMap saturday = weekdays;
+    saturday["name"] = QStringLiteral("SATURDAY");
+    saturday["days"] = QVariantList{ 6 };
+
+    QVariantMap sunday = weekdays;
+    sunday["name"] = QStringLiteral("SUNDAY");
+    sunday["days"] = QVariantList{ 7 };
+
+    check(b.set_channel_plans(3, QVariantList{ weekdays, saturday, sunday }),
+          "three empty days save");
+    checkEq(b.channel_plans(3).size(), 3, "and all three read back");
+
+    // Now fill one in, the way the screen would, and hand all three back.
+    QVariantList days = b.channel_plans(3);
+    QVariantMap first = days.first().toMap();
+    first["blocks"] = QVariantList{ cartoons };
+    days[0] = first;
+    check(b.set_channel_plans(3, days), "filling one day in saves");
+
+    const QVariantList kept = b.channel_plans(3);
+    checkEq(kept.size(), 3, "and the two still empty are still there");
+    checkEq(kept.first().toMap().value(QStringLiteral("blocks")).toList().size(), 1,
+            "with the block that was added on the day it was added to");
+    checkStr(kept.last().toMap().value(QStringLiteral("name")).toString(),
+             QStringLiteral("SUNDAY"), "and the last day still named");
+
+    // A block is played in and out as itself, so it carries its own bumpers.
+    QVariantMap withBumpers = cartoons;
+    withBumpers["intros"] = QVariantList{ QStringLiteral("interstitials/jack-in"),
+                                          QStringLiteral("  ") };
+    withBumpers["outros"] = QVariantList{ QStringLiteral("interstitials/jack-out") };
+
+    QVariantMap onlyDay;
+    onlyDay["name"] = QStringLiteral("WEEKDAYS");
+    onlyDay["gridMinutes"] = 30;
+    onlyDay["days"] = QVariantList{ 1, 2, 3, 4, 5 };
+    onlyDay["blocks"] = QVariantList{ withBumpers };
+
+    check(b.set_channel_plans(3, QVariantList{ onlyDay }), "a block with its own bumpers saves");
+    const QVariantMap block = b.channel_plans(3).first().toMap()
+                                .value(QStringLiteral("blocks")).toList().first().toMap();
+    checkEq(block.value(QStringLiteral("intros")).toStringList().size(), 1,
+            "the blank folder is dropped, the real one kept");
+    checkStr(block.value(QStringLiteral("intros")).toStringList().first(),
+             QStringLiteral("interstitials/jack-in"), "by name");
+    checkStr(block.value(QStringLiteral("outros")).toStringList().first(),
+             QStringLiteral("interstitials/jack-out"), "and the outro with it");
 }
 
 void testSourceSwitchSticks() {

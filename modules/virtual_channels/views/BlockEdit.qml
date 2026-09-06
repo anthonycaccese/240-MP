@@ -45,6 +45,11 @@ FocusScope {
         var r = ["type"]
         if (picksASource) r.push("source")
         r.push("length")
+        // A block is played in and out as itself, or falls back to the
+        // channel's. This is the only place that override is set, because the
+        // block is the only thing on a planned channel that names a show.
+        r.push("intros")
+        r.push("outros")
         r.push("delete")
         return r
     }
@@ -90,15 +95,31 @@ FocusScope {
         return m + "M"
     }
 
+    function foldersOf(key) {
+        if (!block) return []
+        var v = block[key]
+        return (v === undefined || v === null) ? [] : v
+    }
+
     function labelFor(i) {
         switch (rows[i]) {
         case "type":   return "Type"
         case "source": return block ? typeLabel(block.type).charAt(0)
                                       + typeLabel(block.type).slice(1).toLowerCase() : "Source"
         case "length": return "Length"
+        case "intros": return "Intro"
+        case "outros": return "Outro"
         case "delete": return armedToDelete ? "Press Again To Delete" : "Delete This Block"
         }
         return ""
+    }
+
+    // A block with none of its own plays the channel's, which is what the row
+    // says rather than leaving it blank and letting it read as silence.
+    function identLabel(key) {
+        var f = foldersOf(key)
+        if (f.length === 0) return "CHANNEL'S"
+        return f.length === 1 ? "1 FOLDER" : f.length + " FOLDERS"
     }
 
     function valueFor(i) {
@@ -106,6 +127,8 @@ FocusScope {
         case "type":   return block ? typeLabel(block.type) : ""
         case "source": return sourceLabel()
         case "length": return block ? lengthLabel(block.minutes) : ""
+        case "intros": return identLabel("intros")
+        case "outros": return identLabel("outros")
         }
         return ""
     }
@@ -124,6 +147,12 @@ FocusScope {
                                : "What this block plays."
         case "length":  return root.hints.change + " changes it by "
                                + editRoot.step + " minutes — one slot of the plan's grid."
+        case "intros":  return foldersOf("intros").length === 0
+                               ? "Plays into this block. Set one to play this show in as itself."
+                               : "Plays into this block, instead of the channel's."
+        case "outros":  return foldersOf("outros").length === 0
+                               ? "Plays this block out. Set one to play this show out as itself."
+                               : "Plays this block out, instead of the channel's."
         case "delete":  return "Remove this block. The day closes up behind it."
         }
         return ""
@@ -189,6 +218,19 @@ FocusScope {
             all[planIndex] = mine
             if (virtualChannelsBackend.set_channel_plans(channelNumber, all)) goBack()
             else status = "Could not remove that block"
+            return
+        }
+
+        if (r === "intros" || r === "outros") {
+            navigateTo("modules/virtual_channels/views/SourceIdents.qml", {
+                moduleId:      editRoot.moduleId,
+                channelNumber: editRoot.channelNumber,
+                channelName:   editRoot.channelName,
+                planIndex:     editRoot.planIndex,
+                blockIndex:    editRoot.blockIndex,
+                entryName:     editRoot.sourceLabel(),
+                kind:          r
+            }, { currentIndex: editRoot.current })
             return
         }
 

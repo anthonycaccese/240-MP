@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 #include <QVector>
 
@@ -66,6 +67,12 @@ struct PlanBlock {
     QString name;
     QString ref;              // the source's own id for it, where the picker knew one
     int     minutes = 30;
+
+    // The block's own bumpers, as local folders. A block that names none falls
+    // back to the channel's, which is what most blocks want; naming them here
+    // is how one show gets played in and out as itself.
+    QStringList intros;
+    QStringList outros;
 
     bool isValid() const;
 };

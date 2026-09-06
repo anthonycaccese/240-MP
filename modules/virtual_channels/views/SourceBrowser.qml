@@ -326,9 +326,17 @@ FocusScope {
         itemList.currentIndex = Math.max(0, Math.min(items.length - 1, next))
     }
 
+    // Pressing a letter again moves to the next title under it, and round to
+    // the first again at the end. A library with thirty shows under one letter
+    // is otherwise only reachable by arrowing through all of them, which is the
+    // work the jump exists to save.
     function jumpTo(letter) {
         if (items.length === 0) return false
-        for (var i = 0; i < items.length; i++) {
+        var at = itemList.currentIndex
+        var from = (at >= 0 && at < items.length
+                    && initialOf(items[at].label) === letter) ? at + 1 : 0
+        for (var n = 0; n < items.length; n++) {
+            var i = (from + n) % items.length
             if (initialOf(items[i].label) === letter) {
                 itemList.currentIndex = i
                 return true
