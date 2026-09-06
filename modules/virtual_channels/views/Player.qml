@@ -29,6 +29,20 @@ FocusScope {
     property string fillerLogo: ""
     property string offAirText: ""
 
+    // A tune that is going well settles in well under a second. Snow past a few
+    // seconds is no longer a tune settling, it is a channel with nothing to say,
+    // so the card takes over and says what it is waiting for. Without this a
+    // run of programmes that will not start is a quarter of an hour of static.
+    property bool snowWelcome: false
+
+    // What the card has to say. Read into properties rather than bound: a
+    // binding onto the backend throws while this view is being torn down.
+    property string nextUpTitle: ""
+    property real   nextUpAtMs: 0
+    property string countdownText: ""
+    property string playingTitle: ""
+    property string troubleTitle: ""
+
     property var dial: []
     property bool switchingTo: false
     property int pendingChannel: -1
@@ -141,8 +155,53 @@ FocusScope {
     // bound so it cannot be reached for while the view is being torn down.
     property string tuningScreen: "Card"
     readonly property bool waiting: tuning && !rebuilding
-    readonly property bool showSnow:  waiting && tuningScreen === "Static"
+    readonly property bool showSnow:  waiting && tuningScreen === "Static" && snowWelcome
     readonly property bool showBlank: waiting && tuningScreen === "Black"
+
+    // One programme refusing to roll is not the channel being off air, and the
+    // screen should say which it is: the station puts up a slide, names what
+    // would not start, and carries on to the next thing.
+    readonly property bool inTrouble: consecutiveFailures > 0 && !rebuilding
+                                      && (tuning || offAir)
+
+    readonly property string cardLine: {
+        if (rebuilding) return rebuildNote !== "" ? rebuildNote : "Rebuilding schedule…"
+        if (inTrouble)  return "Please stand by"
+        if (filler)     return nextUpTitle !== "" ? "Up next · " + nextUpTitle : ""
+        if (tuning)     return "Tuning…"
+        if (offAir)     return offAirText
+        return ""
+    }
+
+    readonly property string cardSubLine: {
+        if (inTrouble)  return troubleTitle !== "" ? "Couldn't start " + troubleTitle : ""
+        if (filler)     return countdownText
+        return ""
+    }
+
+    // Asked once when the card goes up, and counted down locally from there,
+    // rather than asking the backend every second for something that only
+    // changes when the programme does.
+    function refreshCard() {
+        nextUpTitle   = ""
+        nextUpAtMs    = 0
+        countdownText = ""
+        if (!virtualChannelsBackend) return
+        var n = virtualChannelsBackend.now_next(channelNumber)
+        if (!n || !n.valid || !n.nextTitle) return
+        nextUpTitle = String(n.nextTitle)
+        nextUpAtMs  = Number(n.nextStartMs) || 0
+        tickCountdown()
+    }
+
+    function tickCountdown() {
+        if (nextUpAtMs <= 0) { countdownText = ""; return }
+        var left = Math.round((nextUpAtMs - Date.now()) / 1000)
+        if (left <= 0)  { countdownText = "Any moment now"; return }
+        if (left < 60)  { countdownText = "In " + left + " seconds"; return }
+        var mins = Math.round(left / 60)
+        countdownText = "In " + mins + (mins === 1 ? " minute" : " minutes")
+    }
 
     function loadTuningScreen() {
         var v = appCore.get_setting(moduleId, "tuning_screen")
@@ -338,7 +397,27 @@ FocusScope {
         overrunTicks = 0
         offAir = false
         tuning = true
+        // Cleared with the tune: a failure names the programme that failed, and
+        // saying nothing is better than naming the one before it.
+        playingTitle = ""
+        snowWelcome = true
+        snowCap.restart()
         tuneSettle.restart()
+    }
+
+    // Static is a tune settling, not a state to sit in.
+    Timer {
+        id: snowCap
+        interval: 5000
+        repeat: false
+        onTriggered: playerRoot.snowWelcome = false
+    }
+
+    Timer {
+        interval: 1000
+        repeat: true
+        running: playerRoot.filler && playerRoot.nextUpAtMs > 0
+        onTriggered: playerRoot.tickCountdown()
     }
 
     Timer {
@@ -412,6 +491,7 @@ FocusScope {
             fillerTimer.interval = (isFinite(secs) && secs > 0.5)
                                    ? Math.min(secs, 3600) * 1000 : 1000
             fillerTimer.restart()
+            refreshCard()
             return
         }
         filler = false
@@ -452,6 +532,8 @@ FocusScope {
         overrunTicks = 0
         rebuildTried = false
         currentSlotIndex = descriptor.slotIndex
+        playingTitle = descriptor.title ? String(descriptor.title) : ""
+        troubleTitle = ""
 
         if (tuneAskedAt > 0) {
             console.log("[channels] channel " + channelNumber + ": "
@@ -595,10 +677,15 @@ FocusScope {
                 return
             }
 
-            if (reason === "failed")
+            if (reason === "failed") {
                 playerRoot.consecutiveFailures += 1
-            else
+                // Which programme would not roll -- the card says this rather
+                // than leaving the viewer to conclude the channel is dead.
+                playerRoot.troubleTitle = playerRoot.playingTitle
+            } else {
                 playerRoot.consecutiveFailures = 0
+                playerRoot.troubleTitle = ""
+            }
 
             apply(virtualChannelsBackend.after_playback(
                       playerRoot.channelNumber,
@@ -700,18 +787,44 @@ FocusScope {
             anchors.horizontalCenter: parent.horizontalCenter
             font.pixelSize: root.sh * 0.05
         }
+        // The slide a station puts up when something will not roll. It says the
+        // channel is fine and one programme is not, which is the distinction a
+        // quarter of an hour of static never made.
         Text {
-            visible: !playerRoot.filler
-            text: playerRoot.rebuilding
-                  ? (playerRoot.rebuildNote !== "" ? playerRoot.rebuildNote
-                                                   : "Rebuilding schedule…")
-                  : (playerRoot.tuning ? "Tuning…" : playerRoot.offAirText)
+            visible: playerRoot.inTrouble
+            text: "Technical difficulties"
+            color: root.primaryColor
+            font.family: root.globalFont
+            font.capitalization: Font.AllUppercase
+            horizontalAlignment: Text.AlignHCenter
+            anchors.horizontalCenter: parent.horizontalCenter
+            font.pixelSize: root.sh * 0.0416667
+        }
+
+        Text {
+            visible: playerRoot.cardLine !== ""
+            text: playerRoot.cardLine
             color: root.secondaryColor
             font.family: root.globalFont
             font.capitalization: Font.AllUppercase
             horizontalAlignment: Text.AlignHCenter
             anchors.horizontalCenter: parent.horizontalCenter
+            width: root.sw * 0.7
+            wrapMode: Text.WordWrap
             font.pixelSize: root.sh * 0.0333333
+        }
+
+        Text {
+            visible: playerRoot.cardSubLine !== ""
+            text: playerRoot.cardSubLine
+            color: root.tertiaryColor
+            font.family: root.globalFont
+            font.capitalization: Font.AllUppercase
+            horizontalAlignment: Text.AlignHCenter
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: root.sw * 0.7
+            wrapMode: Text.WordWrap
+            font.pixelSize: root.sh * 0.0291667
         }
     }
 
