@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <locale.h>
 #include <csignal>
+#include <QRegularExpression>
 
 #include "AppCore.h"
 #include "modules/local_files/LocalFilesBackend.h"
@@ -72,7 +73,37 @@ static QString resolveDataRoot() {
 static volatile std::sig_atomic_t g_termRequested = 0;
 extern "C" void mp240HandleTerm(int) { g_termRequested = 1; }
 
+
+// Anything a server token is carried in can end up in a log without anyone
+// meaning to put it there: Qt prints the URL of an image that fails to load,
+// and mpv prints the URL it could not open. Both carry the token that fetched
+// the artwork or the stream, and qWarning survives a release build. So every
+// message goes past here first, and the token never reaches the journal.
+//
+// The message is handed on to the handler that was installed before this one,
+// rather than logged again from in here: logging from inside a log handler
+// comes straight back to it.
+static QtMessageHandler g_priorMessageHandler = nullptr;
+
+static void redactingMessageHandler(QtMsgType type, const QMessageLogContext &ctx,
+                                    const QString &message) {
+    static const QRegularExpression tokenInUrl(
+        QStringLiteral("((?:X-Plex-Token|api_key|ApiKey|X-Emby-Token|X-MediaBrowser-Token|"
+                       "accessToken|X-Plex-Client-Identifier)=)[^&\\s\"'<>]+"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    if (!message.contains(QLatin1Char('='))) {
+        if (g_priorMessageHandler) g_priorMessageHandler(type, ctx, message);
+        return;
+    }
+
+    QString clean = message;
+    clean.replace(tokenInUrl, QStringLiteral("\\1<redacted>"));
+    if (g_priorMessageHandler) g_priorMessageHandler(type, ctx, clean);
+}
+
 int main(int argc, char *argv[]) {
+    g_priorMessageHandler = qInstallMessageHandler(redactingMessageHandler);
     QGuiApplication app(argc, argv);
     app.setApplicationName("240-MP");
     app.setApplicationVersion(QStringLiteral(APP_VERSION));

@@ -537,6 +537,49 @@ int runScheduleGeneratorTests() {
         check(!bumpInTheWrongHour,      "and neither plays in the other's hour");
     }
 
+    // The same show booked twice in a day -- or a collection booked to both
+    // weekend days -- is one show with one place in it. The second block picks
+    // up where the first left off; giving each block a place of its own would
+    // air the same episodes twice and call it a schedule.
+    section("plans: a series in two blocks carries on rather than repeating");
+    {
+        const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));
+
+        ChannelDef d = basicDef();
+        d.horizonHours = 2.0;
+        d.programmes.clear();
+        for (int block : { 1, 2 }) {
+            for (int ep = 1; ep <= 6; ++ep) {
+                MediaItem m = item(QStringLiteral("jack-%1.mkv").arg(ep), 30 * 60000);
+                m.series = "SAMURAI JACK"; m.seasonNo = 1; m.episodeNo = ep;
+                m.planBlock = block;
+                d.programmes.append(m);
+            }
+        }
+
+        PlanBlock first;  first.id  = 1; first.name  = "SAMURAI JACK"; first.minutes  = 60;
+        PlanBlock second; second.id = 2; second.name = "SAMURAI JACK"; second.minutes = 60;
+        DayPlan plan;
+        plan.name   = "WEEKDAYS";
+        plan.blocks = { first, second };
+        d.plans     = { plan };
+
+        const QVector<Slot> s = generateSlots(d, base.toMSecsSinceEpoch());
+
+        QStringList aired;
+        for (const Slot &x : s)
+            if (x.kind == SlotKind::Programme) aired << x.ref;
+
+        checkEq(aired.size(), 4, "four half hours over the two blocks");
+        QStringList distinct = aired;
+        distinct.removeDuplicates();
+        checkEq(distinct.size(), aired.size(),
+                "and no episode airs twice in the same day");
+        if (aired.size() == 4)
+            check(aired[2] != aired[0] && aired[3] != aired[1],
+                  "the second block carries on instead of starting again");
+    }
+
     section("generate: a block whose source gathered nothing holds the card");
     {
         const QDateTime base(QDate(2026, 9, 7), QTime(0, 0));

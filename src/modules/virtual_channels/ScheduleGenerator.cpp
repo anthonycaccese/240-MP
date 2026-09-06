@@ -360,18 +360,24 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
     };
 
     // A day plan draws each stretch from the block it belongs to. The pool is
-    // grouped per block rather than per channel, because the same series can
-    // sit in two blocks and each has to keep its own turn -- and grouped by
-    // series within a block, so a block holding a collection takes turns
-    // through it the way an interleaved channel does.
+    // grouped per block rather than per channel, because each block takes its
+    // own turn through what it holds -- and grouped by series within a block,
+    // so a block holding a collection takes turns through it the way an
+    // interleaved channel does.
+    //
+    // Where a series sits in more than one block -- the same show twice in a
+    // day, or a collection booked to both weekend days -- the blocks share its
+    // place rather than each keeping one. A place belongs to the series, not to
+    // the block that happens to be airing it, so the second block carries on
+    // from where the first left off instead of repeating it.
     struct BlockPool {
         QVector<QVector<int>> groups;
         QVector<QString>      keys;
-        QVector<int>          resume;
-        QVector<int>          taken;
         qint64                turn = 0;
     };
     QHash<int, BlockPool> blockPools;
+    QHash<QString, int>   seriesResume;   // where the mark left each series
+    QHash<QString, int>   seriesTaken;    // how many of it this build has aired
     int activeBlock = -1;
 
     if (!def.plans.isEmpty()) {
@@ -391,16 +397,19 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         }
         for (auto it = blockPools.begin(); it != blockPools.end(); ++it) {
             BlockPool &bp = it.value();
-            bp.resume.fill(0, bp.groups.size());
-            bp.taken.fill(0, bp.groups.size());
             for (int g = 0; g < bp.groups.size(); ++g) {
                 std::sort(bp.groups[g].begin(), bp.groups[g].end(), airedBefore);
                 // The series keeps one place wherever it airs, so moving a
-                // block around never restarts it.
+                // block around never restarts it. Worked out once per series:
+                // a second block holding the same show reads the same place.
+                if (seriesResume.contains(bp.keys[g])) continue;
+                int at = 0;
                 const QString mark = def.marks.value(bp.keys[g]);
-                if (mark.isEmpty()) continue;
-                for (int k = 0; k < bp.groups[g].size(); ++k)
-                    if (programmes[bp.groups[g][k]].ref == mark) { bp.resume[g] = k + 1; break; }
+                if (!mark.isEmpty()) {
+                    for (int k = 0; k < bp.groups[g].size(); ++k)
+                        if (programmes[bp.groups[g][k]].ref == mark) { at = k + 1; break; }
+                }
+                seriesResume.insert(bp.keys[g], at);
             }
         }
     }
@@ -414,7 +423,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         if (activeBlock >= 0) {
             BlockPool &bp = blockPools[activeBlock];
             if (!bp.groups.isEmpty()) {
-                ++bp.taken[int(bp.turn % bp.groups.size())];
+                ++seriesTaken[bp.keys[int(bp.turn % bp.groups.size())]];
                 ++bp.turn;
             }
         } else if (def.order == Ordering::Interleaved) {
@@ -429,7 +438,8 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             const BlockPool &bp = blockPools[activeBlock];
             const int g = int(bp.turn % bp.groups.size());
             const QVector<int> &turn = bp.groups[g];
-            return programmes[turn[(bp.resume[g] + bp.taken[g]) % turn.size()]];
+            const int at = seriesResume.value(bp.keys[g]) + seriesTaken.value(bp.keys[g]);
+            return programmes[turn[at % turn.size()]];
         }
         if (def.order == Ordering::Interleaved) {
             // One episode of each series in turn, then round again. Each series
