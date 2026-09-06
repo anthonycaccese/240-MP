@@ -666,7 +666,7 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
         return QMetaObject::invokeMethod(
             m_plex, "request_transcode",
             Q_ARG(QString, ratingKey), Q_ARG(QString, partKey),
-            Q_ARG(QString, sessionId), Q_ARG(QString, QString()),
+            Q_ARG(QString, sessionId), Q_ARG(QString, m_preferredAudioId),
             Q_ARG(QString, QStringLiteral("0")),
             Q_ARG(int, int(qBound<qint64>(0LL, offsetMs, qint64(INT_MAX)))));
     }
@@ -683,6 +683,23 @@ void VirtualChannelsBackend::onPlexItemLoaded(const QVariant &detail) {
     const QVariantMap d = detail.toMap();
     if (d.value("ratingKey").toString() != m_plexAwaitingDetailFor)
         return;
+
+    // The tracks came with the item, so the AUDIO button never has to ask for
+    // them. They belong to this programme: a different one resets the choice,
+    // because track 2 of one show is nothing to do with track 2 of the next.
+    const QString ref = d.value(QStringLiteral("ratingKey")).toString();
+    if (ref != m_audioForRef) {
+        m_audioForRef      = ref;
+        m_audioStreams     = d.value(QStringLiteral("audioStreams")).toList();
+        m_preferredAudioId.clear();
+        m_audioIndex = 0;
+        const QString playing = d.value(QStringLiteral("selectedAudioId")).toString();
+        for (int i = 0; i < m_audioStreams.size(); ++i)
+            if (m_audioStreams[i].toMap().value(QStringLiteral("id")).toString() == playing) {
+                m_audioIndex = i;
+                break;
+            }
+    }
 
     const QString partKey = d.value("partKey").toString();
     m_plexAwaitingDetailFor.clear();
@@ -759,6 +776,34 @@ bool VirtualChannelsBackend::deliverPreviewUrl(const QString &url, const QString
     }
     emit previewStreamReady(ch, full, double(pos));
     return true;
+}
+
+QVariantMap VirtualChannelsBackend::cycle_audio(int channelNumber) {
+    QVariantMap refused;
+    refused["switched"] = false;
+
+    // Nothing to move between, or nothing resolved yet to move between on.
+    if (m_audioStreams.size() < 2) return refused;
+    // A request is already in the air. Pressing the button again while the
+    // stream is being fetched would abandon that fetch and start another.
+    if (m_urlPending) return refused;
+
+    m_audioIndex = (m_audioIndex + 1) % int(m_audioStreams.size());
+    m_preferredAudioId =
+        m_audioStreams[m_audioIndex].toMap().value(QStringLiteral("id")).toString();
+
+    qInfo("[VirtualChannels] audio track %d of %lld for the programme on channel %d: %s",
+          m_audioIndex + 1, static_cast<long long>(m_audioStreams.size()), channelNumber,
+          qPrintable(m_audioStreams[m_audioIndex].toMap()
+                         .value(QStringLiteral("displayTitle")).toString()));
+
+    // The programme is resolved again from scratch, which is what puts it back
+    // at the offset the clock says it has reached rather than at its beginning.
+    QVariantMap m = tune(channelNumber);
+    m["switched"] = true;
+    m["audioTrackLabel"] =
+        m_audioStreams[m_audioIndex].toMap().value(QStringLiteral("displayTitle")).toString();
+    return m;
 }
 
 QVariantMap VirtualChannelsBackend::tune(int channelNumber) {
@@ -889,6 +934,16 @@ void VirtualChannelsBackend::onPlexStreamUrlReady(const QString &url, const QStr
     m["pending"]   = false;
     m["url"]       = url;
     m["plexToken"] = plexToken;
+    // What the player needs to decide whether the AUDIO button is its business
+    // or mpv's. On a direct play mpv can move between the tracks itself, in
+    // place, without anybody stopping anything.
+    m["transcoded"]      = !m_plexTranscodeSession.isEmpty();
+    m["audioTrackCount"] = int(m_audioStreams.size());
+    m["audioTrackLabel"] =
+        (m_audioIndex >= 0 && m_audioIndex < m_audioStreams.size())
+            ? m_audioStreams[m_audioIndex].toMap()
+                  .value(QStringLiteral("displayTitle")).toString()
+            : QString();
     // A transcode is started at the join offset, so the stream mpv is handed is
     // meant to begin there. Logged because that assumption is exactly what a
     // programme that never starts calls into question.
@@ -902,6 +957,11 @@ void VirtualChannelsBackend::onPlexStreamUrlReady(const QString &url, const QStr
 
 void VirtualChannelsBackend::release_tuner() {
     m_tunedChannel = -1;
+    // The tracks belonged to what was airing, and nothing is now.
+    m_audioStreams.clear();
+    m_audioIndex = -1;
+    m_audioForRef.clear();
+    m_preferredAudioId.clear();
     if (!m_plexTranscodeSession.isEmpty() && m_plex
         && m_plex->metaObject()->indexOfMethod("stop_transcode(QString)") >= 0) {
         QMetaObject::invokeMethod(m_plex, "stop_transcode",

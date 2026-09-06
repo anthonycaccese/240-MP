@@ -51,6 +51,13 @@ FocusScope {
     property int overrunTicks: 0
 
     property bool recovering: false
+    // The AUDIO button is ours to answer only when the source has baked the
+    // track into the stream. On a direct play mpv moves between the tracks
+    // itself, in place, and taking over would stop the picture for nothing.
+    property bool switchingAudio: false
+    property int  audioTrackCount: 0
+    property bool streamIsTranscoded: false
+    readonly property bool audioIsOurs: streamIsTranscoded && audioTrackCount > 1
 
     property string leavingTo: ""
 
@@ -244,6 +251,14 @@ FocusScope {
         if (v === undefined || v === null || v === "") return fallback
         if (typeof v === "string") return v.toUpperCase() === "ON"
         return !!v
+    }
+
+    // The OSC cycles the track itself unless told the module will do it. On a
+    // transcode there is only ever one track in the stream, so cycling locally
+    // finds nothing and reopens the stream -- which is what used to send the
+    // programme back to its beginning.
+    function audioArgs() {
+        return ["--script-opts-append=audio-cycle=" + (audioIsOurs ? "1" : "0")]
     }
 
     function volumeArgs() {
@@ -518,6 +533,13 @@ FocusScope {
         filler = false
         fillerTimer.stop()
 
+        // Whether the AUDIO button is this screen's to answer, learned from the
+        // stream the descriptor describes.
+        if (descriptor) {
+            playerRoot.streamIsTranscoded = descriptor.transcoded === true
+            playerRoot.audioTrackCount    = Number(descriptor.audioTrackCount) || 0
+        }
+
         if (descriptor && descriptor.needsRegeneration && !rebuildTried) {
             rebuildTried = true
             rebuilding = true
@@ -581,7 +603,9 @@ FocusScope {
             [],
             0.0,
             false,
-            playerRoot.logoArgs(descriptor.startSeconds).concat(playerRoot.volumeArgs()),
+            playerRoot.logoArgs(descriptor.startSeconds)
+                      .concat(playerRoot.volumeArgs())
+                      .concat(playerRoot.audioArgs()),
             descriptor.jellyfinToken || "",
             playerRoot.extraUrlsFor(descriptor)
         )
@@ -668,8 +692,32 @@ FocusScope {
             mpvController.forceStop()
         }
 
+        // The AUDIO button, where the track is baked into the stream. mpv has to
+        // be stopped before the stream can be asked for again, and its exit runs
+        // the ordinary "the viewer stopped" path -- so the work waits for the
+        // exit, exactly as the Jellyfin player does it.
+        function onAudioCycleRequested() {
+            if (!playerRoot.audioIsOurs || playerRoot.switchingAudio) return
+            playerRoot.switchingAudio = true
+            mpvController.stop()
+        }
+
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
             playerRoot.tuneAskedAt = Date.now()
+            if (playerRoot.switchingAudio) {
+                playerRoot.switchingAudio = false
+                playerRoot.offAir = false
+                playerRoot.tuning = true
+                // Resolved again from the clock, so it comes back where the
+                // programme has actually got to. If the source will not give a
+                // different track, tune as usual rather than leaving a stopped
+                // player looking at nothing.
+                var next = virtualChannelsBackend.cycle_audio(playerRoot.channelNumber)
+                if (!next || next.switched !== true)
+                    next = virtualChannelsBackend.tune(playerRoot.channelNumber)
+                playerRoot.apply(next)
+                return
+            }
             if (playerRoot.leavingTo !== "") {
                 var dest = playerRoot.leavingTo
                 playerRoot.leavingTo = ""

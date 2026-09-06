@@ -48,6 +48,14 @@ public:
 
     Q_INVOKABLE QVariantMap tune(int channelNumber);
 
+    // Move to the next audio track of the programme now airing and hand back a
+    // descriptor for it, exactly as tune() would. Where a channel is
+    // transcoding, the track is chosen by the server and cannot be changed
+    // without asking for the stream again -- so this asks again, at the offset
+    // the clock says the programme has reached, which is why the viewer sees it
+    // carry on rather than start over.
+    Q_INVOKABLE QVariantMap cycle_audio(int channelNumber);
+
     Q_INVOKABLE QVariantMap after_playback(int channelNumber,
                                            const QString &reason,
                                            int slotIndex,
@@ -436,6 +444,17 @@ private:
     QString plexVideoQuality() const;
 
     QString m_plexTranscodeSession;
+    // The audio tracks of the programme now tuned, as its source reported them
+    // when the item was resolved, and which one is playing. Kept so the AUDIO
+    // button can move between them without asking for the list again; cleared
+    // when the programme changes, because they belong to that programme.
+    QVariantList m_audioStreams;
+    int          m_audioIndex = -1;
+    QString      m_audioForRef;
+    // Asked for on the next stream request. Empty means "whatever the source
+    // would have chosen", which is what every channel gets until asked.
+    QString      m_preferredAudioId;
+
     qint64  m_plexPendingOffsetMs = 0;
     bool    m_plexPendingTranscodeOk = false;
     bool    requestServerUrl(const vchan::Slot &s);
