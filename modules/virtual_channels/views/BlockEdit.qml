@@ -333,139 +333,27 @@ FocusScope {
             current = Math.min(navListState.currentIndex, rowCount - 1)
     }
 
-    Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
-            goBack()
-        } else if (event.key === Qt.Key_Up) {
-            current = (current - 1 + rowCount) % rowCount
-            armedToDelete = false
-            status = ""
-        } else if (event.key === Qt.Key_Down) {
-            current = (current + 1) % rowCount
-            armedToDelete = false
-            status = ""
-        } else if (event.key === Qt.Key_Left) {
-            if (cycles(current)) step_(-1)
-        } else if (event.key === Qt.Key_Right) {
-            if (cycles(current)) step_(1)
-            else open(current)
-        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            open(current)
-        }
-        event.accepted = true
-    }
-
-    Rectangle { anchors.fill: parent; color: root.surfaceColor }
-
-    AppBar {
-        id: appBar
+    // The same list every other settings screen is: the arrows beside a row
+    // mean what they mean everywhere else, and the footer says what this row
+    // does rather than what the screen can do.
+    OptionList {
+        anchors.fill: parent
+        focus: true
         iconSource: editRoot.moduleIcon
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.topMargin: root.sh * 0.075
-        anchors.leftMargin: root.sw * 0.125
         title: editRoot.block
                ? (editRoot.clockLabel(editRoot.block.startsAtMinute) + " — " + editRoot.sourceLabel())
                : "Block"
-    }
-
-    ListView {
-        id: rowList
-        anchors.top: appBar.bottom
-        anchors.topMargin: root.sh * 0.03
-        anchors.bottom: helpBackground.top
-        anchors.bottomMargin: root.sh * 0.02
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: root.sw * 0.75
-        clip: true
-        interactive: false
-        model: editRoot.rowCount
-        currentIndex: editRoot.current
-        highlightMoveDuration: 0
-
-        delegate: Item {
-            required property int index
-            width: rowList.width
-            height: root.sh * 0.07
-            readonly property bool selected: index === editRoot.current
-
-            Rectangle {
-                anchors.fill: parent
-                color: parent.selected ? root.accentColor : "transparent"
-            }
-
-            Text {
-                text: editRoot.labelFor(parent.index)
-                color: parent.selected ? root.surfaceColor : root.primaryColor
-                font.family: root.globalFont
-                font.capitalization: Font.AllUppercase
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: root.sw * 0.0125
-                anchors.right: valueText.left
-                anchors.rightMargin: root.sw * 0.0125
-                elide: Text.ElideRight
-                font.pixelSize: root.sh * 0.0354
-            }
-
-            Text {
-                id: valueText
-                text: editRoot.valueFor(parent.index)
-                color: parent.selected ? root.surfaceColor : root.tertiaryColor
-                font.family: root.globalFont
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.right: parent.right
-                anchors.rightMargin: root.sw * 0.0125
-                font.pixelSize: root.sh * 0.0271
-            }
-        }
-    }
-
-    Rectangle {
-        id: helpBackground
-        property color baseColor: root.primaryColor
-        color: Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.2)
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.bottomMargin: root.sh * 0.1583333
-        anchors.leftMargin: root.sw * 0.125
-        width: root.sw * 0.75
-        height: root.sh * 0.0583333
-        clip: true
-
-        Text {
-            text: editRoot.status !== "" ? editRoot.status : editRoot.helpFor(editRoot.current)
-            color: root.primaryColor
-            font.family: root.globalFont
-            font.pixelSize: root.sh * 0.0291667
-            wrapMode: Text.WordWrap
-            anchors.fill: parent
-            anchors.margins: root.sw * 0.0125
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
-
-    // Says what this row does, not what the screen can do: select does nothing
-    // on a row that only cycles, and offering it there is a promise the screen
-    // does not keep.
-    readonly property string rowHint: {
-        var parts = []
-        if (cycles(current)) parts.push(root.hints.change + ":CHANGE")
-        else                 parts.push(root.hints.select + ":"
-                                        + (rows[current] === "delete" ? "DELETE" : "CHOOSE"))
-        return parts.join(" ")
-    }
-
-    Text {
-        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE "
-              + editRoot.rowHint
-        color: root.tertiaryColor
-        font.family: root.globalFont
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.bottomMargin: root.sh * 0.0833333
-        anchors.leftMargin: root.sw * 0.125
-        font.pixelSize: root.sh * 0.0291667
+        rows: editRoot.rows
+        current: editRoot.current
+        onCurrentChanged: { editRoot.current = current; editRoot.armedToDelete = false }
+        status: editRoot.status
+        labelFor: function(i) { return editRoot.labelFor(i) }
+        valueFor: function(i) { return editRoot.valueFor(i) }
+        helpFor:  function(i) { return editRoot.helpFor(i) }
+        cycles:   function(i) { return editRoot.cycles(i) }
+        actionFor: function(i) { return editRoot.rows[i] === "delete" ? "DELETE" : "CHOOSE" }
+        onStep:     function(d) { editRoot.step_(d) }
+        onActivate: function(i) { editRoot.open(i) }
+        onBack:     function() { editRoot.goBack() }
     }
 }

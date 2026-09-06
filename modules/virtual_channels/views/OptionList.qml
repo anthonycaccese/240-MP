@@ -12,9 +12,6 @@ Item {
     property var valueFor: function(i) { return "" }
     property var helpFor:  function(i) { return "" }
     property var cycles:   function(i) { return false }
-    // A row that cycles usually has nothing to open, so select cycles it too.
-    // A row that says yes here has both: left and right choose, select opens.
-    property var opens:    function(i) { return false }
     property var actionFor: function(i) { return "OPEN" }
     property var secondaryFor: function(i) { return "" }
 
@@ -36,16 +33,13 @@ Item {
     signal secondary(int index)
     signal back()
 
-    // A row that only cycles is changed, a row that only opens is selected, and
-    // a row that does both says so, in that order.
-    readonly property string changeAndSelectHint: {
-        if (count === 0) return root.hints.select + ":" + actionFor(current)
-        var parts = []
-        if (cycles(current)) parts.push(root.hints.change + ":CHANGE")
-        if (!cycles(current) || opens(current))
-            parts.push(root.hints.select + ":" + actionFor(current))
-        return parts.join(" ")
-    }
+    // A row either changes where it stands or opens something. Never both:
+    // nothing else in the app does, and the arrows beside a row are how a
+    // viewer tells which it is.
+    readonly property string changeAndSelectHint:
+        (count > 0 && cycles(current))
+            ? root.hints.change + ":CHANGE"
+            : root.hints.select + ":" + actionFor(current)
 
     // The same jump the source browser has, so a long list behaves the same
     // whichever screen it is on. Pressing the letter again moves to the next
@@ -89,8 +83,8 @@ Item {
             else if (secondaryFor(current) !== "")    optionList.secondary(current)
             else                                      optionList.activate(current)
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (!opens(current) && cycles(current)) optionList.step(1)
-            else                                    optionList.activate(current)
+            if (cycles(current)) optionList.step(1)
+            else                 optionList.activate(current)
         } else if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
                    || (event.key >= Qt.Key_0 && event.key <= Qt.Key_9)) {
             optionList.jumpTo(String.fromCharCode(event.key))

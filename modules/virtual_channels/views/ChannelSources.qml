@@ -60,6 +60,10 @@ FocusScope {
         }
 
         r.push("timing")
+        // Blocks are managed on a screen of their own, reached from a row of
+        // its own -- the way movie slots are. A row that both cycles and opens
+        // is a row nothing else in the app is.
+        if (onADayPlan) r.push("blocks")
 
         // On blocks, each block names what it plays and carries its own
         // bumpers, so the pools are not read at all -- offering them here would
@@ -115,6 +119,7 @@ FocusScope {
     readonly property bool isMovies: cfg.kind === "movies"
     readonly property bool onADayPlan: cfg.schedule === "day_plan"
     readonly property int  planCount: cfg.planCount !== undefined ? cfg.planCount : 0
+    property int blockCount: 0
     readonly property bool fromPlaylist: cfg.filmsFrom === "playlist"
 
     // Plex calls a film's genres its categories. The screens follow whichever
@@ -130,6 +135,13 @@ FocusScope {
         slotCount = virtualChannelsBackend.channel_bookings(channelNumber).length
         interstitials = virtualChannelsBackend.channel_interstitials(channelNumber)
         channelLogo = virtualChannelsBackend.channel_logo(channelNumber) || ""
+        // How many blocks the days hold between them, counted the way the slots
+        // are, so the row says what is behind it without being opened.
+        var plans = virtualChannelsBackend.channel_plans(channelNumber)
+        var blocks = 0
+        for (var d = 0; d < plans.length; d++)
+            blocks += (plans[d].blocks || []).length
+        blockCount = blocks
         var timing = virtualChannelsBackend.channel_timing(channelNumber)
         gridMinutes = timing.gridMinutes
         adsPerBreak = timing.adsPerBreak
@@ -200,6 +212,7 @@ FocusScope {
         case "logo":         return "Logo"
         case "order":        return "Order"
         case "timing":       return "Schedule"
+        case "blocks":       return "Manage Blocks"
         case "ads":          return "Per Break"
         case "breaks":       return "Breaks"
         case "rebuild":      return building ? "Building…" : "Build Channel"
@@ -255,6 +268,10 @@ FocusScope {
             return sourcesRoot.order === "shuffle" ? "SHUFFLE"
                  : sourcesRoot.order === "interleaved" ? "INTERLEAVED"
                                                        : "BROADCAST"
+        case "blocks": {
+            var b = sourcesRoot.blockCount
+            return b === 0 ? "NONE" : (b === 1 ? "1 BLOCK" : b + " BLOCKS")
+        }
         case "timing":
             if (sourcesRoot.onADayPlan)
                 return "BLOCKS"
@@ -304,8 +321,9 @@ FocusScope {
                                  : sourcesRoot.order === "interleaved"
                                    ? "Series take turns, each keeping its own place — a short one comes round again while a long one plays on."
                                    : "Everything airs in the order it first did, oldest first, whichever show it belongs to."
+        case "blocks":      return "The day, block by block: this show at this hour, then that one."
         case "timing":      return sourcesRoot.onADayPlan
-                                   ? "A day laid out as blocks — this show at this hour, then that one. " + root.hints.select + " opens them."
+                                   ? "A day laid out as blocks — this show at this hour, then that one."
                                  : sourcesRoot.gridMinutes === 0
                                    ? "Free run: each program starts when the last one ended."
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
@@ -381,9 +399,7 @@ FocusScope {
         if (building) return
         var row = rows[i]
 
-        // Blocks are the one row that both cycles and opens: left and
-        // right choose how the channel keeps time, and select opens the day.
-        if (row === "timing" && sourcesRoot.onADayPlan) {
+        if (row === "blocks") {
             if (sourcesRoot.planCount === 0) {
                 // Nothing to open yet, so make the day the viewer just asked
                 // for: one block, one slot of the grid, waiting to be told what
@@ -526,10 +542,6 @@ FocusScope {
         valueFor: function(i) { return sourcesRoot.valueFor(i) }
         helpFor:  function(i) { return sourcesRoot.helpFor(i) }
         cycles:   function(i) { return sourcesRoot.cycles(i) }
-        opens:    function(i) { return sourcesRoot.rows[i] === "timing"
-                                       && sourcesRoot.onADayPlan }
-        actionFor: function(i) { return sourcesRoot.rows[i] === "timing"
-                                        ? "BLOCKS" : "OPEN" }
         onStep:     function(d) { sourcesRoot.step(d) }
         onActivate: function(i) { sourcesRoot.open(i) }
         onBack:     function() { sourcesRoot.goBack() }

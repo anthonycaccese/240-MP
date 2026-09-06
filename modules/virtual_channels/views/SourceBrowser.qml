@@ -61,7 +61,11 @@ FocusScope {
                                       : kind === "movies"       ? "films"
                                       : kind === "moviegenres"  ? "genres"
                                       : "match"
-    readonly property bool canDescend: kind === "shows" || kind === "seasons"
+    // Descending narrows a channel's pool to particular seasons and episodes,
+    // which is a thing a pool row has and a block does not: a block draws on a
+    // whole series. Selecting a season here used to hand its name back as the
+    // block's show, which then matched nothing at all.
+    readonly property bool canDescend: (kind === "shows" || kind === "seasons") && !pickOne
 
     focus: true
 
@@ -497,6 +501,9 @@ FocusScope {
 
             Rectangle {
                 id: box
+                // A tick says whether a thing is in a list. Choosing one thing
+                // and coming straight back has no list to be in.
+                visible: !browserRoot.pickOne
                 // Whole, even pixels: at this size the nominal 0.030 lands on
                 // 14.4, and a box with fractional edges cannot hold a centred
                 // square -- the halves round apart and it sits a pixel high.
@@ -562,9 +569,11 @@ FocusScope {
                  : "TICKED CAN AIR IN THIS SLOT")
               : browserRoot.partialHint() !== ""
                 ? browserRoot.partialHint()
-                : browserRoot.isExclusionLevel
-                  ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
-                  : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
+                : browserRoot.pickOne
+                  ? "CHOOSE ONE FOR THIS BLOCK"
+                  : browserRoot.isExclusionLevel
+                    ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
+                    : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
         color: root.tertiaryColor
         font.family: root.globalFont
         font.pixelSize: root.sh * 0.0271
@@ -577,7 +586,7 @@ FocusScope {
               // that can run to hundreds of rows, so it says so here too.
               + (browserRoot.canDescend ? root.hints.change + ":OPEN  A-Z:JUMP "
                                         : root.hints.change + ":LETTER  A-Z:JUMP ")
-              + root.hints.select + ":TOGGLE"
+              + root.hints.select + (browserRoot.pickOne ? ":CHOOSE" : ":TOGGLE")
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

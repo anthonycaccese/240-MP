@@ -328,9 +328,20 @@ FocusScope {
         }
     }
 
+    // What this row does, not what the screen can do: the day row changes which
+    // day is being laid out and opens nothing, and the row that adds a block
+    // has nothing to move. Built per row the way the channel list builds its.
+    readonly property string rowHint: {
+        if (current === planRow)
+            return plans.length > 1 ? root.hints.change + ":CHANGE" : ""
+        if (current === addIndex)
+            return root.hints.select + ":ADD"
+        return root.hints.change + ":MOVE " + root.hints.select + ":OPEN"
+    }
+
     Text {
         text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE "
-              + root.hints.change + ":MOVE " + root.hints.select + ":OPEN"
+              + planRoot.rowHint
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom
