@@ -1877,13 +1877,13 @@ void VirtualChannelsBackend::rebuildNextOrFinish() {
 
     QString summary;
     if (m_rebuildFailed == 0)
-        summary = QStringLiteral("Rebuilt %1 channel%2")
+        summary = QStringLiteral("Built %1 channel%2")
                       .arg(m_rebuildOk).arg(m_rebuildOk == 1 ? "" : "s");
     else if (m_rebuildOk == 0)
         summary = QStringLiteral("Could not rebuild any of %1 channels")
                       .arg(m_rebuildFailed);
     else
-        summary = QStringLiteral("Rebuilt %1 of %2 channels — %3 had nothing to build")
+        summary = QStringLiteral("Built %1 of %2 channels — %3 had nothing to build")
                       .arg(m_rebuildOk).arg(m_rebuildOk + m_rebuildFailed).arg(m_rebuildFailed);
 
     qInfo("[VirtualChannels] rebuild all: %s", qPrintable(summary));

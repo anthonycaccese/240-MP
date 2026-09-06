@@ -518,7 +518,10 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         return from[pick(from.size())];
     };
 
-    const auto placeFiller = [&](qint64 durMs) {
+    // `held` says this stretch has nothing booked to it, rather than being the
+    // tail of a programme's own slot. A sliver too short to be worth a row of
+    // its own still joins the slot before it, and takes that slot's meaning.
+    const auto placeFiller = [&](qint64 durMs, bool held = false) {
         if (durMs <= 0) return;
         if (durMs < kMinFillerMs && !out.isEmpty()) {
             out.back().dur += durMs;
@@ -531,6 +534,7 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
         f.kind  = SlotKind::Filler;
         f.src   = SlotSource::Local;
         f.title = def.name;
+        f.held  = held;
         out.push_back(f);
         t += durMs;
     };
@@ -698,19 +702,24 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             if (until <= t) continue;
             if (sp.start > t) {
                 // A stretch no plan covers: the card holds it rather than the
-                // channel reading as off air.
+                // channel reading as off air. Nothing was booked to it, so the
+                // guide says so rather than counting it as part of whatever
+                // happened to air before it.
                 activeBlock = -1;
-                placeFiller(qMin(sp.start, horizonEnd) - t);
+                placeFiller(qMin(sp.start, horizonEnd) - t, /*held*/ true);
             }
             // A block whose source gathered nothing is held by the card too,
             // for exactly as long as the plan gave it.
             activeBlock = blockHasProgrammes(sp.block.id) ? sp.block.id : -1;
-            if (activeBlock < 0) placeFiller(until - t);
+            if (activeBlock < 0) placeFiller(until - t, /*held*/ true);
             else                 fill(until, /*padRemainder*/ true);
+            // What is left of a block its own programmes could not fill is the
+            // tail of that block, not a stretch nobody booked, so it stays with
+            // the programme before it.
             if (t < until) placeFiller(until - t);
         }
         activeBlock = -1;
-        if (t < horizonEnd) placeFiller(horizonEnd - t);
+        if (t < horizonEnd) placeFiller(horizonEnd - t, /*held*/ true);
     } else {
         for (const Anchor &a : anchors) {
             if (out.size() >= kMaxSlotsPerChannel) break;
@@ -738,6 +747,7 @@ QByteArray serializeSchedule(const ChannelDef &def,
         o["kind"]  = slotKindToString(s.kind);
         o["src"]   = slotSourceToString(s.src);
         o["ref"]   = s.ref;
+        if (s.held)               o["held"]     = true;
         if (!s.partKey.isEmpty()) o["part_key"] = s.partKey;
         if (!s.title.isEmpty())   o["title"]    = s.title;
         if (!s.series.isEmpty())  o["series"]   = s.series;

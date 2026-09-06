@@ -195,6 +195,108 @@ int runChannelScheduleTests() {
         checkEq(g.runWindow(0).size(), 2, "run stops at the gap");
     }
 
+    // A channel laid out in blocks holds the hours nothing is booked to. That
+    // stretch belongs to nobody: counted into the programme before it, a two
+    // hour film on a channel that then holds until noon reads as a fourteen
+    // hour film.
+    section("programmeBlocks: a held stretch is its own entry");
+    {
+        const qint64 filmDur = 7200000;      // two hours
+        const qint64 heldDur = 43200000;     // twelve
+        const QByteArray json = QStringLiteral(
+            R"({"channel":1,"generated_at":%1,"slots":[)"
+            R"({"start":%2,"dur":%3,"kind":"programme","src":"local","ref":"akira.mkv","title":"Akira"},)"
+            R"({"start":%4,"dur":600000,"kind":"filler","src":"local","title":"Chan"},)"
+            R"({"start":%5,"dur":%6,"kind":"filler","src":"local","title":"Chan","held":true},)"
+            R"({"start":%7,"dur":1500000,"kind":"programme","src":"local","ref":"next.mkv","title":"Next Up"}]})")
+            .arg(kBase - 1000)
+            .arg(kBase).arg(filmDur)
+            .arg(kBase + filmDur)
+            .arg(kBase + filmDur + 600000).arg(heldDur)
+            .arg(kBase + filmDur + 600000 + heldDur)
+            .toUtf8();
+
+        const auto s = ChannelSchedule::fromJson(json);
+        check(s.isValid(), "a schedule with a held stretch parses");
+
+        const auto blocks = s.programmeBlocks(kBase, kBase + filmDur + heldDur + 3600000);
+        checkEq(blocks.size(), 3, "the film, the held stretch, and what follows");
+        if (blocks.size() == 3) {
+            check(blocks[0].title == QLatin1String("Akira"), "the film is first");
+            checkEq(blocks[0].dur, filmDur + 600000,
+                    "it keeps the padding that belongs to it, and nothing more");
+
+            check(blocks[1].title == QLatin1String("No Content"),
+                  "the held stretch says what it is");
+            checkEq(blocks[1].dur, heldDur, "and runs for exactly as long as it was held");
+
+            check(blocks[2].title == QLatin1String("Next Up"), "the next programme follows it");
+        }
+
+        bool tiles = true;
+        for (int i = 1; i < blocks.size(); ++i)
+            if (blocks[i].start != blocks[i-1].end()) tiles = false;
+        check(tiles, "and the three still tile the timeline");
+
+        ChannelSchedule::Block on;
+        check(s.blockAt(kBase + filmDur + 600000 + 1000, &on), "something is on while it holds");
+        check(on.title == QLatin1String("No Content"), "and it is the held stretch");
+        check(on.slotIndex >= 0 && on.slotIndex < s.slotList().size(),
+              "which names a real slot, so asking what is on cannot run off the end");
+    }
+
+    // A build that starts partway through a block leaves filler in front of the
+    // first programme. That is not padding for a programme -- there is none
+    // before it -- so it reads as no content rather than as an empty row, which
+    // is what a viewer would take for a channel with nothing on it at all.
+    section("programmeBlocks: filler before the first programme says so");
+    {
+        const QByteArray json = QStringLiteral(
+            R"({"channel":1,"generated_at":%1,"slots":[)"
+            R"({"start":%2,"dur":6720000,"kind":"filler","src":"local","title":"Chan"},)"
+            R"({"start":%3,"dur":1800000,"kind":"filler","src":"local","title":"Chan","held":true},)"
+            R"({"start":%4,"dur":1500000,"kind":"programme","src":"local","ref":"a.mkv","title":"First Show"}]})")
+            .arg(kBase - 1000)
+            .arg(kBase)
+            .arg(kBase + 6720000)
+            .arg(kBase + 6720000 + 1800000)
+            .toUtf8();
+        const auto s = ChannelSchedule::fromJson(json);
+        check(s.isValid(), "a schedule that opens on filler parses");
+
+        const auto blocks = s.programmeBlocks(kBase, kBase + 6720000 + 1800000 + 1500000);
+        checkEq(blocks.size(), 2, "the hold and the programme after it");
+        if (blocks.size() == 2) {
+            check(blocks[0].title == QLatin1String("No Content"),
+                  "the stretch before the first programme is named");
+            checkEq(blocks[0].start, kBase, "starting where the schedule does");
+            checkEq(blocks[0].dur, 6720000 + 1800000, "and running until something is on");
+            check(blocks[1].title == QLatin1String("First Show"), "then the programme");
+        }
+
+        ChannelSchedule::Block on;
+        check(s.blockAt(kBase + 1000, &on), "something is on at the very start");
+        check(on.title == QLatin1String("No Content"), "and it says there is nothing on");
+    }
+
+    // A channel that has been switched to blocks but had nothing put in them
+    // yet holds all day. It still has a guide entry: the alternative is a row
+    // that reads as though the channel does not exist.
+    section("programmeBlocks: a channel holding all day still says so");
+    {
+        const QByteArray json = QStringLiteral(
+            R"({"channel":1,"generated_at":%1,"slots":[)"
+            R"({"start":%2,"dur":3600000,"kind":"filler","src":"local","title":"Chan","held":true}]})")
+            .arg(kBase - 1000).arg(kBase).toUtf8();
+        const auto s = ChannelSchedule::fromJson(json);
+        check(s.isValid(), "a schedule of nothing but a hold parses");
+        const auto blocks = s.programmeBlocks(kBase, kBase + 3600000);
+        checkEq(blocks.size(), 1, "it has an entry");
+        if (!blocks.isEmpty())
+            check(blocks[0].title == QLatin1String("No Content"),
+                  "saying there is nothing on");
+    }
+
     section("clockLooksSane");
     {
         check(!clockLooksSane(0, 0),                    "epoch zero is not sane");

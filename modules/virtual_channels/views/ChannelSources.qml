@@ -183,7 +183,7 @@ FocusScope {
         case "timing":       return "Schedule"
         case "ads":          return "Per Break"
         case "breaks":       return "Breaks"
-        case "rebuild":      return building ? "Rebuilding…" : "Rebuild This Channel"
+        case "rebuild":      return building ? "Building…" : "Build Channel"
         case "rename":       return "Rename"
         case "delete":       return sourcesRoot.armedToDelete ? "Delete — Press Again" : "Delete Channel"
         }
@@ -284,7 +284,7 @@ FocusScope {
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
         case "ads":         return "How many things play between programs. Free run only — on a clock the gap decides."
         case "breaks":      return "What plays between programs: intros, bumps, commercials and outros."
-        case "rebuild":     return "Rebuild the schedule so source changes actually air."
+        case "rebuild":     return "Build the schedule so source changes actually air."
         case "rename":      return "Change what this channel is called."
         case "delete":      return sourcesRoot.armedToDelete
                                    ? "Press again to remove this channel, or move away to keep it."
@@ -408,7 +408,7 @@ FocusScope {
 
         if (row === "rebuild") {
             building = true
-            status = "Rebuilding…"
+            status = "Building…"
             virtualChannelsBackend.regenerate(channelNumber)
             return
         }
@@ -480,7 +480,7 @@ FocusScope {
         function onGenerationFinished(ch, ok, message) {
             if (ch !== sourcesRoot.channelNumber) return
             sourcesRoot.building = false
-            sourcesRoot.status = (ok ? "Rebuilt: " : "Failed: ") + message
+            sourcesRoot.status = (ok ? "Built: " : "Failed: ") + message
             sourcesRoot.reload()
         }
     }

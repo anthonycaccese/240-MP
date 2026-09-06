@@ -165,7 +165,7 @@ FocusScope {
                                       && (tuning || offAir)
 
     readonly property string cardLine: {
-        if (rebuilding) return rebuildNote !== "" ? rebuildNote : "Rebuilding schedule…"
+        if (rebuilding) return rebuildNote !== "" ? rebuildNote : "Building schedule…"
         if (inTrouble)  return "Please stand by"
         if (filler)     return nextUpTitle !== "" ? "Up next · " + nextUpTitle : ""
         if (tuning)     return "Tuning…"
@@ -593,8 +593,8 @@ FocusScope {
         function onGenerationProgress(ch, done, total) {
             if (!playerRoot.rebuilding || ch !== playerRoot.channelNumber) return
             playerRoot.rebuildNote = total > 0
-                ? "Rebuilding schedule… " + done + " of " + total
-                : "Rebuilding schedule…"
+                ? "Building schedule… " + done + " of " + total
+                : "Building schedule…"
         }
 
         function onGenerationFinished(ch, ok, message) {

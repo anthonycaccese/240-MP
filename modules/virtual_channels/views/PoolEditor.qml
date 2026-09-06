@@ -62,7 +62,7 @@ FocusScope {
     function labelFor(i) {
         var row = rows[i]
         if (row === undefined) return ""
-        if (row === "rebuild") return building ? "Rebuilding…" : "Rebuild This Channel"
+        if (row === "rebuild") return building ? "Building…" : "Build Channel"
         if (row.indexOf("add:") === 0) return "Add From " + sourceLabel(row.substring(4))
 
         var e = entryAt(i)
@@ -94,7 +94,7 @@ FocusScope {
     function helpFor(i) {
         var row = rows[i]
         if (row === undefined) return ""
-        if (row === "rebuild") return "Rebuild the schedule so a change here actually airs."
+        if (row === "rebuild") return "Build the schedule so a change here actually airs."
         if (row.indexOf("add:") === 0)
             return row.substring(4) === "local"
                    ? "Choose a folder of clips under the media directory."
@@ -144,7 +144,7 @@ FocusScope {
 
         if (row === "rebuild") {
             building = true
-            status = "Rebuilding…"
+            status = "Building…"
             virtualChannelsBackend.regenerate(channelNumber)
             return
         }
@@ -225,7 +225,7 @@ FocusScope {
         function onGenerationFinished(ch, ok, message) {
             if (ch !== poolRoot.channelNumber) return
             poolRoot.building = false
-            poolRoot.status = (ok ? "Rebuilt: " : "Failed: ") + message
+            poolRoot.status = (ok ? "Built: " : "Failed: ") + message
             poolRoot.reload()
         }
     }

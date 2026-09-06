@@ -76,7 +76,7 @@ FocusScope {
 
     function labelFor(i) {
         if (i === addIndex)     return "Add Movie Slot"
-        if (i === rebuildIndex) return building ? "Rebuilding…" : "Rebuild This Channel"
+        if (i === rebuildIndex) return building ? "Building…" : "Build Channel"
         var b = bookings[i]
         return timeLabel(b.hour, b.minute) + "  " + b.name
     }
@@ -91,7 +91,7 @@ FocusScope {
         if (i === addIndex)
             return "A new slot at 8 PM every day. Open it to say what it plays."
         if (i === rebuildIndex)
-            return "Rebuild the schedule so slot changes actually air."
+            return "Build the schedule so slot changes actually air."
         var b = bookings[i]
         if (!b.valid) return "This slot has no usable time and will not air. Open it to set one."
         // A folder counts as having picked something, though it is not in
@@ -106,7 +106,7 @@ FocusScope {
 
         if (i === rebuildIndex) {
             building = true
-            status = "Rebuilding…"
+            status = "Building…"
             virtualChannelsBackend.regenerate(channelNumber)
             return
         }
@@ -146,7 +146,7 @@ FocusScope {
         function onGenerationFinished(ch, ok, message) {
             if (ch !== bookingsRoot.channelNumber) return
             bookingsRoot.building = false
-            bookingsRoot.status = (ok ? "Rebuilt: " : "Failed: ") + message
+            bookingsRoot.status = (ok ? "Built: " : "Failed: ") + message
             bookingsRoot.reload()
         }
     }

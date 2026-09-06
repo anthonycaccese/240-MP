@@ -8,6 +8,10 @@ namespace vchan {
 
 enum class SlotKind   { Programme, Commercial, Bump, Intro, Outro, Filler, Unknown };
 
+// What a stretch with nothing booked to it is called, wherever it is named --
+// the guide, the card between programmes, and the day a plan is laid out on.
+inline QString noContentTitle() { return QStringLiteral("No Content"); }
+
 inline bool leadsProgramme(SlotKind k) { return k == SlotKind::Intro; }
 
 enum class SlotSource { Local, Plex, Jellyfin, Emby };
@@ -26,6 +30,11 @@ struct Slot {
     QString    ep;
     QString    desc;
     QString    art;
+    // Filler the schedule put here on purpose, because nothing was booked to
+    // this stretch -- as against filler padding out the end of a programme's
+    // own slot. The card looks the same either way; the guide does not, since
+    // one belongs to the programme before it and the other does not.
+    bool       held = false;
 
     qint64 end() const { return start + dur; }
 };

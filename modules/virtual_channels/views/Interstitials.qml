@@ -56,7 +56,7 @@ FocusScope {
         case "bumps":       return "Bumps"
         case "commercials": return "Commercials"
         case "outros":      return "Outros"
-        case "rebuild":     return "Rebuild This Channel"
+        case "rebuild":     return "Build Channel"
         }
         return ""
     }
@@ -74,7 +74,7 @@ FocusScope {
         case "bumps":       return "Short pieces between the commercials and the program either side of them. The same for every show."
         case "commercials": return "The commercials themselves. A clock channel packs as many as the gap allows. The same for every show."
         case "outros":      return "Played as a program ends, before the break. Open to see which shows override it."
-        case "rebuild":     return "Rebuild the schedule so a change here actually airs."
+        case "rebuild":     return "Build the schedule so a change here actually airs."
         }
         return ""
     }
@@ -87,7 +87,7 @@ FocusScope {
 
         if (row === "rebuild") {
             building = true
-            status = "Rebuilding…"
+            status = "Building…"
             virtualChannelsBackend.regenerate(channelNumber)
             return
         }
@@ -128,7 +128,7 @@ FocusScope {
         function onGenerationFinished(ch, ok, message) {
             if (ch !== interRoot.channelNumber) return
             interRoot.building = false
-            interRoot.status = (ok ? "Rebuilt: " : "Failed: ") + message
+            interRoot.status = (ok ? "Built: " : "Failed: ") + message
             interRoot.reload()
         }
     }

@@ -135,6 +135,7 @@ ChannelSchedule ChannelSchedule::fromJson(const QByteArray &json,
         slot.ep      = o.value(QLatin1String("ep")).toString();
         slot.desc    = o.value(QLatin1String("desc")).toString();
         slot.art     = o.value(QLatin1String("art")).toString();
+        slot.held    = o.value(QLatin1String("held")).toBool(false);
 
         s.m_slots.push_back(slot);
     }
@@ -245,8 +246,6 @@ QVector<ChannelSchedule::Block> ChannelSchedule::programmeBlocks(qint64 fromMs,
         if (m_slots[i].kind == SlotKind::Programme)
             anchors.push_back(i);
 
-    if (anchors.isEmpty()) return blocks;
-
     for (int a = 0; a < anchors.size(); ++a) {
         const int p = anchors[a];
 
@@ -272,11 +271,54 @@ QVector<ChannelSchedule::Block> ChannelSchedule::programmeBlocks(qint64 fromMs,
             b.dur = m_slots.last().end() - b.start;
         }
 
+        // A stretch with nothing booked to it is not part of the programme
+        // before it. Without this a two hour film on a channel that then holds
+        // until the morning reads as a fourteen hour film.
+        for (int j = p + 1; j < m_slots.size() && m_slots[j].start < b.end(); ++j) {
+            if (!m_slots[j].held) continue;
+            b.dur = m_slots[j].start - b.start;
+            break;
+        }
+
         if (b.dur <= 0) continue;
         if (b.end() <= fromMs) continue;
         if (b.start >= toMs)  break;
         blocks.push_back(b);
     }
+
+    // A stretch with nothing booked to it is an entry of its own, so the guide
+    // says so instead of stretching the last programme over it -- or, where the
+    // hold comes before the first programme, instead of an empty row that reads
+    // as though the channel has no listings at all.
+    //
+    // Filler that merely pads out the end of a programme's own slot is still
+    // that programme's, and is left where it is.
+    for (int i = 0; i < m_slots.size(); ) {
+        if (m_slots[i].kind != SlotKind::Filler) { ++i; continue; }
+
+        const int runStart = i;
+        int firstHeld = -1;
+        while (i < m_slots.size() && m_slots[i].kind == SlotKind::Filler) {
+            if (firstHeld < 0 && m_slots[i].held) firstHeld = i;
+            ++i;
+        }
+
+        const bool beforeAnyProgramme = anchors.isEmpty() || runStart < anchors.first();
+        const int from = beforeAnyProgramme ? runStart : firstHeld;
+        if (from < 0) continue;
+
+        Block b;
+        b.start     = m_slots[from].start;
+        b.dur       = m_slots[i - 1].end() - b.start;
+        b.slotIndex = from;
+        b.title     = noContentTitle();
+        if (b.dur <= 0) continue;
+        if (b.end() <= fromMs || b.start >= toMs) continue;
+        blocks.push_back(b);
+    }
+
+    std::sort(blocks.begin(), blocks.end(),
+              [](const Block &x, const Block &y) { return x.start < y.start; });
 
     if (minDurMs <= 0) return blocks;
 

@@ -141,10 +141,10 @@
     },
     {
       "key": "rebuild_all",
-      "label": "Rebuild Schedules",
+      "label": "Build All Channels",
       "type": "action",
       "action_slot": "rebuild_all",
-      "description": "Rebuild every channel's schedule. Do this after adding video."
+      "description": "Build every channel's schedule. Do this after adding video."
     }
   ]
 }

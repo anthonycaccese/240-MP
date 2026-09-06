@@ -339,7 +339,8 @@ a programme if that is where the schedule is.
 
 **A channel is built, not played live.** Editing a pool changes `channels.json`
 only; nothing airs differently until the channel is rebuilt, which is why every
-editing screen carries a REBUILD row and says "rebuild to air the change". A
+editing screen carries a BUILD CHANNEL row and says "rebuild to air the
+change". A
 build probes durations (ffprobe, falling back to mpv), asks each source what it
 holds, lays out the timeline to the configured horizon, and writes the schedule
 file. `SCHEDULE AHEAD` sets that horizon; schedules are topped up nightly and at
