@@ -79,7 +79,7 @@ FocusScope {
             r.push("collections")
             if (cfg.supportsPlaylists) r.push("playlists")
         }
-        // A day plan says when everything airs, so booking a film to a time and
+        // Blocks say when everything airs, so booking a film to a time and
         // choosing an order are both the plan's to decide.
         if (!onADayPlan) {
             r.push("slots")
@@ -231,7 +231,7 @@ FocusScope {
                                                        : "BROADCAST"
         case "timing":
             if (sourcesRoot.onADayPlan)
-                return sourcesRoot.planCount > 0 ? "DAY PLAN ►" : "DAY PLAN"
+                return "BLOCKS"
             return sourcesRoot.gridMinutes === 0
                    ? "FREE RUN" : "ON THE " + sourcesRoot.gridMinutes + " MIN"
         case "ads":
@@ -274,7 +274,7 @@ FocusScope {
                                    ? "Series take turns, each keeping its own place — a short one comes round again while a long one plays on."
                                    : "Everything airs in the order it first did, oldest first, whichever show it belongs to."
         case "timing":      return sourcesRoot.onADayPlan
-                                   ? "A day laid out as blocks — this show at this hour, then that one. " + root.hints.select + " opens it."
+                                   ? "A day laid out as blocks — this show at this hour, then that one. " + root.hints.select + " opens them."
                                  : sourcesRoot.gridMinutes === 0
                                    ? "Free run: each program starts when the last one ended."
                                    : "Every program starts on the clock. Breaks fill the rest; the card holds any remainder."
@@ -323,7 +323,7 @@ FocusScope {
             return
         }
         if (r === "timing") {
-            // Free run, the grids, then a day plan: one more stop on a row that
+            // Free run, the grids, then blocks: one more stop on a row that
             // already asks how a channel keeps time, rather than a row of its
             // own that every channel would have to scroll past.
             var stops = gridChoices.concat(["day_plan"])
@@ -350,7 +350,7 @@ FocusScope {
         if (building) return
         var row = rows[i]
 
-        // The day plan is the one row that both cycles and opens: left and
+        // Blocks are the one row that both cycles and opens: left and
         // right choose how the channel keeps time, and select opens the day.
         if (row === "timing" && sourcesRoot.onADayPlan) {
             if (sourcesRoot.planCount === 0) {
@@ -366,7 +366,7 @@ FocusScope {
                     { name: "SUNDAY",   gridMinutes: 30, days: [7],             blocks: [] }
                 ]
                 if (!virtualChannelsBackend.set_channel_plans(channelNumber, seed)) {
-                    status = "Could not start a day plan"
+                    status = "Could not start the blocks"
                     return
                 }
                 reload()
@@ -495,6 +495,10 @@ FocusScope {
         valueFor: function(i) { return sourcesRoot.valueFor(i) }
         helpFor:  function(i) { return sourcesRoot.helpFor(i) }
         cycles:   function(i) { return sourcesRoot.cycles(i) }
+        opens:    function(i) { return sourcesRoot.rows[i] === "timing"
+                                       && sourcesRoot.onADayPlan }
+        actionFor: function(i) { return sourcesRoot.rows[i] === "timing"
+                                        ? "BLOCKS" : "OPEN" }
         onStep:     function(d) { sourcesRoot.step(d) }
         onActivate: function(i) { sourcesRoot.open(i) }
         onBack:     function() { sourcesRoot.goBack() }

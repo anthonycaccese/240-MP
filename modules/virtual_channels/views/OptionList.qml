@@ -12,6 +12,9 @@ Item {
     property var valueFor: function(i) { return "" }
     property var helpFor:  function(i) { return "" }
     property var cycles:   function(i) { return false }
+    // A row that cycles usually has nothing to open, so select cycles it too.
+    // A row that says yes here has both: left and right choose, select opens.
+    property var opens:    function(i) { return false }
     property var actionFor: function(i) { return "OPEN" }
     property var secondaryFor: function(i) { return "" }
 
@@ -26,6 +29,17 @@ Item {
     signal activate(int index)
     signal secondary(int index)
     signal back()
+
+    // A row that only cycles is changed, a row that only opens is selected, and
+    // a row that does both says so, in that order.
+    readonly property string changeAndSelectHint: {
+        if (count === 0) return root.hints.select + ":" + actionFor(current)
+        var parts = []
+        if (cycles(current)) parts.push(root.hints.change + ":CHANGE")
+        if (!cycles(current) || opens(current))
+            parts.push(root.hints.select + ":" + actionFor(current))
+        return parts.join(" ")
+    }
 
     function clampCurrent() {
         if (current >= count) current = Math.max(0, count - 1)
@@ -51,8 +65,8 @@ Item {
             else if (secondaryFor(current) !== "")    optionList.secondary(current)
             else                                      optionList.activate(current)
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (cycles(current)) optionList.step(1)
-            else                 optionList.activate(current)
+            if (!opens(current) && cycles(current)) optionList.step(1)
+            else                                    optionList.activate(current)
         }
         event.accepted = true
     }
@@ -189,9 +203,7 @@ Item {
               + (optionList.secondaryFor(optionList.current) !== ""
                  ? root.hints.change + ":" + optionList.secondaryFor(optionList.current) + " "
                  : "")
-              + (optionList.count > 0 && optionList.cycles(optionList.current)
-                 ? root.hints.change + ":CHANGE"
-                 : root.hints.select + ":" + optionList.actionFor(optionList.current))
+              + optionList.changeAndSelectHint
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

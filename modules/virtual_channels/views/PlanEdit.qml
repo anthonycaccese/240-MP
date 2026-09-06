@@ -203,8 +203,8 @@ FocusScope {
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.075
         anchors.leftMargin: root.sw * 0.125
-        title: planRoot.plan ? (planRoot.plan.name !== "" ? planRoot.plan.name : "Day Plan")
-                             : "Day Plan"
+        title: planRoot.plan ? (planRoot.plan.name !== "" ? planRoot.plan.name : "Blocks")
+                             : "Blocks"
     }
 
     // What the day adds up to, said out loud. A plan shorter than the day comes
