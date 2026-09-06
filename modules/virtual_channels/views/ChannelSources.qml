@@ -20,15 +20,20 @@ FocusScope {
     property string status: ""
     property bool building: false
 
+    // Ordered by how much a row changes. The three at the top decide what the
+    // rows below them even mean; then what the channel plays; then how it is
+    // presented, with the logo last because it is the one row a channel can go
+    // without; then the things that act on the channel itself.
     readonly property var rows: {
         var r = ["source", "kind"]
+
         if (isMovies) {
             // A film channel takes its running order from where the films come
             // from, so it carries no order row and no timing row: films do not
             // sit on a clock. Movie Slots is gone too -- booking a film to a
             // time says nothing when every programme is already a film.
-            // Local files have no playlists, genres or collections: a film is
-            // a file under movies/. Offering those rows would be offering a
+            // Local files have no playlists, genres or collections: a film is a
+            // file under movies/. Offering those rows would be offering a
             // server's furniture to a folder.
             if (cfg.source === "local") {
                 r.push("films")
@@ -45,14 +50,17 @@ FocusScope {
             // Shows left behind by a channel that used to be a TV one. Shown so
             // that nothing airs which the screen is not admitting to.
             if (countOf("match") > 0) r.push("series")
-            r.push("logo")
             r.push("ads")
             r.push("breaks")
+            r.push("logo")
             r.push("rebuild")
             r.push("rename")
             r.push("delete")
             return r
         }
+
+        r.push("timing")
+
         if (cfg.source === "local") {
             // Local files are a library like any other source: the two things a
             // media folder can hold, straight off this screen. There is no
@@ -71,12 +79,15 @@ FocusScope {
             r.push("collections")
             if (cfg.supportsPlaylists) r.push("playlists")
         }
-        r.push("slots")
-        r.push("logo")
-        r.push("order")
-        r.push("timing")
-        if (sourcesRoot.gridMinutes === 0) r.push("ads")
+        // A day plan says when everything airs, so booking a film to a time and
+        // choosing an order are both the plan's to decide.
+        if (!onADayPlan) {
+            r.push("slots")
+            r.push("order")
+        }
+        if (sourcesRoot.gridMinutes === 0 || onADayPlan) r.push("ads")
         r.push("breaks")
+        r.push("logo")
         r.push("rebuild")
         r.push("rename")
         r.push("delete")
