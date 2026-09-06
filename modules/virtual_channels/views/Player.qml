@@ -51,6 +51,13 @@ FocusScope {
     property int overrunTicks: 0
 
     property bool recovering: false
+    // A recovery that is a failure rather than an ending. A stream that dies
+    // half way through a programme has still played it, and the schedule has
+    // moved on; one that never produced a picture at all has not, and counting
+    // the two the same is why a channel of unplayable films retried for ever
+    // and never said anything was wrong.
+    property bool recoveringFailed: false
+    property bool sawPicture: false
     // The AUDIO button is ours to answer only when the source has baked the
     // track into the stream. On a direct play mpv moves between the tracks
     // itself, in place, and taking over would stop the picture for nothing.
@@ -494,6 +501,36 @@ FocusScope {
         }
     }
 
+    // The programme has actually started once the clock inside it moves.
+    Connections {
+        target: mpvController
+        function onPositionChanged() {
+            if (mpvController.position > 0) playerRoot.sawPicture = true
+        }
+    }
+
+    // A programme that has not produced a picture is not going to. Waiting the
+    // watchdog's full thirty seconds to find that out is thirty seconds of
+    // nothing; this says so sooner, and says it as a failure.
+    Timer {
+        id: startGuard
+        interval: 12000
+        repeat: false
+        running: !playerRoot.sawPicture && !playerRoot.offAir && !playerRoot.tuning
+                 && !playerRoot.filler && !playerRoot.switchingTo
+                 && playerRoot.leavingTo === "" && !playerRoot.recovering
+        onTriggered: playerRoot.giveUpOnProgramme("nothing played at all")
+    }
+
+    function giveUpOnProgramme(why) {
+        if (recovering) return
+        console.log("[channels] channel " + channelNumber + ": " + why
+                    + "; counting it against the channel")
+        recoveringFailed = true
+        recovering = true
+        mpvController.forceStop()
+    }
+
     readonly property int overrunSlackMs: 15000
 
     Timer {
@@ -590,6 +627,7 @@ FocusScope {
         }
 
         volumeEchoSeen = false
+        sawPicture = false
         mpvController.loadAndPlay(
             descriptor.url,
             descriptor.startSeconds,
@@ -711,8 +749,12 @@ FocusScope {
             if (playerRoot.recovering || playerRoot.switchingTo
                 || playerRoot.leavingTo !== "" || playerRoot.offAir
                 || playerRoot.tuning || playerRoot.filler) return
+            if (!playerRoot.sawPicture) {
+                playerRoot.giveUpOnProgramme("nothing played for " + silentSeconds + "s")
+                return
+            }
             console.log("[channels] channel " + playerRoot.channelNumber
-                        + ": nothing played for " + silentSeconds + "s; moving on")
+                        + ": stopped after " + silentSeconds + "s of silence; moving on")
             playerRoot.recovering = true
             mpvController.forceStop()
         }
@@ -758,10 +800,21 @@ FocusScope {
             }
             if (playerRoot.recovering) {
                 playerRoot.recovering = false
-                playerRoot.consecutiveFailures = 0
+                var failed = playerRoot.recoveringFailed
+                playerRoot.recoveringFailed = false
+                if (failed) {
+                    playerRoot.consecutiveFailures += 1
+                    // Names the programme that would not roll, so the card can
+                    // say which rather than leaving the channel looking dead.
+                    playerRoot.troubleTitle = playerRoot.playingTitle
+                } else {
+                    playerRoot.consecutiveFailures = 0
+                }
                 playerRoot.apply(virtualChannelsBackend.after_playback(
-                                     playerRoot.channelNumber, "eof",
-                                     playerRoot.currentSlotIndex, 0))
+                                     playerRoot.channelNumber,
+                                     failed ? "failed" : "eof",
+                                     playerRoot.currentSlotIndex,
+                                     playerRoot.consecutiveFailures))
                 return
             }
 
