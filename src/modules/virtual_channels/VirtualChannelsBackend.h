@@ -156,6 +156,13 @@ public:
     // Switch one season or episode off for a single block, rather than for the
     // whole channel: two blocks can run the same series and take different
     // parts of it. Same shape as a pool row's exclusions, kept on the block.
+    // What one block draws on. A block holds one thing, so choosing names it and
+    // choosing another replaces it; an empty name clears it. Narrowing goes with
+    // the thing it narrowed, so changing what a block plays forgets which parts
+    // of the last one it was skipping.
+    Q_INVOKABLE bool set_block_source(int channelNumber, int planIndex, int blockIndex,
+                                      const QString &name, const QString &ref);
+
     Q_INVOKABLE bool set_block_excluded(int channelNumber, int planIndex, int blockIndex,
                                         const QString &kind, const QString &itemKey,
                                         bool excluded, const QString &seasonKey = QString());

@@ -13,10 +13,6 @@ FocusScope {
     // Assigned directly by the app's router and nested in navParams by the
     // module's; this view is reachable both ways, so it reads either.
     property var navListState: navParams.navListState || ({})
-    // Set by a screen that wants one thing chosen and returned, not a list
-    // edited in place. The pick is left in `pickKey` for it to read.
-    property bool   pickOne: navParams.pickOne === true
-    property string pickKey: navParams.pickKey || "block_pick"
     // Where the viewer was before descending into a season list. The list
     // arrives asynchronously, so it is put back when the items land rather
     // than on completion, and only once.
@@ -39,6 +35,7 @@ FocusScope {
     property int    planIndex:     navParams.planIndex  !== undefined ? navParams.planIndex  : -1
     property int    blockIndex:    navParams.blockIndex !== undefined ? navParams.blockIndex : -1
     readonly property bool blockMode: planIndex >= 0 && blockIndex >= 0
+    property string blockPick: ""
     property var    blockOffSeasons:  []
     property var    blockOffEpisodes: []
 
@@ -63,19 +60,17 @@ FocusScope {
     // that is half of what its tick means. The other half is the exclusion list.
     readonly property string seriesName: seriesLabel !== "" ? seriesLabel
                                         : (kind === "seasons" ? heading : "")
-    // A block names its series outright, so it is always drawing from it.
+    // A block draws on the one thing it names, so that is what its tick means
+    // and what "is this series on" asks about below it.
     readonly property bool seriesSelected: blockMode
-        || (seriesName !== "" && (cfg.match || []).indexOf(seriesName) >= 0)
+        ? (seriesName !== "" && seriesName === blockPick)
+        : (seriesName !== "" && (cfg.match || []).indexOf(seriesName) >= 0)
     readonly property string listField: kind === "collections"  ? "collections"
                                       : kind === "playlists"    ? "playlists"
                                       : kind === "movies"       ? "films"
                                       : kind === "moviegenres"  ? "genres"
                                       : "match"
-    // Descending narrows a channel's pool to particular seasons and episodes,
-    // which is a thing a pool row has and a block does not: a block draws on a
-    // whole series. Selecting a season here used to hand its name back as the
-    // block's show, which then matched nothing at all.
-    readonly property bool canDescend: (kind === "shows" || kind === "seasons") && !pickOne
+    readonly property bool canDescend: kind === "shows" || kind === "seasons"
 
     focus: true
 
@@ -86,6 +81,7 @@ FocusScope {
         var plans = virtualChannelsBackend.channel_plans(channelNumber)
         var blocks = planIndex < plans.length ? (plans[planIndex].blocks || []) : []
         var blk = blockIndex < blocks.length ? blocks[blockIndex] : null
+        blockPick = blk ? String(blk.name || "") : ""
         var excl = (blk && blk.exclude) ? blk.exclude : ({})
         blockOffSeasons = excl.seasons || []
         // Kept under the season each belongs to; flattened here because a tick
@@ -125,6 +121,7 @@ FocusScope {
             if (kind === "episodes" && offSeasons.indexOf(parentKey) >= 0) return false
             return (kind === "seasons" ? offSeasons : offEpisodes).indexOf(item.id) < 0
         }
+        if (blockMode) return item.label === blockPick
         var list = cfg[listField] || []
         return list.indexOf(item.label) >= 0
     }
@@ -159,16 +156,6 @@ FocusScope {
     function toggle(item) {
         if (channelNumber < 0) return
 
-        // Picking one thing and handing it back, rather than ticking a list.
-        // The pick goes into a setting and the screen that asked reads it on
-        // the way back, which is how naming and pool picking already work.
-        if (pickOne) {
-            appCore.save_setting(moduleId, pickKey,
-                                 String(item.label) + "\u001f" + String(item.id || ""))
-            goBack()
-            return
-        }
-
         if (bookingMode) {
             var picked = bookingTitles.slice()
             var where = picked.indexOf(item.label)
@@ -186,12 +173,7 @@ FocusScope {
         }
 
         if (blockMode) {
-            // No pool row to add or remove: the block already names the show,
-            // so the tick says only whether this block airs that part of it.
-            if (!virtualChannelsBackend.set_block_excluded(
-                    channelNumber, planIndex, blockIndex, kind, item.id,
-                    /*excluded*/ isOn(item),
-                    kind === "episodes" ? parentKey : "")) {
+            if (!toggleBlockExclusion(item)) {
                 status = "Could not save"
                 return
             }
@@ -303,6 +285,57 @@ FocusScope {
         for (var k = 0; k < items.length; k++)
             virtualChannelsBackend.set_channel_excluded(channelNumber, "seasons", items[k].id, false)
         return true
+    }
+
+    // A block has no pool row to add or drop, but everything below that works
+    // the way it does on a pool row: switching a season off takes its episodes
+    // with it, bringing one episode back brings the season back narrowed to it,
+    // and switching the last one off switches the season off.
+    function toggleBlockExclusion(item) {
+        const set = function (kindName, id, excluded, under) {
+            return virtualChannelsBackend.set_block_excluded(
+                       channelNumber, planIndex, blockIndex, kindName, id, excluded, under || "")
+        }
+
+        var wasAiring = isOn(item)
+
+        // The top of the list: a block holds one thing, so ticking this one
+        // takes the place of whatever was there, and ticking it again clears
+        // the block. Nothing to descend past yet, so nothing else to say.
+        if (!isExclusionLevel) {
+            return virtualChannelsBackend.set_block_source(
+                       channelNumber, planIndex, blockIndex,
+                       wasAiring ? "" : item.label,
+                       wasAiring ? "" : String(item.id || ""))
+        }
+
+        if (kind === "seasons") return set("seasons", item.id, wasAiring)
+
+        var seasonOff = offSeasons.indexOf(parentKey) >= 0
+
+        if (!wasAiring) {
+            // Off only because it was picked out of a season that is otherwise
+            // airing: put it back and leave everything else alone.
+            if (!seasonOff) return set("episodes", item.id, false, parentKey)
+
+            // The whole season was off, so bringing one episode back brings the
+            // season back narrowed to that episode.
+            if (!set("seasons", parentKey, false)) return false
+            for (var i = 0; i < items.length; i++)
+                set("episodes", items[i].id, items[i].id !== item.id, parentKey)
+            return true
+        }
+
+        if (!set("episodes", item.id, true, parentKey)) return false
+
+        // If that was the last one airing, the season goes off with it rather
+        // than being left listing every episode it holds.
+        reloadBlockExclusions()
+        for (var k = 0; k < items.length; k++)
+            if (blockOffEpisodes.indexOf(items[k].id) < 0) return true
+        for (var m = 0; m < items.length; m++)
+            set("episodes", items[m].id, false, parentKey)
+        return set("seasons", parentKey, true)
     }
 
     function toggleEpisode(item) {
@@ -433,7 +466,13 @@ FocusScope {
             // up in a channel's excluded-seasons list.
             siblingSeasons: browserRoot.kind === "seasons"
                             ? browserRoot.items.map(function (s) { return s.id })
-                            : []
+                            : [],
+            // Which block this is narrowing, carried down with it. Without it
+            // the episode list reads the channel's exclusions instead of the
+            // block's, shows every episode of a switched-off season as airing,
+            // and writes any change to the wrong place.
+            planIndex:  browserRoot.planIndex,
+            blockIndex: browserRoot.blockIndex
         }, { currentIndex: itemList.currentIndex })
     }
 
@@ -550,9 +589,6 @@ FocusScope {
 
             Rectangle {
                 id: box
-                // A tick says whether a thing is in a list. Choosing one thing
-                // and coming straight back has no list to be in.
-                visible: !browserRoot.pickOne
                 // Whole, even pixels: at this size the nominal 0.030 lands on
                 // 14.4, and a box with fractional edges cannot hold a centred
                 // square -- the halves round apart and it sits a pixel high.
@@ -618,11 +654,11 @@ FocusScope {
                  : "TICKED CAN AIR IN THIS SLOT")
               : browserRoot.partialHint() !== ""
                 ? browserRoot.partialHint()
-                : browserRoot.pickOne
-                  ? "CHOOSE ONE FOR THIS BLOCK"
-                  : browserRoot.blockMode
-                    ? "TICKED MEANS IT AIRS IN THIS BLOCK"
-                    : browserRoot.isExclusionLevel
+                : browserRoot.blockMode
+                  ? (browserRoot.isExclusionLevel
+                     ? "TICKED MEANS IT AIRS IN THIS BLOCK"
+                     : "TICKED IS WHAT THIS BLOCK PLAYS — ONE AT A TIME")
+                  : browserRoot.isExclusionLevel
                       ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
                       : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
         color: root.tertiaryColor
@@ -637,7 +673,7 @@ FocusScope {
               // that can run to hundreds of rows, so it says so here too.
               + (browserRoot.canDescend ? root.hints.change + ":OPEN  A-Z:JUMP "
                                         : root.hints.change + ":LETTER  A-Z:JUMP ")
-              + root.hints.select + (browserRoot.pickOne ? ":CHOOSE" : ":TOGGLE")
+              + root.hints.select + ":TOGGLE"
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

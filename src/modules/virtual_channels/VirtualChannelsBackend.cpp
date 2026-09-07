@@ -4139,6 +4139,43 @@ static bool isExclusionKind(const QString &kind) {
     return false;
 }
 
+bool VirtualChannelsBackend::set_block_source(int channelNumber, int planIndex,
+                                              int blockIndex, const QString &name,
+                                              const QString &ref) {
+    QJsonArray channels = readChannels();
+    for (int i = 0; i < channels.size(); ++i) {
+        QJsonObject o = channels[i].toObject();
+        if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
+
+        QJsonArray plans = o.value(QLatin1String("plans")).toArray();
+        if (planIndex < 0 || planIndex >= plans.size()) return false;
+        QJsonObject plan = plans[planIndex].toObject();
+        QJsonArray blocks = plan.value(QLatin1String("blocks")).toArray();
+        if (blockIndex < 0 || blockIndex >= blocks.size()) return false;
+
+        QJsonObject block = blocks[blockIndex].toObject();
+        const QString was = block.value(QLatin1String("name")).toString();
+        const QString now = name.trimmed();
+
+        if (now.isEmpty()) block.remove(QLatin1String("name"));
+        else               block[QLatin1String("name")] = now;
+        if (ref.trimmed().isEmpty()) block.remove(QLatin1String("ref"));
+        else                         block[QLatin1String("ref")] = ref.trimmed();
+
+        // Seasons and episodes belong to the show they were switched off in.
+        if (was.compare(now, Qt::CaseInsensitive) != 0)
+            block.remove(QLatin1String("exclude"));
+
+        blocks[blockIndex] = block;
+        plan[QLatin1String("blocks")] = blocks;
+        plans[planIndex] = plan;
+        o[QLatin1String("plans")] = plans;
+        channels[i] = o;
+        return writeChannels(channels);
+    }
+    return false;
+}
+
 bool VirtualChannelsBackend::set_block_excluded(int channelNumber, int planIndex,
                                                int blockIndex, const QString &kind,
                                                const QString &itemKey, bool excluded,
