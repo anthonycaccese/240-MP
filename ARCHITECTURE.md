@@ -44,7 +44,7 @@ The guiding idea: **browse structured content, then hand off to the right tool f
     ModuleList.qml
     Settings.qml
     ...
-    Components/                     # shared QML components (AppBar, qmldir)
+    Components/                     # shared QML components (AppBar, ChoiceOverlay, qmldir)
   Main.qml                          # app root
   CMakeLists.txt
 ```
@@ -550,6 +550,18 @@ Shared QML components live in `views/Components/` (registered via `qmldir`, impo
 | `subtitle` | `string` | Optional context label (hidden when empty) |
 
 The icon is automatically colorized to the app accent color
+
+### ChoiceOverlay (`views/Components/ChoiceOverlay.qml`)
+
+Full-screen keyboard-driven chooser: a prompt, the thing being acted on, and a short list of options. Use it whenever a single button has to ask "which way?" — the Plex show/season PLAY button asks next-episode vs shuffle through it.
+
+| Property | Type | Description |
+|---|---|---|
+| `promptText` | `string` | The question, e.g. `"What would you like to play?"` |
+| `subtitleText` | `string` | What is being acted on — the show or season name (hidden when empty) |
+| `choices` | `var` | List of `{ label, action }` maps |
+
+Call `open()` to show it. It emits `activated(action)` when the user picks one and `closed()` once it hides (bind `onClosed: <host>.forceActiveFocus()`); Up/Down wrap, Esc/Back cancels. As with NfcCardWriter, **behaviour keys off `action`, never the label text** — labels are free to change with state (`"Resume Next Episode"` vs `"Play Next Episode"`) without touching the handler.
 
 ### NfcCardWriter (`views/Components/NfcCardWriter.qml`)
 

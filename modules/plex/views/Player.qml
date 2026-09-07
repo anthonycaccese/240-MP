@@ -327,8 +327,10 @@ FocusScope {
         // screen, not the one we auto-advanced from. Item.qml reloads from
         // item.ratingKey, so a minimal item carrying the new keys suffices.
         // A queue was launched with replaceWith, so the stack top is the list the
-        // queue came from — leave it pointing at the list.
-        if (queue.length === 0) updateBackItem({
+        // queue came from — leave it pointing at the list. Same for a shuffle,
+        // whose stack top is the show or season being shuffled: repointing it at
+        // an episode would leave a show detail screen rendering an episode.
+        if (queue.length === 0 && shuffleScope === "") updateBackItem({
             ratingKey: detail.ratingKey,
             type: detail.type || "episode",
             title: detail.title || "",

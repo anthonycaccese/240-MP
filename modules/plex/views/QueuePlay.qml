@@ -1,13 +1,23 @@
 import QtQuick
 
-// PLAY ALL / SHUFFLE launcher for a playlist or collection. Resolves the first
-// playable item of the queue, builds its stream, then replaces itself with
-// Player.qml — which carries the rest of the queue and advances through it.
+// Launcher for playing a whole set. Two modes, one loading frame:
+//
+//   queueItems   — PLAY ALL / SHUFFLE over a playlist or collection. Expands the
+//                  set into ratingKeys and hands the Player the full ordered
+//                  queue to advance through.
+//   shuffleScope — SHUFFLE EPISODES from a show or season detail screen. Draws
+//                  one random episode from the scope and hands the Player the
+//                  scope itself, so it keeps drawing at every end of file. A
+//                  jukebox: endless, and reports no timeline.
+//
+// Either way it resolves the first playable item, builds its stream, then
+// replaces itself with Player.qml.
 //
 // replaceWith (not navigateTo) leaves no entry on the nav stack, so backing out
-// of the player returns straight to the list the queue was started from, with
-// its selected row restored. This mirrors CardPlay.qml, the other launcher that
-// plays something without going through a detail screen.
+// of the player returns straight to the screen the set was started from — the
+// list, or the show/season being shuffled — with its selected row restored. This
+// mirrors CardPlay.qml, the other launcher that plays something without going
+// through a detail screen.
 FocusScope {
     id: queueRoot
 
@@ -20,6 +30,10 @@ FocusScope {
     property var    queueItems: navParams.queueItems || []
     property bool   shuffle:    navParams.shuffle    || false
     property string queueTitle: navParams.title      || ""
+    // Show or season ratingKey to draw random episodes from. Non-empty puts this
+    // view in jukebox mode, where there is no queue at all — the Player redraws
+    // from the scope itself.
+    property string shuffleScope: navParams.shuffleScope || ""
 
     // The ratingKeys that actually play, once the shows have been expanded into
     // their episodes and the order has been settled.
@@ -48,6 +62,13 @@ FocusScope {
 
     function start() {
         errorMessage = ""
+        if (shuffleScope !== "") {
+            launching = true
+            // The backend's shuffle bag owns the ordering here, so there is
+            // nothing to expand and nothing to shuffle client-side.
+            plexBackend.load_random_episode(shuffleScope)
+            return
+        }
         if (queueItems.length === 0) { fail("NOTHING TO PLAY"); return }
         launching = true
         // Answers immediately when there is nothing to expand; a set containing
@@ -96,6 +117,12 @@ FocusScope {
             // An unplayable entry must not sink the whole queue — skip to the next
             // one, and only give up once nothing in the queue resolves.
             if (!detail || !detail.ratingKey) {
+                // Jukebox mode has no queue to walk: an empty draw means the
+                // show or season holds nothing playable.
+                if (queueRoot.shuffleScope !== "") {
+                    queueRoot.fail("NOTHING TO PLAY")
+                    return
+                }
                 queueRoot.queueIndex++
                 if (queueRoot.queueIndex >= queueRoot.queue.length) {
                     queueRoot.fail("COULD NOT LOAD THIS ITEM")
@@ -140,8 +167,17 @@ FocusScope {
                 selectedAudioId:    d.selectedAudioId,
                 selectedSubtitleId: d.selectedSubtitleId,
                 // The queue owns advancing: the season-based autoplay chain must
-                // not also fire at the end of an episode inside a playlist.
-                allowAutoplay:      false,
+                // not also fire at the end of an episode inside a playlist. A
+                // jukebox is the other way round — it rides on that same chain,
+                // so it leaves allowAutoplay alone and the user's
+                // autoplay_next_episode setting decides whether it keeps rolling.
+                allowAutoplay:      queueRoot.shuffleScope !== "",
+                // A jukebox reports no timeline, so the show's watched state and
+                // Continue Watching stay untouched; a queue is ordinary playback
+                // and reports normally. The scope goes with it, so the Player
+                // redraws from the show or season instead of walking a queue.
+                trackProgress:      queueRoot.shuffleScope === "",
+                shuffleScope:       queueRoot.shuffleScope,
                 queue:              queueRoot.queue,
                 queueIndex:         queueRoot.queueIndex
             })

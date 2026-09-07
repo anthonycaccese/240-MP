@@ -20,6 +20,10 @@ FocusScope {
     property var extras: []
     readonly property bool hasExtras: extras.length > 0
 
+    // Drives both the play button's PLAY/RSUM label and the wording of the
+    // matching choice in the play prompt — one expression, two consumers.
+    readonly property bool resumeAvailable: (item.viewOffset || 0) > 0
+
     // Focus rows: 0 = play button, 1 = extras (when hasExtras),
     // 4 = write NFC card (when a reader is present), 2 = season list.
     // The NFC row is 4 rather than 3 so the existing saved-focus restores, which
@@ -174,8 +178,7 @@ FocusScope {
     Keys.onReturnPressed: {
         if (focusRow === 0) {
             if (seasons.length === 0) return
-            showRoot.waitingForOnDeck = true
-            plexBackend.load_on_deck_for(item.ratingKey)
+            playChoice.open()
         } else if (focusRow === 4) {
             cardWriter.open()
         } else if (focusRow === 1) {
@@ -254,7 +257,7 @@ FocusScope {
 
                     Text {
                         anchors.centerIn: parent
-                        text: (item.viewOffset && item.viewOffset > 0) ? "RSUM \u25BA" : "PLAY \u25BA"
+                        text: showRoot.resumeAvailable ? "RSUM \u25BA" : "PLAY \u25BA"
                         color: focusRow === 0 ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         font.pixelSize: root.sh * 0.05 //24
@@ -459,6 +462,34 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125 //80
         font.pixelSize: root.sh * 0.0333333 //16
     }
+    // PLAY prompt. Shuffle plays as a jukebox — endless random episodes drawn
+    // from this show, reporting no timeline — so it must be a deliberate choice,
+    // not something the play button silently does.
+    ChoiceOverlay {
+        id: playChoice
+        anchors.fill: parent
+        promptText:   "What would you like to play?"
+        subtitleText: item.title || ""
+        choices: [
+            { label: showRoot.resumeAvailable ? "Resume Next Episode" : "Play Next Episode",
+              action: "next" },
+            { label: "Shuffle Episodes", action: "shuffle" }
+        ]
+        onClosed: showRoot.forceActiveFocus()
+        onActivated: function(action) {
+            if (action === "shuffle") {
+                showRoot.navigateTo("QueuePlay.qml", {
+                    shuffleScope: item.ratingKey,
+                    title:        item.title,
+                    libraryName:  libraryName
+                }, { focusRow: 0 })
+            } else {
+                showRoot.waitingForOnDeck = true
+                plexBackend.load_on_deck_for(item.ratingKey)
+            }
+        }
+    }
+
     NfcCardWriter {
         id: cardWriter
         anchors.fill: parent

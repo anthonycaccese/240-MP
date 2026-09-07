@@ -21,6 +21,15 @@ FocusScope {
     property var extras: []
     readonly property bool hasExtras: extras.length > 0
 
+    // Drives both the play button's PLAY/RSUM label and the wording of the
+    // matching choice in the play prompt — one expression, two consumers.
+    readonly property bool resumeAvailable: {
+        for (var i = 0; i < episodes.length; i++) {
+            if (episodes[i].viewOffset > 0) return true
+        }
+        return false
+    }
+
     // Focus rows: 0 = play button, 1 = extras (when hasExtras),
     // 4 = write NFC card (when a reader is present), 2 = episode list.
     // The NFC row is 4 rather than 3 so the existing saved-focus restores, which
@@ -130,7 +139,8 @@ FocusScope {
     }
     Keys.onReturnPressed: {
         if (focusRow === 0) {
-            playBestEpisode()
+            if (episodes.length === 0) return
+            playChoice.open()
         } else if (focusRow === 4) {
             cardWriter.open()
         } else if (focusRow === 1) {
@@ -235,13 +245,7 @@ FocusScope {
 
                     Text {
                         anchors.centerIn: parent
-                        text: {
-                            // Show RSUM if any in-progress episode exists
-                            for (var i = 0; i < seasonRoot.episodes.length; i++) {
-                                if (seasonRoot.episodes[i].viewOffset > 0) return "RSUM \u25BA"
-                            }
-                            return "PLAY \u25BA"
-                        }
+                        text: seasonRoot.resumeAvailable ? "RSUM \u25BA" : "PLAY \u25BA"
                         color: focusRow === 0 ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         font.pixelSize: root.sh * 0.05 //24
@@ -403,6 +407,35 @@ FocusScope {
         anchors.leftMargin: root.sw * 0.125 //80
         font.pixelSize: root.sh * 0.0333333 //16
     }
+    // PLAY prompt. Shuffle plays as a jukebox — endless random episodes drawn
+    // from this season, reporting no timeline — so it must be a deliberate
+    // choice, not something the play button silently does.
+    ChoiceOverlay {
+        id: playChoice
+        anchors.fill: parent
+        promptText:   "What would you like to play?"
+        subtitleText: seasonRoot.showTitle
+                      + (seasonRoot.seasonLabel() ? " - " + seasonRoot.seasonLabel() : "")
+        choices: [
+            { label: seasonRoot.resumeAvailable ? "Resume Next Episode" : "Play Next Episode",
+              action: "next" },
+            { label: "Shuffle Episodes", action: "shuffle" }
+        ]
+        onClosed: seasonRoot.forceActiveFocus()
+        onActivated: function(action) {
+            if (action === "shuffle") {
+                var label = seasonRoot.seasonLabel()
+                seasonRoot.navigateTo("QueuePlay.qml", {
+                    shuffleScope: item.ratingKey,
+                    title:        showTitle + (label ? " - " + label : ""),
+                    libraryName:  libraryName
+                }, { focusRow: 0 })
+            } else {
+                seasonRoot.playBestEpisode()
+            }
+        }
+    }
+
     NfcCardWriter {
         id: cardWriter
         anchors.fill: parent

@@ -1,3 +1,4 @@
 module Components
 AppBar AppBar.qml
+ChoiceOverlay ChoiceOverlay.qml
 NfcCardWriter NfcCardWriter.qml
