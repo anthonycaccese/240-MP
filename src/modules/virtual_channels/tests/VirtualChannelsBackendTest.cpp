@@ -807,6 +807,102 @@ void testBlockExclusions() {
           "a block that is not there is refused rather than written past");
 }
 
+// Blocks have to work on whatever a channel is pointed at. Local files take a
+// road of their own -- read off disk rather than asked for -- so what a block
+// narrows has to survive that road too.
+void testLocalBlockGathers() {
+    section("Backend: a block on local files asks for its own part of a show");
+
+    Fixture fx;
+    QJsonObject ch = localChannel(3);
+    ch["source"]   = QStringLiteral("local");
+    ch["schedule"] = QStringLiteral("day_plan");
+
+    QJsonObject block;
+    block["type"]    = QStringLiteral("series");
+    // The label the picker shows carries the year; the folder may not. What is
+    // stored is what was ticked.
+    block["name"]    = QStringLiteral("Batman Beyond (1999)");
+    block["minutes"] = 60;
+    QJsonObject excl;
+    excl["seasons"] = QJsonArray{ QStringLiteral("Batman Beyond (1999)|2") };
+    block["exclude"] = excl;
+
+    QJsonObject plan;
+    plan["name"]   = QStringLiteral("EVERY DAY");
+    plan["days"]   = QJsonArray{ 1, 2, 3, 4, 5, 6, 7 };
+    plan["blocks"] = QJsonArray{ block };
+    ch["plans"]    = QJsonArray{ plan };
+    fx.write(ch);
+
+    VirtualChannelsBackend b(fx.data(), fx.data());
+    vchan::ChannelDef def;
+    def.plans = VirtualChannelsBackend::readPlans(ch);
+    const QVector<VirtualChannelsBackend::PoolJob> jobs = b.readPools(ch, def);
+
+    int programmes = 0;
+    for (const VirtualChannelsBackend::PoolJob &j : jobs) {
+        if (j.pool != vchan::SlotKind::Programme) continue;
+        ++programmes;
+        checkEq(j.src == vchan::SlotSource::Local, true, "it asks local files, not a server");
+        checkEq(j.match.size(), 1, "for the one show the block names");
+        checkStr(j.match.value(0), QStringLiteral("Batman Beyond (1999)"),
+                 "by the name it was ticked under");
+        checkEq(j.excludeSeasons.size(), 1, "carrying the season the block leaves out");
+        check(j.planBlock >= 0, "and stamped with the block it gathers for");
+    }
+    checkEq(programmes, 1, "one block, one programme job");
+}
+
+// Jellyfin and Emby take the same road as each other and a different one from
+// Plex, so a block on either has to come out asking the right server for the
+// right show, narrowed the same way.
+void testServerBlockGathers() {
+    section("Backend: a block on Jellyfin or Emby asks that server for its show");
+
+    for (const QString &src : { QStringLiteral("jellyfin"), QStringLiteral("emby") }) {
+        Fixture fx;
+        QJsonObject ch = localChannel(3);
+        ch["source"]   = src;
+        ch["schedule"] = QStringLiteral("day_plan");
+
+        QJsonObject block;
+        block["type"]    = QStringLiteral("series");
+        block["name"]    = QStringLiteral("Samurai Jack");
+        block["ref"]     = QStringLiteral("abc123");
+        block["minutes"] = 60;
+        QJsonObject excl;
+        excl["seasons"] = QJsonArray{ QStringLiteral("s2") };
+        block["exclude"] = excl;
+
+        QJsonObject plan;
+        plan["name"]   = QStringLiteral("EVERY DAY");
+        plan["days"]   = QJsonArray{ 1, 2, 3, 4, 5, 6, 7 };
+        plan["blocks"] = QJsonArray{ block };
+        ch["plans"]    = QJsonArray{ plan };
+        fx.write(ch);
+
+        VirtualChannelsBackend b(fx.data(), fx.data());
+        vchan::ChannelDef def;
+        def.plans = VirtualChannelsBackend::readPlans(ch);
+        const QVector<VirtualChannelsBackend::PoolJob> jobs = b.readPools(ch, def);
+
+        int programmes = 0;
+        for (const VirtualChannelsBackend::PoolJob &j : jobs) {
+            if (j.pool != vchan::SlotKind::Programme) continue;
+            ++programmes;
+            const bool right = (src == QLatin1String("jellyfin"))
+                                   ? j.src == vchan::SlotSource::Jellyfin
+                                   : j.src == vchan::SlotSource::Emby;
+            check(right, "the job goes to the server the channel is on");
+            checkEq(j.showIds.size(), 1, "asked for by the id it was picked by");
+            checkEq(j.excludeSeasons.size(), 1, "carrying what the block leaves out");
+            check(j.planBlock >= 0, "and stamped with its block");
+        }
+        checkEq(programmes, 1, "one block, one programme job");
+    }
+}
+
 void testPlansRoundTrip() {
     section("Backend: plans survive being read out and handed back");
 
@@ -1110,6 +1206,8 @@ int runVirtualChannelsBackendTests() {
     testProgrammesAreKeptOncePerBlock();
     testABlockKeepsWhatWasNotChanged();
     testBlockExclusions();
+    testLocalBlockGathers();
+    testServerBlockGathers();
     testPlansRoundTrip();
     testFilmPoolEntries();
     testFilmAndShowListsAreSeparate();

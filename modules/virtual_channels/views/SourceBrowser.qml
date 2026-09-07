@@ -107,9 +107,8 @@ FocusScope {
         virtualChannelsBackend.browse_source(channelNumber, kind, parentKey)
     }
 
-    // What is switched off here, whether "here" is the channel's pool row or one
-    // block of a day. The question a tick answers is the same either way, so it
-    // is only asked once; all that differs is which pocket the answer is in.
+    // What is switched off here -- the channel's pool row, or one block of a
+    // day. The question is the same; only the pocket differs.
     readonly property var offSeasons:  blockMode ? blockOffSeasons
                                                  : (cfg.excludedSeasons || [])
     readonly property var offEpisodes: blockMode ? blockOffEpisodes
@@ -326,8 +325,7 @@ FocusScope {
 
         var wasAiring = isOn(item)
 
-        // The top of the list: the block holds one thing, so this takes the
-        // place of whatever it held.
+        // A block holds one thing, so this replaces whatever it held.
         if (!isExclusionLevel) {
             return virtualChannelsBackend.set_block_source(
                        channelNumber, planIndex, blockIndex,
@@ -534,10 +532,8 @@ FocusScope {
             siblingSeasons: browserRoot.kind === "seasons"
                             ? browserRoot.items.map(function (s) { return s.id })
                             : [],
-            // Which block this is narrowing, carried down with it. Without it
-            // the episode list reads the channel's exclusions instead of the
-            // block's, shows every episode of a switched-off season as airing,
-            // and writes any change to the wrong place.
+            // Without this the level below reads the channel's exclusions
+            // instead of the block's, and writes to the wrong one.
             planIndex:  browserRoot.planIndex,
             blockIndex: browserRoot.blockIndex
         }, { currentIndex: itemList.currentIndex })

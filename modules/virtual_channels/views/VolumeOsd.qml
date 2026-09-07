@@ -1,13 +1,9 @@
 import QtQuick
 
-// The volume bar, and the keys that drive it, for the screens mpv is not on.
-//
-// Volume keys are routed straight to mpv, which no-ops when mpv is not running
-// -- so the guide, the weather channel and the card between programmes had no
-// volume at all. They do now, and this is the same bar mpv draws
-// (scripts/mpv-media-keys.lua), laid out from the same fractions of the screen
-// so that turning the volume up on the guide and turning it up over a programme
-// look like one control rather than two.
+// The volume bar for the screens mpv is not on. Volume keys go straight to
+// mpv, which no-ops when it is not running, so the guide, the weather channel
+// and the card between programmes had none at all. Laid out from the same
+// fractions of the screen as scripts/mpv-media-keys.lua so the two match.
 Item {
     id: osd
 
