@@ -32,7 +32,7 @@ MpvController::MpvController(const QString &appRoot, const QString &dataRoot,
 {
     m_videoProfile = detectVideoProfile();
     qInfo("[MpvController] video profile: %s",
-          m_videoProfile == VideoProfile::Pi4       ? "Pi 4 — drm + v4l2m2m-copy"
+          m_videoProfile == VideoProfile::Pi4       ? "Pi 4 — drm + drm-copy,v4l2m2m-copy"
         : m_videoProfile == VideoProfile::Pi3       ? "Pi 3 — gpu/drm + v4l2m2m (zero-copy)"
         : m_videoProfile == VideoProfile::PiFullKms ? "Pi 5 (Full KMS) — drm + auto-safe"
                                                     : "generic");
@@ -668,7 +668,7 @@ void MpvController::appendVideoArgs(QStringList &args) const {
             // jitters into visible 24p judder. The copy + zimg downscale costs more
             // CPU (~50-70% across 4 cores) but the Pi4 has the headroom, and crop
             // (--panscan) works because frames go through the normal scaler.
-            args << "--vo=drm" << "--hwdec=v4l2m2m-copy";
+            args << "--vo=drm" << "--hwdec=drm-copy,v4l2m2m-copy";
         } else if (m_videoProfile == VideoProfile::Pi3) {
             // Pi 3B/3B+: too weak for the copy + software-scale path above (it pegs
             // all four cores and gets choppy). Zero-copy v4l2m2m hands decoded frames
