@@ -25,6 +25,7 @@ FocusScope {
     // The series these seasons or episodes belong to, carried down so every level
     // can answer the same question: does this channel draw from that series?
     property string seriesLabel:   navParams.seriesLabel  || ""
+    property string seriesRef:     navParams.seriesRef    || ""
     // The other seasons of that series, handed to the episode level because
     // narrowing a series to one episode means switching the rest of them off and
     // only the season list knows what they are.
@@ -37,6 +38,7 @@ FocusScope {
     readonly property bool blockMode: planIndex >= 0 && blockIndex >= 0
     property string blockPick: ""
     property var    blockOffSeasons:  []
+    property var    blockOffBySeason: ({})
     property var    blockOffEpisodes: []
 
     property int    bookingIndex:  navParams.bookingIndex !== undefined ? navParams.bookingIndex : -1
@@ -83,7 +85,8 @@ FocusScope {
         var blk = blockIndex < blocks.length ? blocks[blockIndex] : null
         blockPick = blk ? String(blk.name || "") : ""
         var excl = (blk && blk.exclude) ? blk.exclude : ({})
-        blockOffSeasons = excl.seasons || []
+        blockOffSeasons  = excl.seasons  || []
+        blockOffBySeason = excl.episodes || ({})
         // Kept under the season each belongs to; flattened here because a tick
         // only asks whether this episode airs, not which season it sits in.
         var flat = []
@@ -129,10 +132,17 @@ FocusScope {
     // On, but with some of what is under it switched off. A season keeps its
     // own excluded episodes under its key, so it is the one level that can say
     // so without walking the library again.
+    // A thing that is on with some of what is under it switched off. A season
+    // knows its own episodes; a series at the top of the list is partial when
+    // anything inside it has been left out.
     function isPartial(item) {
-        if (blockMode) return false
-        if (kind !== "seasons" || !isOn(item)) return false
-        var by = cfg.excludedBySeason || ({})
+        if (!isOn(item)) return false
+        if (kind === "shows")
+            return blockMode ? (offSeasons.length > 0 || offEpisodes.length > 0)
+                             : ((cfg.excludedSeasons || []).length > 0
+                                || (cfg.excludedEpisodes || []).length > 0)
+        if (kind !== "seasons") return false
+        var by = blockMode ? blockOffBySeason : (cfg.excludedBySeason || ({}))
         var refs = by[item.id]
         return refs !== undefined && refs !== null && refs.length > 0
     }
@@ -148,7 +158,7 @@ FocusScope {
     }
 
     function partialCount(item) {
-        var by = cfg.excludedBySeason || ({})
+        var by = blockMode ? blockOffBySeason : (cfg.excludedBySeason || ({}))
         var refs = by[item.id]
         return (refs === undefined || refs === null) ? 0 : refs.length
     }
@@ -287,21 +297,37 @@ FocusScope {
         return true
     }
 
-    // A block has no pool row to add or drop, but everything below that works
-    // the way it does on a pool row: switching a season off takes its episodes
-    // with it, bringing one episode back brings the season back narrowed to it,
-    // and switching the last one off switches the season off.
+    // The same moves a pool row makes, with the block standing in for the pool:
+    // choosing the series is set_block_source rather than adding it to a list,
+    // and everything below that is the same shape.
+    //
+    // The point of it is that you can start anywhere. Ticking one episode of a
+    // series the block has never named picks the series, switches off its other
+    // seasons and the rest of this one, and leaves the block airing that
+    // episode -- which is what the season and the series then read as: on, with
+    // something inside them off.
     function toggleBlockExclusion(item) {
         const set = function (kindName, id, excluded, under) {
             return virtualChannelsBackend.set_block_excluded(
                        channelNumber, planIndex, blockIndex, kindName, id, excluded, under || "")
         }
+        const clearEpisodes = function (seasonKey) {
+            return virtualChannelsBackend.clear_block_episode_exclusions(
+                       channelNumber, planIndex, blockIndex, seasonKey)
+        }
+        const pickSeries = function () {
+            return virtualChannelsBackend.set_block_source(
+                       channelNumber, planIndex, blockIndex, seriesName, seriesRef)
+        }
+        const dropSeries = function () {
+            return virtualChannelsBackend.set_block_source(
+                       channelNumber, planIndex, blockIndex, "", "")
+        }
 
         var wasAiring = isOn(item)
 
-        // The top of the list: a block holds one thing, so ticking this one
-        // takes the place of whatever was there, and ticking it again clears
-        // the block. Nothing to descend past yet, so nothing else to say.
+        // The top of the list: the block holds one thing, so this takes the
+        // place of whatever it held.
         if (!isExclusionLevel) {
             return virtualChannelsBackend.set_block_source(
                        channelNumber, planIndex, blockIndex,
@@ -309,33 +335,72 @@ FocusScope {
                        wasAiring ? "" : String(item.id || ""))
         }
 
-        if (kind === "seasons") return set("seasons", item.id, wasAiring)
+        var narrowing = !seriesSelected
 
+        if (kind === "seasons") {
+            if (!wasAiring) {
+                // From nothing, this narrows the series to this season. If the
+                // series is already the block's, the other seasons are somebody's
+                // choice and stay as they are.
+                if (narrowing) {
+                    if (!pickSeries()) return false
+                    for (var i = 0; i < items.length; i++)
+                        set("seasons", items[i].id, items[i].id !== item.id)
+                } else {
+                    set("seasons", item.id, false)
+                }
+                clearEpisodes(item.id)
+                return true
+            }
+
+            if (!set("seasons", item.id, true)) return false
+            clearEpisodes(item.id)
+            reloadBlockExclusions()
+            for (var j = 0; j < items.length; j++)
+                if (blockOffSeasons.indexOf(items[j].id) < 0) return true
+
+            // The last season went off, so the block is playing nothing.
+            dropSeries()
+            return true
+        }
+
+        // Episodes.
         var seasonOff = offSeasons.indexOf(parentKey) >= 0
 
         if (!wasAiring) {
             // Off only because it was picked out of a season that is otherwise
             // airing: put it back and leave everything else alone.
-            if (!seasonOff) return set("episodes", item.id, false, parentKey)
+            if (!narrowing && !seasonOff) return set("episodes", item.id, false, parentKey)
 
-            // The whole season was off, so bringing one episode back brings the
-            // season back narrowed to that episode.
-            if (!set("seasons", parentKey, false)) return false
-            for (var i = 0; i < items.length; i++)
-                set("episodes", items[i].id, items[i].id !== item.id, parentKey)
+            // Otherwise nothing above it is on. From nothing this narrows the
+            // series to this episode; where only the season was off, that season
+            // comes back narrowed to it and the rest of the series is left alone.
+            if (narrowing) {
+                if (!pickSeries()) return false
+                for (var k = 0; k < siblingSeasons.length; k++)
+                    set("seasons", siblingSeasons[k], siblingSeasons[k] !== parentKey)
+            } else {
+                set("seasons", parentKey, false)
+            }
+            clearEpisodes(parentKey)
+            for (var m = 0; m < items.length; m++)
+                if (items[m].id !== item.id) set("episodes", items[m].id, true, parentKey)
             return true
         }
 
         if (!set("episodes", item.id, true, parentKey)) return false
-
-        // If that was the last one airing, the season goes off with it rather
-        // than being left listing every episode it holds.
         reloadBlockExclusions()
-        for (var k = 0; k < items.length; k++)
-            if (blockOffEpisodes.indexOf(items[k].id) < 0) return true
-        for (var m = 0; m < items.length; m++)
-            set("episodes", items[m].id, false, parentKey)
-        return set("seasons", parentKey, true)
+        for (var n = 0; n < items.length; n++)
+            if (blockOffEpisodes.indexOf(items[n].id) < 0) return true
+
+        // The last episode of the season went off, so the season did too.
+        clearEpisodes(parentKey)
+        set("seasons", parentKey, true)
+        reloadBlockExclusions()
+        for (var q = 0; q < siblingSeasons.length; q++)
+            if (blockOffSeasons.indexOf(siblingSeasons[q]) < 0) return true
+        dropSeries()
+        return true
     }
 
     function toggleEpisode(item) {
@@ -461,6 +526,8 @@ FocusScope {
             parentKey: item.id,
             title: item.label,
             seriesLabel: browserRoot.kind === "shows" ? item.label : browserRoot.seriesName,
+            seriesRef:   browserRoot.kind === "shows" ? String(item.id || "")
+                                                     : browserRoot.seriesRef,
             // Only the season list holds seasons; from the show list these are
             // shows, and passing them as seasons is how 246 of them once ended
             // up in a channel's excluded-seasons list.

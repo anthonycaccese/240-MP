@@ -163,6 +163,11 @@ public:
     Q_INVOKABLE bool set_block_source(int channelNumber, int planIndex, int blockIndex,
                                       const QString &name, const QString &ref);
 
+    // Every episode of one season airs again, whatever had been picked out of
+    // it. The twin of clear_episode_exclusions, for a block.
+    Q_INVOKABLE bool clear_block_episode_exclusions(int channelNumber, int planIndex,
+                                                    int blockIndex, const QString &seasonKey);
+
     Q_INVOKABLE bool set_block_excluded(int channelNumber, int planIndex, int blockIndex,
                                         const QString &kind, const QString &itemKey,
                                         bool excluded, const QString &seasonKey = QString());
