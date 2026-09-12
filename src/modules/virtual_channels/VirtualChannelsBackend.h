@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <functional>
 #include <QHash>
 #include <QPair>
@@ -55,6 +56,10 @@ public:
     // the clock says the programme has reached, which is why the viewer sees it
     // carry on rather than start over.
     Q_INVOKABLE QVariantMap cycle_audio(int channelNumber);
+
+    // The same for subtitles, with one more stop: off. A subtitle a viewer does
+    // not want is the common case, so the cycle comes back round to none.
+    Q_INVOKABLE QVariantMap cycle_subtitle(int channelNumber);
 
     Q_INVOKABLE QVariantMap after_playback(int channelNumber,
                                            const QString &reason,
@@ -267,6 +272,8 @@ private slots:
     void onPlexChildrenLoaded(const QVariant &items);
     void onPlexCollectionsLoaded(const QVariant &collections);
     void onPlexPlaylistsLoaded(const QVariant &playlists);
+    void onPlexSubtitleStreamSet(const QString &partId);
+    void onPlexTranscodeStopped(const QString &sessionId);
     void onGenerationTick();
     void onUrlTimeout();
     void onPlexEnumTimeout();
@@ -473,6 +480,35 @@ private:
     // Asked for on the next stream request. Empty means "whatever the source
     // would have chosen", which is what every channel gets until asked.
     QString      m_preferredAudioId;
+
+    // The subtitle tracks of the programme now tuned, and which is showing.
+    // The list opens with the OFF pseudo-stream every Plex track list carries,
+    // so index 0 is off -- where a channel starts and where the cycle returns.
+    QVariantList m_subtitleStreams;
+    int          m_subtitleIndex = 0;
+    QString      m_preferredSubtitleId;
+    // The part the tuned programme plays from. Plex wants the subtitle choice
+    // set on it, not just named on the transcode request.
+    QString      m_plexPartId;
+
+    // A transcode request waiting on the server to take a subtitle selection.
+    // Held rather than sent because Plex reads the part when the request
+    // arrives, so the one that arrives first decides what gets burned in.
+    struct HeldTranscode {
+        QString ratingKey;
+        QString partKey;
+        QString sessionId;
+        qint64  offsetMs = 0;
+    };
+    // How many answers the held request is still waiting on: the subtitle
+    // selection landing, and the last session being let go of.
+    int                          m_transcodeHolds = 0;
+    std::optional<HeldTranscode> m_heldTranscode;
+    bool sendTranscodeRequest(const QString &ratingKey, const QString &partKey,
+                              const QString &sessionId, qint64 offsetMs);
+    void releaseOneHold();
+    void releaseHeldTranscode();
+
 
     qint64  m_plexPendingOffsetMs = 0;
     bool    m_plexPendingTranscodeOk = false;

@@ -162,6 +162,14 @@ signals:
     void itemLoaded(const QVariant &detail);
     void showYearReady(const QString &showRatingKey, int year);
     void streamUrlReady(const QString &url, const QString &plexToken);
+    // The server has taken a subtitle selection for a part. Emitted because a
+    // transcode asked for before it lands burns in whatever the part said
+    // before -- Plex reads the part, not the id on the transcode request.
+    void subtitleStreamSet(const QString &partId);
+    // A transcode session has been torn down. Emitted because the next one for
+    // the same item, started before the server has let go of this one, comes
+    // back carrying its decisions rather than the ones just asked for.
+    void transcodeStopped(const QString &sessionId);
     void childrenLoaded(const QVariant &items);
     void extrasLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);
@@ -178,6 +186,9 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
+    void startTranscode(const QString &ratingKey, const QString &partKey,
+                        const QString &sessionId, const QString &audioId,
+                        const QString &subtitleId, int offsetMs);
     // Auth file I/O
     QJsonObject loadAuth() const;
     void saveAuth(const QJsonObject &auth) const;

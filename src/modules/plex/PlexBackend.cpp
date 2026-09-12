@@ -1,6 +1,7 @@
 #include "PlexBackend.h"
 
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -2568,17 +2569,12 @@ void PlexBackend::resolve_card_queue(const QString &ref) {
     });
 }
 
-void PlexBackend::request_transcode(const QString &ratingKey, const QString &partKey,
-                                    const QString &sessionId,
-                                    const QString &audioId, const QString &subtitleId,
-                                    int offsetMs) {
-    QString uri   = serverUrl();
-    QString token = serverToken();
-    QString quality = videoQuality();
-
-    qInfo("[Plex] playback TRANSCODE for %s at offset %d s, cap %s kbps",
-          qPrintable(ratingKey), offsetMs / 1000, qPrintable(quality));
-    QUrl url(uri + "/video/:/transcode/universal/start.m3u8");
+// The query both transcode calls share. hasMDE=1 is a promise: the client will
+// ask the Media Decision Engine itself, so the server may skip running one.
+static QUrlQuery transcodeQuery(const QString &ratingKey, const QString &sessionId,
+                                const QString &quality, const QString &clientId,
+                                const QString &audioId, const QString &subtitleId,
+                                int offsetMs) {
     QUrlQuery q;
     q.addQueryItem("hasMDE",      "1");
     q.addQueryItem("path",        "/library/metadata/" + ratingKey);
@@ -2597,7 +2593,7 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
     // target codecs/containers. This is separate from the X-Plex-Platform header
     // (which identifies the calling application for auth/logging purposes).
     q.addQueryItem("X-Plex-Platform", "Chrome");
-    q.addQueryItem("X-Plex-Client-Identifier", clientId());
+    q.addQueryItem("X-Plex-Client-Identifier", clientId);
     if (offsetMs > 0)
         q.addQueryItem("offset", QString::number(offsetMs / 1000));
     if (!audioId.isEmpty())
@@ -2606,7 +2602,47 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
         q.addQueryItem("subtitleStreamID", subtitleId);
         q.addQueryItem("subtitles", "burn");
     }
-    url.setQuery(q);
+    return q;
+}
+
+void PlexBackend::request_transcode(const QString &ratingKey, const QString &partKey,
+                                    const QString &sessionId,
+                                    const QString &audioId, const QString &subtitleId,
+                                    int offsetMs) {
+    const QString uri = serverUrl(), token = serverToken(), quality = videoQuality();
+    qInfo("[Plex] playback TRANSCODE for %s at offset %d s, cap %s kbps",
+          qPrintable(ratingKey), offsetMs / 1000, qPrintable(quality));
+
+    // Ask the Media Decision Engine before asking for the stream. With hasMDE=1
+    // the server takes the client to have done this already, and when it has
+    // not, the server reuses whatever it last decided for this client -- which
+    // for a stream that changed its subtitle is the decision made without one.
+    // Every session where the engine ran burned the subtitle it was asked for;
+    // sessions where it was skipped did so a third of the time. Whatever the
+    // decision call returns, the stream is still asked for: a pre-flight that
+    // fails must not cost the viewer the programme.
+    QUrl decide(uri + "/video/:/transcode/universal/decision");
+    decide.setQuery(transcodeQuery(ratingKey, sessionId, quality, clientId(),
+                                   audioId, subtitleId, offsetMs));
+    QNetworkRequest dreq = plexRequest(decide, token);
+    dreq.setRawHeader("X-Plex-Platform", "Chrome");
+    auto *decision = m_nam->get(dreq);
+    ignoreSslErrors(decision);
+    connect(decision, &QNetworkReply::finished, this,
+            [this, decision, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs]() {
+        decision->deleteLater();
+        startTranscode(ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs);
+    });
+}
+
+void PlexBackend::startTranscode(const QString &ratingKey, const QString &partKey,
+                                 const QString &sessionId,
+                                 const QString &audioId, const QString &subtitleId,
+                                 int offsetMs) {
+    const QString uri = serverUrl(), token = serverToken(), quality = videoQuality();
+    QUrl url(uri + "/video/:/transcode/universal/start.m3u8");
+    url.setQuery(transcodeQuery(ratingKey, sessionId, quality, clientId(),
+                                audioId, subtitleId, offsetMs));
 
     // Build the request with Chrome as the platform in the header too, so it
     // matches the query param. Plex uses the Chrome profile for transcoding.
@@ -2678,7 +2714,10 @@ void PlexBackend::set_subtitle_stream(const QString &streamId, const QString &pa
     QUrl url(uri + "/library/parts/" + partId);
     QUrlQuery q; q.addQueryItem("subtitleStreamID", streamId); url.setQuery(q);
     auto *reply = plexPut(url, token);
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, partId]() {
+        reply->deleteLater();
+        emit subtitleStreamSet(partId);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -2919,7 +2958,10 @@ void PlexBackend::stop_transcode(const QString &sessionId) {
     q.addQueryItem("X-Plex-Client-Identifier", clientId());
     url.setQuery(q);
     auto *reply = plexGet(url, token);
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, sessionId]() {
+        reply->deleteLater();
+        emit transcodeStopped(sessionId);
+    });
 }
 
 void PlexBackend::stop_live_session(const QString &sessionId) {

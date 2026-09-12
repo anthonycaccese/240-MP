@@ -62,9 +62,17 @@ FocusScope {
     // track into the stream. On a direct play mpv moves between the tracks
     // itself, in place, and taking over would stop the picture for nothing.
     property bool switchingAudio: false
+    property bool switchingSubtitle: false
     property int  audioTrackCount: 0
+    property int  subtitleTrackCount: 0
+    // The name of the burned-in track, for the OSC to say. mpv has no subtitle
+    // track to read it off when the server has burned it into the picture.
+    property string subtitleTrackLabel: ""
     property bool streamIsTranscoded: false
     readonly property bool audioIsOurs: streamIsTranscoded && audioTrackCount > 1
+    // Audio needs two tracks before cycling means anything; subtitles need one,
+    // because off is the other stop.
+    readonly property bool subtitlesAreOurs: streamIsTranscoded && subtitleTrackCount > 0
 
     property string leavingTo: ""
 
@@ -265,8 +273,18 @@ FocusScope {
     // transcode there is only ever one track in the stream, so cycling locally
     // finds nothing and reopens the stream -- which is what used to send the
     // programme back to its beginning.
+    // Told to the OSC, which uses them to route each button and to decide
+    // whether to draw it: a transcode has no subtitle track for mpv to find.
+    // The name goes with them for the same reason -- there is nothing on the
+    // stream for the info line to read. script-opts is a comma-separated
+    // key=value list, so spaces round-trip as underscores and neither
+    // separator may appear.
     function audioArgs() {
-        return ["--script-opts-append=audio-cycle=" + (audioIsOurs ? "1" : "0")]
+        var subName = subtitleTrackLabel !== "" ? subtitleTrackLabel : "Off"
+        subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
+        return ["--script-opts-append=audio-cycle=" + (audioIsOurs ? "1" : "0"),
+                "--script-opts-append=sub-cycle=" + (subtitlesAreOurs ? "1" : "0"),
+                "--script-opts-append=transcode-sub=" + subName]
     }
 
     function volumeArgs() {
@@ -577,8 +595,10 @@ FocusScope {
         // Whether the AUDIO button is this screen's to answer, learned from the
         // stream the descriptor describes.
         if (descriptor) {
-            playerRoot.streamIsTranscoded = descriptor.transcoded === true
-            playerRoot.audioTrackCount    = Number(descriptor.audioTrackCount) || 0
+            playerRoot.streamIsTranscoded  = descriptor.transcoded === true
+            playerRoot.audioTrackCount     = Number(descriptor.audioTrackCount) || 0
+            playerRoot.subtitleTrackCount  = Number(descriptor.subtitleTrackCount) || 0
+            playerRoot.subtitleTrackLabel  = descriptor.subtitleTrackLabel || ""
         }
 
         if (descriptor && descriptor.needsRegeneration && !rebuildTried) {
@@ -769,17 +789,27 @@ FocusScope {
             mpvController.stop()
         }
 
+        function onSubtitleCycleRequested() {
+            if (!playerRoot.subtitlesAreOurs || playerRoot.switchingSubtitle) return
+            playerRoot.switchingSubtitle = true
+            mpvController.stop()
+        }
+
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
             playerRoot.tuneAskedAt = Date.now()
-            if (playerRoot.switchingAudio) {
+            if (playerRoot.switchingAudio || playerRoot.switchingSubtitle) {
+                var wasSubtitle = playerRoot.switchingSubtitle
                 playerRoot.switchingAudio = false
+                playerRoot.switchingSubtitle = false
                 playerRoot.offAir = false
                 playerRoot.tuning = true
                 // Resolved again from the clock, so it comes back where the
                 // programme has actually got to. If the source will not give a
                 // different track, tune as usual rather than leaving a stopped
                 // player looking at nothing.
-                var next = virtualChannelsBackend.cycle_audio(playerRoot.channelNumber)
+                var next = wasSubtitle
+                           ? virtualChannelsBackend.cycle_subtitle(playerRoot.channelNumber)
+                           : virtualChannelsBackend.cycle_audio(playerRoot.channelNumber)
                 if (!next || next.switched !== true)
                     next = virtualChannelsBackend.tune(playerRoot.channelNumber)
                 playerRoot.apply(next)
