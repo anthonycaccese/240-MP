@@ -162,13 +162,10 @@ signals:
     void itemLoaded(const QVariant &detail);
     void showYearReady(const QString &showRatingKey, int year);
     void streamUrlReady(const QString &url, const QString &plexToken);
-    // The server has taken a subtitle selection for a part. Emitted because a
-    // transcode asked for before it lands burns in whatever the part said
-    // before -- Plex reads the part, not the id on the transcode request.
+    // The server has taken a subtitle selection for a part; a transcode asked
+    // for before it lands burns what the part said before.
     void subtitleStreamSet(const QString &partId);
-    // A transcode session has been torn down. Emitted because the next one for
-    // the same item, started before the server has let go of this one, comes
-    // back carrying its decisions rather than the ones just asked for.
+    // A transcode session is gone; one started before that carries its decision.
     void transcodeStopped(const QString &sessionId);
     void childrenLoaded(const QVariant &items);
     void extrasLoaded(const QVariant &items);

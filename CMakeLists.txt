@@ -227,6 +227,7 @@ if(BUILD_VCHAN_TESTS)
         # Listed so AUTOMOC processes it: it declares a QObject but has no
         # same-named source file for AUTOMOC to pair it with.
         src/modules/virtual_channels/tests/FakeMediaServer.h
+        src/modules/virtual_channels/tests/FakePlexServer.h
         src/modules/virtual_channels/ChannelSchedule.cpp
         src/modules/virtual_channels/PathGuard.cpp
         src/modules/virtual_channels/ChannelTuner.cpp

@@ -1,6 +1,6 @@
 #pragma once
-#include <optional>
 #include <functional>
+#include <optional>
 #include <QHash>
 #include <QPair>
 #include <QSet>
@@ -57,8 +57,7 @@ public:
     // carry on rather than start over.
     Q_INVOKABLE QVariantMap cycle_audio(int channelNumber);
 
-    // The same for subtitles, with one more stop: off. A subtitle a viewer does
-    // not want is the common case, so the cycle comes back round to none.
+    // The same for subtitles; off is one of the stops.
     Q_INVOKABLE QVariantMap cycle_subtitle(int channelNumber);
 
     Q_INVOKABLE QVariantMap after_playback(int channelNumber,
@@ -482,33 +481,27 @@ private:
     QString      m_preferredAudioId;
 
     // The subtitle tracks of the programme now tuned, and which is showing.
-    // The list opens with the OFF pseudo-stream every Plex track list carries,
-    // so index 0 is off -- where a channel starts and where the cycle returns.
+    // Index 0 is the OFF pseudo-stream every Plex track list opens with.
     QVariantList m_subtitleStreams;
     int          m_subtitleIndex = 0;
     QString      m_preferredSubtitleId;
-    // The part the tuned programme plays from. Plex wants the subtitle choice
-    // set on it, not just named on the transcode request.
-    QString      m_plexPartId;
+    QString      m_plexPartId;    // where the selection is written
 
-    // A transcode request waiting on the server to take a subtitle selection.
-    // Held rather than sent because Plex reads the part when the request
-    // arrives, so the one that arrives first decides what gets burned in.
+    // A stream request held until the server has taken the subtitle selection
+    // and let go of the last session -- one hold per answer still owed.
     struct HeldTranscode {
         QString ratingKey;
         QString partKey;
         QString sessionId;
         qint64  offsetMs = 0;
     };
-    // How many answers the held request is still waiting on: the subtitle
-    // selection landing, and the last session being let go of.
     int                          m_transcodeHolds = 0;
     std::optional<HeldTranscode> m_heldTranscode;
+    QTimer                      *m_holdCap = nullptr;
     bool sendTranscodeRequest(const QString &ratingKey, const QString &partKey,
                               const QString &sessionId, qint64 offsetMs);
     void releaseOneHold();
     void releaseHeldTranscode();
-
 
     qint64  m_plexPendingOffsetMs = 0;
     bool    m_plexPendingTranscodeOk = false;

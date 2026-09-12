@@ -30,6 +30,8 @@ namespace {
 constexpr const char *kModuleId = "com.240mp.virtual_channels";
 
 constexpr int kUrlTimeoutMs = 12000;
+// The most a stream request waits on the server before it goes anyway.
+constexpr int kHoldCapMs = 1500;
 
 constexpr int kGuideSliverDivisor = 16;
 
@@ -157,6 +159,14 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
     }
 
     m_urlTimer = new QTimer(this);
+
+    m_holdCap = new QTimer(this);
+
+    m_holdCap->setSingleShot(true);
+
+    m_holdCap->setInterval(kHoldCapMs);
+
+    connect(m_holdCap, &QTimer::timeout, this, &VirtualChannelsBackend::releaseHeldTranscode);
     m_urlTimer->setSingleShot(true);
     m_urlTimer->setInterval(kUrlTimeoutMs);
     connect(m_urlTimer, &QTimer::timeout, this, &VirtualChannelsBackend::onUrlTimeout);
@@ -631,6 +641,14 @@ bool VirtualChannelsBackend::requestPlexUrl(const Slot &s, qint64 offsetMs,
 
     m_plexAwaitingDetailFor.clear();
     m_serverPendingSrc = SlotSource::Plex;
+    // No item detail describes this programme, so nothing learned from the last
+    // one may be written to its part.
+    if (s.ref != m_audioForRef) {
+        m_subtitleStreams.clear();
+        m_subtitleIndex = 0;
+        m_preferredSubtitleId.clear();
+        m_plexPartId.clear();
+    }
     const QString sessionId = QStringLiteral("vchan-%1").arg(nowMs());
     const bool ok = askPlexForStream(s.ref, s.partKey, sessionId, offsetMs,
                                      transcodeAllowed);
@@ -643,9 +661,8 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
                                              const QString &sessionId,
                                              qint64 offsetMs,
                                              bool transcodeAllowed) {
-    // Waited for, not just fired: a session started while the server still has
-    // the last one for this programme comes back with the last one's subtitle
-    // decision on it, which is how turning them off left them on.
+    // Waited for: a session started while the server still holds the last one
+    // comes back with the last one's subtitle decision.
     if (!m_plexTranscodeSession.isEmpty()
         && m_plex->metaObject()->indexOfMethod("stop_transcode(QString)") >= 0) {
         if (QMetaObject::invokeMethod(m_plex, "stop_transcode",
@@ -674,21 +691,12 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
 
     if (willTranscode) {
         m_plexTranscodeSession = sessionId;
-        // Plex burns whatever the *part* says it is showing and ignores the id
-        // on this request -- so asking before the selection lands burns the
-        // last answer in. Both are queued on the same event loop and the one
-        // that reaches the server first is whichever finds a spare connection,
-        // which is why this has to wait rather than merely be written second.
+        // Plex burns what the part says it is showing, so the request waits for
+        // the selection to land and the last session to go. Capped: late is a
+        // programme without its subtitle, never is the technical difficulties card.
         if (m_transcodeHolds > 0) {
             m_heldTranscode = HeldTranscode{ratingKey, partKey, sessionId, offsetMs};
-            // An answer that never comes must not cost the viewer the
-            // programme: hold for it, but not for longer than it takes to
-            // notice. Late is a programme without the subtitle on it; never is
-            // the technical difficulties card.
-            QTimer::singleShot(1500, this, [this]() {
-                m_transcodeHolds = 0;
-                releaseHeldTranscode();
-            });
+            m_holdCap->start();
             return true;
         }
         return sendTranscodeRequest(ratingKey, partKey, sessionId, offsetMs);
@@ -723,14 +731,9 @@ void VirtualChannelsBackend::onPlexItemLoaded(const QVariant &detail) {
                 break;
             }
 
-        // Where the server already has this programme's subtitles set, because
-        // that is what it burns into the picture whoever asked for it -- the
-        // choice lives on the part and outlives the play, so the Plex module
-        // and a channel are looking at the same switch. Assuming off here is
-        // how the banner came to say OFF over a picture that had subtitles on
-        // it, and how the first press appeared to do nothing: it moved onto
-        // the track that was already showing. Index 0 is the OFF the list
-        // always opens with, which is also what an unset part reports.
+        // Start from what the part already shows: the choice lives on the
+        // server and outlives the play, and the Plex module sets the same one.
+        // Index 0 is the OFF the list opens with, which an unset part reports.
         m_subtitleStreams = d.value(QStringLiteral("subtitleStreams")).toList();
         m_subtitleIndex   = 0;
         const QString showingSub = d.value(QStringLiteral("selectedSubtitleId")).toString();
@@ -742,8 +745,6 @@ void VirtualChannelsBackend::onPlexItemLoaded(const QVariant &detail) {
         m_preferredSubtitleId = m_subtitleIndex > 0 ? showingSub : QString();
     }
 
-    // Which part is playing, for the subtitle selection that has to be set on
-    // it before the server will burn one in.
     m_plexPartId = d.value(QStringLiteral("partId")).toString();
 
     const QString partKey = d.value("partKey").toString();
@@ -851,9 +852,7 @@ QVariantMap VirtualChannelsBackend::cycle_audio(int channelNumber) {
     return m;
 }
 
-// What to call a subtitle entry, empty for the OFF the Plex track list always
-// opens with: the player turns an empty name into the same "(NONE)" the OSC
-// shows for every other module.
+// Empty for the OFF pseudo-stream, which the player shows as "(NONE)".
 static QString subtitleLabel(const QVariantMap &track) {
     return track.value(QStringLiteral("id")).toString() == QLatin1String("0")
                ? QString()
@@ -864,11 +863,7 @@ QVariantMap VirtualChannelsBackend::cycle_subtitle(int channelNumber) {
     QVariantMap refused;
     refused["switched"] = false;
 
-    // The list opens with the OFF pseudo-stream Plex hands to every module, so
-    // one entry means the programme has no subtitles at all and the cycle has
-    // nowhere to go. Off is already a stop on it; adding another would make
-    // half the presses do nothing.
-    if (m_subtitleStreams.size() < 2) return refused;
+    if (m_subtitleStreams.size() < 2) return refused;   // only the OFF pseudo-stream
     if (m_urlPending) return refused;
 
     m_subtitleIndex = (m_subtitleIndex + 1) % m_subtitleStreams.size();
@@ -876,17 +871,11 @@ QVariantMap VirtualChannelsBackend::cycle_subtitle(int channelNumber) {
     const QVariantMap track = m_subtitleStreams[m_subtitleIndex].toMap();
     m_preferredSubtitleId = track.value(QStringLiteral("id")).toString();
 
-    qInfo("[VirtualChannels] subtitles on channel %d: %s (part %s)", channelNumber,
-          qPrintable(track.value(QStringLiteral("displayTitle")).toString()),
-          m_plexPartId.isEmpty() ? "unknown" : qPrintable(m_plexPartId));
+    qInfo("[VirtualChannels] subtitles on channel %d: %s", channelNumber,
+          qPrintable(track.value(QStringLiteral("displayTitle")).toString()));
 
-    // Plex burns a subtitle only into a part it has been told is showing one:
-    // the stream id on the transcode request alone is dropped and the picture
-    // comes back bare. Said here rather than beside the request itself so the
-    // whole item-detail round trip stands between the two -- the server has to
-    // have taken it before it is asked for a stream, or it burns the old
-    // choice in. Only ever after a press, so tuning a channel leaves the
-    // viewer's library alone.
+    // Plex burns what the part says it is showing, not what the request names.
+    // Written only on a press, so tuning leaves the viewer's library alone.
     if (!m_plexPartId.isEmpty() && m_plex
         && m_plex->metaObject()->indexOfMethod(
                "set_subtitle_stream(QString,QString)") >= 0) {
@@ -896,8 +885,7 @@ QVariantMap VirtualChannelsBackend::cycle_subtitle(int channelNumber) {
             ++m_transcodeHolds;
     }
 
-    // Resolved again from the clock, so it comes back where the programme has
-    // got to rather than at its beginning.
+    // Resolved again from the clock, so it comes back where the programme is.
     QVariantMap m = tune(channelNumber);
     m["switched"] = true;
     m["subtitleTrackLabel"] = subtitleLabel(track);
@@ -908,13 +896,8 @@ bool VirtualChannelsBackend::sendTranscodeRequest(const QString &ratingKey,
                                                  const QString &partKey,
                                                  const QString &sessionId,
                                                  qint64 offsetMs) {
-    // Named here as well as set on the part, because the two kinds of subtitle
-    // are burned in by different roads and each needs its own half. An image
-    // one (pgs) the server overlays off the part's selection alone -- that is
-    // all the Plex module ever sets, which is why its picture comes back with
-    // the subtitle on it. A text one (subrip) is drawn only when the transcode
-    // is asked for it by name: set on the part and not named here, the server
-    // picks the stream and renders none of it. Saying both covers both.
+    // Named on the request as well as set on the part: an image subtitle is
+    // drawn from the part alone, a text one only when the request names it.
     return QMetaObject::invokeMethod(
         m_plex, "request_transcode",
         Q_ARG(QString, ratingKey), Q_ARG(QString, partKey),
@@ -924,7 +907,6 @@ bool VirtualChannelsBackend::sendTranscodeRequest(const QString &ratingKey,
         Q_ARG(int, int(qBound<qint64>(0LL, offsetMs, qint64(INT_MAX)))));
 }
 
-// One precondition answered. The request goes out when the last of them does.
 void VirtualChannelsBackend::releaseOneHold() {
     if (m_transcodeHolds > 0) --m_transcodeHolds;
     if (m_transcodeHolds == 0) releaseHeldTranscode();
@@ -932,6 +914,7 @@ void VirtualChannelsBackend::releaseOneHold() {
 
 void VirtualChannelsBackend::releaseHeldTranscode() {
     m_transcodeHolds = 0;
+    m_holdCap->stop();
     if (!m_heldTranscode.has_value()) return;
     const HeldTranscode held = *m_heldTranscode;
     m_heldTranscode.reset();
@@ -1081,8 +1064,7 @@ void VirtualChannelsBackend::onPlexStreamUrlReady(const QString &url, const QStr
     // place, without anybody stopping anything.
     m["transcoded"]      = !m_plexTranscodeSession.isEmpty();
     m["audioTrackCount"] = int(m_audioStreams.size());
-    // Real tracks only: the OFF at the head of the list is not one anybody chose,
-    // and a button offering off in place of off is a button that does nothing.
+    // Real tracks only; the OFF at the head of the list is not one.
     m["subtitleTrackCount"] = int(qMax(0, m_subtitleStreams.size() - 1));
     m["subtitleTrackLabel"] =
         (m_subtitleIndex >= 0 && m_subtitleIndex < m_subtitleStreams.size())
@@ -1117,6 +1099,7 @@ void VirtualChannelsBackend::release_tuner() {
     m_plexPartId.clear();
     m_transcodeHolds = 0;
     m_heldTranscode.reset();
+    m_holdCap->stop();
     if (!m_plexTranscodeSession.isEmpty() && m_plex
         && m_plex->metaObject()->indexOfMethod("stop_transcode(QString)") >= 0) {
         QMetaObject::invokeMethod(m_plex, "stop_transcode",

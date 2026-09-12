@@ -2569,8 +2569,7 @@ void PlexBackend::resolve_card_queue(const QString &ref) {
     });
 }
 
-// The query both transcode calls share. hasMDE=1 is a promise: the client will
-// ask the Media Decision Engine itself, so the server may skip running one.
+// The query the decision and the stream request share.
 static QUrlQuery transcodeQuery(const QString &ratingKey, const QString &sessionId,
                                 const QString &quality, const QString &clientId,
                                 const QString &audioId, const QString &subtitleId,
@@ -2613,14 +2612,11 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
     qInfo("[Plex] playback TRANSCODE for %s at offset %d s, cap %s kbps",
           qPrintable(ratingKey), offsetMs / 1000, qPrintable(quality));
 
-    // Ask the Media Decision Engine before asking for the stream. With hasMDE=1
-    // the server takes the client to have done this already, and when it has
-    // not, the server reuses whatever it last decided for this client -- which
-    // for a stream that changed its subtitle is the decision made without one.
-    // Every session where the engine ran burned the subtitle it was asked for;
-    // sessions where it was skipped did so a third of the time. Whatever the
-    // decision call returns, the stream is still asked for: a pre-flight that
-    // fails must not cost the viewer the programme.
+    // hasMDE=1 promises the server the client consults the Media Decision
+    // Engine itself; skip it and the server reuses its last decision for this
+    // client, made before any subtitle was chosen. The stream is asked for
+    // whatever the decision returns -- a pre-flight must not cost the viewer
+    // the programme.
     QUrl decide(uri + "/video/:/transcode/universal/decision");
     decide.setQuery(transcodeQuery(ratingKey, sessionId, quality, clientId(),
                                    audioId, subtitleId, offsetMs));

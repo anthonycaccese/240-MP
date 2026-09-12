@@ -1,4 +1,5 @@
 #include "../VirtualChannelsBackend.h"
+#include "FakePlexServer.h"
 #include "TestHarness.h"
 
 #include <QDir>
@@ -6,6 +7,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDateTime>
+#include <QEventLoop>
+#include <QTimer>
 #include <QTemporaryDir>
 #include <QVariantList>
 #include <QVariantMap>
@@ -1192,6 +1196,133 @@ void testChannelLifecycle() {
     check(!stillThere, "the deleted channel is gone");
 }
 
+
+// A Plex channel airing one programme right now, and the detail the fake
+// answers for it: an OFF pseudo-stream and however many real tracks.
+QJsonObject plexChannel(int number) {
+    QJsonObject o;
+    o["number"] = number;
+    o["name"]   = QStringLiteral("Plex Test");
+    o["plex"]   = QJsonObject();
+    return o;
+}
+
+void writeAiringNow(const Fixture &fx, int number, const QString &ref) {
+    QJsonObject slot;
+    slot["start"] = double(QDateTime::currentMSecsSinceEpoch() - 60 * 1000);
+    slot["dur"]   = double(60 * 60 * 1000);
+    slot["kind"]  = QStringLiteral("programme");
+    slot["src"]   = QStringLiteral("plex");
+    slot["ref"]   = ref;
+    slot["title"] = QStringLiteral("Bloodlines");
+    QJsonArray entries; entries.append(slot);
+    QJsonObject root;
+    root["channel"]      = number;
+    root["seed"]         = 1;
+    root["generated_at"] = double(QDateTime::currentMSecsSinceEpoch() - 60 * 1000);
+    root["horizon_end"]  = double(QDateTime::currentMSecsSinceEpoch() + 60 * 60 * 1000);
+    root["slots"]        = entries;
+    QDir().mkpath(fx.data() + QStringLiteral("/channels/schedule"));
+    QFile f(fx.data() + QStringLiteral("/channels/schedule/%1.json").arg(number));
+    if (f.open(QIODevice::WriteOnly)) f.write(QJsonDocument(root).toJson());
+}
+
+QVariantMap plexDetail(const QString &ref, int realSubtitleTracks) {
+    QVariantList subs;
+    subs << QVariantMap{{"id", "0"}, {"displayTitle", "OFF"}};
+    if (realSubtitleTracks > 0) subs << QVariantMap{{"id", "28932"}, {"displayTitle", "English"}};
+    if (realSubtitleTracks > 1) subs << QVariantMap{{"id", "28933"}, {"displayTitle", "English SDH"}};
+    QVariantMap d;
+    d["ratingKey"]          = ref;
+    d["partKey"]            = QStringLiteral("/library/parts/11234/1/file.mkv");
+    d["partId"]             = QStringLiteral("11234");
+    d["audioStreams"]       = QVariantList{QVariantMap{{"id", "7"}, {"displayTitle", "English"}}};
+    d["selectedAudioId"]    = QStringLiteral("7");
+    d["subtitleStreams"]    = subs;
+    d["selectedSubtitleId"] = QStringLiteral("0");
+    return d;
+}
+
+void spin(int ms) {
+    QEventLoop loop;
+    QTimer::singleShot(ms, &loop, &QEventLoop::quit);
+    loop.exec();
+}
+
+void testSubtitleCycleRefusesWithNoTracks() {
+    section("Subtitles: a programme with only the OFF pseudo-stream has nothing to cycle");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 0);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    checkEq(plex.count("request_transcode"), 1, "the tune asks for one stream");
+
+    const QVariantMap r = b.cycle_subtitle(5); spin(20);
+    check(r.value("switched").toBool() == false, "the cycle is refused");
+    checkEq(plex.count("set_subtitle_stream"), 0, "nothing is written to the part");
+    checkEq(plex.count("request_transcode"), 1, "no second stream is asked for");
+}
+
+void testSubtitleCycleHoldsForBothAnswers() {
+    section("Subtitles: the stream waits for the selection to land and the last session to go");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 2);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    checkStr(plex.transcodeSubtitleIds.value(0), QStringLiteral("0"), "a tune names no subtitle");
+
+    const QVariantMap r = b.cycle_subtitle(5); spin(20);
+    check(r.value("switched").toBool(), "the cycle is taken");
+    checkStr(r.value("subtitleTrackLabel").toString(), QStringLiteral("English"), "it moved onto the first real track");
+    checkEq(plex.count("set_subtitle_stream:28932@11234"), 1, "the selection is written to the part");
+    checkEq(plex.count("stop_transcode"), 1, "the last session is stopped");
+    checkEq(plex.count("request_transcode"), 1, "the stream is held while both answers are owed");
+
+    emit plex.subtitleStreamSet(QStringLiteral("11234"));
+    checkEq(plex.count("request_transcode"), 1, "still held with one answer owed");
+    emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    checkEq(plex.count("request_transcode"), 2, "released when the last answer lands");
+    checkStr(plex.transcodeSubtitleIds.value(1), QStringLiteral("28932"), "and names the track on the request");
+
+    // Round again: the second track, then off, which is written as stream 0.
+    b.cycle_subtitle(5); spin(20);
+    emit plex.subtitleStreamSet(QStringLiteral("11234")); emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    checkStr(plex.transcodeSubtitleIds.value(2), QStringLiteral("28933"), "second track");
+    const QVariantMap off = b.cycle_subtitle(5); spin(20);
+    emit plex.subtitleStreamSet(QStringLiteral("11234")); emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    checkStr(off.value("subtitleTrackLabel").toString(), QString(), "off has no name");
+    checkEq(plex.count("set_subtitle_stream:0@11234"), 1, "off is written to the part as stream 0");
+    checkStr(plex.transcodeSubtitleIds.value(3), QStringLiteral("0"), "and the request names none");
+}
+
+void testSubtitleHoldIsCapped() {
+    section("Subtitles: an answer that never comes does not cost the programme");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 1);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    b.cycle_subtitle(5); spin(20);
+    checkEq(plex.count("request_transcode"), 1, "held");
+    spin(300);
+    checkEq(plex.count("request_transcode"), 1, "still held well inside the cap");
+    spin(1500);
+    checkEq(plex.count("request_transcode"), 2, "sent once the cap passes");
+    // A press right after the release must not be let go early by a stale cap.
+    spin(20); b.cycle_subtitle(5); spin(20);
+    checkEq(plex.count("request_transcode"), 2, "the next request is held afresh");
+    spin(300);
+    checkEq(plex.count("request_transcode"), 2, "and the old cap does not release it");
+}
+
 }  // namespace
 
 int runVirtualChannelsBackendTests() {
@@ -1219,5 +1350,8 @@ int runVirtualChannelsBackendTests() {
     testInterstitialsAreCounted();
     testSourceSwitchAndPicks();
     testChannelLifecycle();
+    testSubtitleCycleRefusesWithNoTracks();
+    testSubtitleCycleHoldsForBothAnswers();
+    testSubtitleHoldIsCapped();
     return 0;
 }
