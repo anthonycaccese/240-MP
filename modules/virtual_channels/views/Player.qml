@@ -69,9 +69,10 @@ FocusScope {
     // track to read it off when the server has burned it into the picture.
     property string subtitleTrackLabel: ""
     property bool streamIsTranscoded: false
-    readonly property bool audioIsOurs: streamIsTranscoded && audioTrackCount > 1
-    // Audio needs two tracks before cycling means anything; subtitles need one,
-    // because off is the other stop.
+    // Any transcode: mpv cycling the one track it can see goes off and back by
+    // reopening the stream, which does not always come back where it left.
+    readonly property bool audioIsOurs: streamIsTranscoded
+    // One subtitle track is a cycle, because off is the other stop.
     readonly property bool subtitlesAreOurs: streamIsTranscoded && subtitleTrackCount > 0
 
     property string leavingTo: ""
@@ -283,6 +284,7 @@ FocusScope {
         var subName = subtitleTrackLabel !== "" ? subtitleTrackLabel : "Off"
         subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
         return ["--script-opts-append=audio-cycle=" + (audioIsOurs ? "1" : "0"),
+                "--script-opts-append=audio-tracks=" + audioTrackCount,
                 "--script-opts-append=sub-cycle=" + (subtitlesAreOurs ? "1" : "0"),
                 "--script-opts-append=transcode-sub=" + subName]
     }
@@ -785,6 +787,7 @@ FocusScope {
         // exit, exactly as the Jellyfin player does it.
         function onAudioCycleRequested() {
             if (!playerRoot.audioIsOurs || playerRoot.switchingAudio) return
+            if (playerRoot.audioTrackCount < 2) return   // nothing to move between
             playerRoot.switchingAudio = true
             mpvController.stop()
         }
