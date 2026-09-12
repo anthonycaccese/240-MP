@@ -161,17 +161,14 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
     }
 
     m_urlTimer = new QTimer(this);
-
-    m_holdCap = new QTimer(this);
-
-    m_holdCap->setSingleShot(true);
-
-    m_holdCap->setInterval(kHoldCapMs);
-
-    connect(m_holdCap, &QTimer::timeout, this, &VirtualChannelsBackend::releaseHeldTranscode);
     m_urlTimer->setSingleShot(true);
     m_urlTimer->setInterval(kUrlTimeoutMs);
     connect(m_urlTimer, &QTimer::timeout, this, &VirtualChannelsBackend::onUrlTimeout);
+
+    m_holdCap = new QTimer(this);
+    m_holdCap->setSingleShot(true);
+    m_holdCap->setInterval(kHoldCapMs);
+    connect(m_holdCap, &QTimer::timeout, this, &VirtualChannelsBackend::releaseHeldTranscode);
 
     m_genTimer = new QTimer(this);
     m_genTimer->setInterval(0);
@@ -663,21 +660,26 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
                                              const QString &sessionId,
                                              qint64 offsetMs,
                                              bool transcodeAllowed) {
-    // Waited for: a session started while the server still holds the last one
-    // comes back with the last one's subtitle decision.
-    if (!m_plexTranscodeSession.isEmpty()
-        && m_plex->metaObject()->indexOfMethod("stop_transcode(QString)") >= 0) {
-        if (QMetaObject::invokeMethod(m_plex, "stop_transcode",
-                                      Q_ARG(QString, m_plexTranscodeSession)))
-            ++m_transcodeHolds;
-    }
-    m_plexTranscodeSession.clear();
-
     const QString quality = plexVideoQuality();
     const bool willTranscode =
         transcodeAllowed && quality != QLatin1String("auto")
         && m_plex->metaObject()->indexOfMethod(
                "request_transcode(QString,QString,QString,QString,QString,int)") >= 0;
+
+    // The last session is stopped either way. Only a transcode waits for the
+    // stop to land: one started while the server still holds the last comes
+    // back with the last one's decision. A preview or direct play has no such
+    // decision to protect and must not leave a hold behind.
+    if (!m_plexTranscodeSession.isEmpty()
+        && m_plex->metaObject()->indexOfMethod("stop_transcode(QString)") >= 0) {
+        if (QMetaObject::invokeMethod(m_plex, "stop_transcode",
+                                      Q_ARG(QString, m_plexTranscodeSession))
+            && willTranscode) {
+            m_awaitStop = m_plexTranscodeSession;
+            ++m_transcodeHolds;
+        }
+    }
+    m_plexTranscodeSession.clear();
 
     // Which road a programme takes, and why. A channel joins part-way through
     // and allows transcoding; a guide preview starts at nothing and does not.
@@ -697,6 +699,8 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
         // the selection to land and the last session to go. Capped: late is a
         // programme without its subtitle, never is the technical difficulties card.
         if (m_transcodeHolds > 0) {
+            // A second press inside the hold replaces the request; the session
+            // it replaces was never started, so there is nothing to stop.
             m_heldTranscode = HeldTranscode{ratingKey, partKey, sessionId, offsetMs};
             m_holdCap->start();
             return true;
@@ -850,8 +854,10 @@ QVariantMap VirtualChannelsBackend::cycle_audio(int channelNumber) {
         && m_plex->metaObject()->indexOfMethod("set_audio_stream(QString,QString)") >= 0) {
         if (QMetaObject::invokeMethod(m_plex, "set_audio_stream",
                                       Q_ARG(QString, m_preferredAudioId),
-                                      Q_ARG(QString, m_plexPartId)))
+                                      Q_ARG(QString, m_plexPartId))) {
+            m_awaitPart = m_plexPartId;
             ++m_transcodeHolds;
+        }
     }
 
     // The programme is resolved again from scratch, which is what puts it back
@@ -892,8 +898,10 @@ QVariantMap VirtualChannelsBackend::cycle_subtitle(int channelNumber) {
                "set_subtitle_stream(QString,QString)") >= 0) {
         if (QMetaObject::invokeMethod(m_plex, "set_subtitle_stream",
                                       Q_ARG(QString, m_preferredSubtitleId),
-                                      Q_ARG(QString, m_plexPartId)))
+                                      Q_ARG(QString, m_plexPartId))) {
+            m_awaitPart = m_plexPartId;
             ++m_transcodeHolds;
+        }
     }
 
     // Resolved again from the clock, so it comes back where the programme is.
@@ -925,6 +933,8 @@ void VirtualChannelsBackend::releaseOneHold() {
 
 void VirtualChannelsBackend::releaseHeldTranscode() {
     m_transcodeHolds = 0;
+    m_awaitPart.clear();
+    m_awaitStop.clear();
     m_holdCap->stop();
     if (!m_heldTranscode.has_value()) return;
     const HeldTranscode held = *m_heldTranscode;
@@ -932,18 +942,24 @@ void VirtualChannelsBackend::releaseHeldTranscode() {
     sendTranscodeRequest(held.ratingKey, held.partKey, held.sessionId, held.offsetMs);
 }
 
+// The Plex backend is one object shared with the Plex module, so its answers
+// arrive for everything anybody asked. Only the one this hold is waiting on
+// may release it.
 void VirtualChannelsBackend::onPlexSubtitleStreamSet(const QString &partId) {
-    Q_UNUSED(partId);
+    if (partId != m_awaitPart) return;
+    m_awaitPart.clear();
     releaseOneHold();
 }
 
 void VirtualChannelsBackend::onPlexAudioStreamSet(const QString &partId) {
-    Q_UNUSED(partId);
+    if (partId != m_awaitPart) return;
+    m_awaitPart.clear();
     releaseOneHold();
 }
 
 void VirtualChannelsBackend::onPlexTranscodeStopped(const QString &sessionId) {
-    Q_UNUSED(sessionId);
+    if (sessionId != m_awaitStop) return;
+    m_awaitStop.clear();
     releaseOneHold();
 }
 
@@ -1115,6 +1131,8 @@ void VirtualChannelsBackend::release_tuner() {
     m_plexPartId.clear();
     m_transcodeHolds = 0;
     m_heldTranscode.reset();
+    m_awaitPart.clear();
+    m_awaitStop.clear();
     m_holdCap->stop();
     if (!m_plexTranscodeSession.isEmpty() && m_plex
         && m_plex->metaObject()->indexOfMethod("stop_transcode(QString)") >= 0) {

@@ -1245,6 +1245,12 @@ QVariantMap plexDetail(const QString &ref, int realSubtitleTracks, int audioTrac
     return d;
 }
 
+// The session the backend last asked the fake to stop -- what its stop answer must name.
+QString lastStopped(const FakePlexServer &plex) {
+    const QStringList stops = plex.calls.filter(QStringLiteral("stop_transcode:"));
+    return stops.isEmpty() ? QString() : stops.last().section(QLatin1Char(':'), 1);
+}
+
 void spin(int ms) {
     QEventLoop loop;
     QTimer::singleShot(ms, &loop, &QEventLoop::quit);
@@ -1288,16 +1294,16 @@ void testSubtitleCycleHoldsForBothAnswers() {
 
     emit plex.subtitleStreamSet(QStringLiteral("11234"));
     checkEq(plex.count("request_transcode"), 1, "still held with one answer owed");
-    emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    emit plex.transcodeStopped(lastStopped(plex)); spin(20);
     checkEq(plex.count("request_transcode"), 2, "released when the last answer lands");
     checkStr(plex.transcodeSubtitleIds.value(1), QStringLiteral("28932"), "and names the track on the request");
 
     // Round again: the second track, then off, which is written as stream 0.
     b.cycle_subtitle(5); spin(20);
-    emit plex.subtitleStreamSet(QStringLiteral("11234")); emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    emit plex.subtitleStreamSet(QStringLiteral("11234")); emit plex.transcodeStopped(lastStopped(plex)); spin(20);
     checkStr(plex.transcodeSubtitleIds.value(2), QStringLiteral("28933"), "second track");
     const QVariantMap off = b.cycle_subtitle(5); spin(20);
-    emit plex.subtitleStreamSet(QStringLiteral("11234")); emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    emit plex.subtitleStreamSet(QStringLiteral("11234")); emit plex.transcodeStopped(lastStopped(plex)); spin(20);
     checkStr(off.value("subtitleTrackLabel").toString(), QString(), "off has no name");
     checkEq(plex.count("set_subtitle_stream:0@11234"), 1, "off is written to the part as stream 0");
     checkStr(plex.transcodeSubtitleIds.value(3), QStringLiteral("0"), "and the request names none");
@@ -1320,7 +1326,7 @@ void testAudioCycleWritesThePart() {
     checkEq(plex.count("set_audio_stream:8@11234"), 1, "the track is written to the part");
     checkEq(plex.count("request_transcode"), 1, "the stream is held for the write and the stop");
     emit plex.audioStreamSet(QStringLiteral("11234"));
-    emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    emit plex.transcodeStopped(lastStopped(plex)); spin(20);
     checkEq(plex.count("request_transcode"), 2, "released once both have landed");
     checkStr(plex.transcodeAudioIds.value(1), QStringLiteral("8"), "and names the track on the request");
 }
@@ -1336,15 +1342,57 @@ void testSubtitleHoldIsCapped() {
     b.tune(5); spin(20);
     b.cycle_subtitle(5); spin(20);
     checkEq(plex.count("request_transcode"), 1, "held");
-    spin(300);
+    spin(200);
     checkEq(plex.count("request_transcode"), 1, "still held well inside the cap");
-    spin(1500);
+    spin(1900);
     checkEq(plex.count("request_transcode"), 2, "sent once the cap passes");
     // A press right after the release must not be let go early by a stale cap.
     spin(20); b.cycle_subtitle(5); spin(20);
     checkEq(plex.count("request_transcode"), 2, "the next request is held afresh");
-    spin(300);
+    spin(200);
     checkEq(plex.count("request_transcode"), 2, "and the old cap does not release it");
+}
+
+void testOnlyTheAskedForAnswersRelease() {
+    section("Holds: answers about other parts and sessions do not release a held stream");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 1);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    b.cycle_subtitle(5); spin(20);
+    checkEq(plex.count("request_transcode"), 1, "held");
+    // The Plex module, or a stale stop of our own, answering about something else.
+    emit plex.subtitleStreamSet(QStringLiteral("99999"));
+    emit plex.transcodeStopped(QStringLiteral("someone-elses-session")); spin(20);
+    checkEq(plex.count("request_transcode"), 1, "still held: those were not ours");
+    emit plex.subtitleStreamSet(QStringLiteral("11234"));
+    emit plex.transcodeStopped(lastStopped(plex)); spin(20);
+    checkEq(plex.count("request_transcode"), 2, "released by the answers that were asked for");
+}
+
+void testDirectPlayLeavesNoHold() {
+    section("Holds: stopping the last session for a direct play does not hold anything");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 1);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);                       // a transcode, leaving a session to stop
+    plex.quality = QStringLiteral("auto");
+    b.tune(5); spin(20);                       // direct play: stops the session, holds nothing
+    checkEq(plex.count("stop_transcode"), 1, "the old session is stopped");
+    checkEq(plex.count("build_stream_url"), 1, "and a direct stream is asked for");
+    plex.quality = QStringLiteral("2000");
+    b.cycle_subtitle(5); spin(20);
+    // Only the press's own two answers are owed; a stray hold from the direct
+    // play would keep this waiting after both.
+    emit plex.subtitleStreamSet(QStringLiteral("11234"));
+    emit plex.transcodeStopped(QStringLiteral("none-outstanding")); spin(20);
+    checkEq(plex.count("request_transcode"), 2, "released once its own answers land");
 }
 
 }  // namespace
@@ -1378,5 +1426,7 @@ int runVirtualChannelsBackendTests() {
     testSubtitleCycleHoldsForBothAnswers();
     testSubtitleHoldIsCapped();
     testAudioCycleWritesThePart();
+    testOnlyTheAskedForAnswersRelease();
+    testDirectPlayLeavesNoHold();
     return 0;
 }

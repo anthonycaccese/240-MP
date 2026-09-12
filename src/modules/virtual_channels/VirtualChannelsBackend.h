@@ -497,6 +497,8 @@ private:
         qint64  offsetMs = 0;
     };
     int                          m_transcodeHolds = 0;
+    QString                      m_awaitPart;   // the part whose write is owed
+    QString                      m_awaitStop;   // the session whose stop is owed
     std::optional<HeldTranscode> m_heldTranscode;
     QTimer                      *m_holdCap = nullptr;
     bool sendTranscodeRequest(const QString &ratingKey, const QString &partKey,

@@ -274,12 +274,8 @@ FocusScope {
     // transcode there is only ever one track in the stream, so cycling locally
     // finds nothing and reopens the stream -- which is what used to send the
     // programme back to its beginning.
-    // Told to the OSC, which uses them to route each button and to decide
-    // whether to draw it: a transcode has no subtitle track for mpv to find.
-    // The name goes with them for the same reason -- there is nothing on the
-    // stream for the info line to read. script-opts is a comma-separated
-    // key=value list, so spaces round-trip as underscores and neither
-    // separator may appear.
+    // Routes each OSC button and says whether to draw it; the subtitle's name
+    // rides along because a burned-in track leaves mpv nothing to read.
     function audioArgs() {
         var subName = subtitleTrackLabel !== "" ? subtitleTrackLabel : "Off"
         subName = subName.replace(/ /g, "_").replace(/[,=]/g, "")
@@ -786,14 +782,14 @@ FocusScope {
         // the ordinary "the viewer stopped" path -- so the work waits for the
         // exit, exactly as the Jellyfin player does it.
         function onAudioCycleRequested() {
-            if (!playerRoot.audioIsOurs || playerRoot.switchingAudio) return
+            if (!playerRoot.audioIsOurs || playerRoot.switchingAudio || playerRoot.switchingSubtitle) return
             if (playerRoot.audioTrackCount < 2) return   // nothing to move between
             playerRoot.switchingAudio = true
             mpvController.stop()
         }
 
         function onSubtitleCycleRequested() {
-            if (!playerRoot.subtitlesAreOurs || playerRoot.switchingSubtitle) return
+            if (!playerRoot.subtitlesAreOurs || playerRoot.switchingSubtitle || playerRoot.switchingAudio) return
             playerRoot.switchingSubtitle = true
             mpvController.stop()
         }

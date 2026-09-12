@@ -19,7 +19,8 @@ public:
     QStringList transcodeSubtitleIds;         // subtitleId of each request_transcode
     QStringList transcodeAudioIds;            // audioId of each
 
-    Q_INVOKABLE QString video_quality() const { return QStringLiteral("2000"); }
+    QString quality = QStringLiteral("2000");   // "auto" makes every stream a direct play
+    Q_INVOKABLE QString video_quality() const { return quality; }
     Q_INVOKABLE QString get_access_token() const { return QStringLiteral("tok"); }
 
     Q_INVOKABLE void load_item_detail(const QString &ratingKey) {
