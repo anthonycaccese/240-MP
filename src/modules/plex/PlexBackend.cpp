@@ -2702,7 +2702,10 @@ void PlexBackend::set_audio_stream(const QString &streamId, const QString &partI
     QUrl url(uri + "/library/parts/" + partId);
     QUrlQuery q; q.addQueryItem("audioStreamID", streamId); url.setQuery(q);
     auto *reply = plexPut(url, token);
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, partId]() {
+        reply->deleteLater();
+        emit audioStreamSet(partId);
+    });
 }
 
 void PlexBackend::set_subtitle_stream(const QString &streamId, const QString &partId) {

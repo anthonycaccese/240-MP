@@ -1227,7 +1227,7 @@ void writeAiringNow(const Fixture &fx, int number, const QString &ref) {
     if (f.open(QIODevice::WriteOnly)) f.write(QJsonDocument(root).toJson());
 }
 
-QVariantMap plexDetail(const QString &ref, int realSubtitleTracks) {
+QVariantMap plexDetail(const QString &ref, int realSubtitleTracks, int audioTracks = 1) {
     QVariantList subs;
     subs << QVariantMap{{"id", "0"}, {"displayTitle", "OFF"}};
     if (realSubtitleTracks > 0) subs << QVariantMap{{"id", "28932"}, {"displayTitle", "English"}};
@@ -1236,7 +1236,9 @@ QVariantMap plexDetail(const QString &ref, int realSubtitleTracks) {
     d["ratingKey"]          = ref;
     d["partKey"]            = QStringLiteral("/library/parts/11234/1/file.mkv");
     d["partId"]             = QStringLiteral("11234");
-    d["audioStreams"]       = QVariantList{QVariantMap{{"id", "7"}, {"displayTitle", "English"}}};
+    QVariantList audio{QVariantMap{{"id", "7"}, {"displayTitle", "Portugues"}}};
+    if (audioTracks > 1) audio << QVariantMap{{"id", "8"}, {"displayTitle", "English"}};
+    d["audioStreams"]       = audio;
     d["selectedAudioId"]    = QStringLiteral("7");
     d["subtitleStreams"]    = subs;
     d["selectedSubtitleId"] = QStringLiteral("0");
@@ -1301,6 +1303,28 @@ void testSubtitleCycleHoldsForBothAnswers() {
     checkStr(plex.transcodeSubtitleIds.value(3), QStringLiteral("0"), "and the request names none");
 }
 
+void testAudioCycleWritesThePart() {
+    section("Audio: a press writes the track to the part and holds the stream for it");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 0, 2);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    checkStr(plex.transcodeAudioIds.value(0), QString(), "a tune names no audio track");
+
+    const QVariantMap r = b.cycle_audio(5); spin(20);
+    check(r.value("switched").toBool(), "the cycle is taken");
+    checkStr(r.value("audioTrackLabel").toString(), QStringLiteral("English"), "it moved to the other track");
+    checkEq(plex.count("set_audio_stream:8@11234"), 1, "the track is written to the part");
+    checkEq(plex.count("request_transcode"), 1, "the stream is held for the write and the stop");
+    emit plex.audioStreamSet(QStringLiteral("11234"));
+    emit plex.transcodeStopped(QStringLiteral("x")); spin(20);
+    checkEq(plex.count("request_transcode"), 2, "released once both have landed");
+    checkStr(plex.transcodeAudioIds.value(1), QStringLiteral("8"), "and names the track on the request");
+}
+
 void testSubtitleHoldIsCapped() {
     section("Subtitles: an answer that never comes does not cost the programme");
     Fixture fx;
@@ -1353,5 +1377,6 @@ int runVirtualChannelsBackendTests() {
     testSubtitleCycleRefusesWithNoTracks();
     testSubtitleCycleHoldsForBothAnswers();
     testSubtitleHoldIsCapped();
+    testAudioCycleWritesThePart();
     return 0;
 }

@@ -272,6 +272,7 @@ private slots:
     void onPlexCollectionsLoaded(const QVariant &collections);
     void onPlexPlaylistsLoaded(const QVariant &playlists);
     void onPlexSubtitleStreamSet(const QString &partId);
+    void onPlexAudioStreamSet(const QString &partId);
     void onPlexTranscodeStopped(const QString &sessionId);
     void onGenerationTick();
     void onUrlTimeout();

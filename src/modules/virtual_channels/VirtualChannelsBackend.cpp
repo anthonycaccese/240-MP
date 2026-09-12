@@ -128,6 +128,8 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
                 connect(m_plex, SIGNAL(playlistsLoaded(QVariant)), this, SLOT(onPlexPlaylistsLoaded(QVariant)));
             if (mo->indexOfSignal("subtitleStreamSet(QString)") >= 0)
                 connect(m_plex, SIGNAL(subtitleStreamSet(QString)), this, SLOT(onPlexSubtitleStreamSet(QString)));
+            if (mo->indexOfSignal("audioStreamSet(QString)") >= 0)
+                connect(m_plex, SIGNAL(audioStreamSet(QString)), this, SLOT(onPlexAudioStreamSet(QString)));
             if (mo->indexOfSignal("transcodeStopped(QString)") >= 0)
                 connect(m_plex, SIGNAL(transcodeStopped(QString)), this, SLOT(onPlexTranscodeStopped(QString)));
         } else {
@@ -843,6 +845,15 @@ QVariantMap VirtualChannelsBackend::cycle_audio(int channelNumber) {
           qPrintable(m_audioStreams[m_audioIndex].toMap()
                          .value(QStringLiteral("displayTitle")).toString()));
 
+    // Plex plays what the part says it is showing, not what the request names.
+    if (!m_plexPartId.isEmpty() && m_plex
+        && m_plex->metaObject()->indexOfMethod("set_audio_stream(QString,QString)") >= 0) {
+        if (QMetaObject::invokeMethod(m_plex, "set_audio_stream",
+                                      Q_ARG(QString, m_preferredAudioId),
+                                      Q_ARG(QString, m_plexPartId)))
+            ++m_transcodeHolds;
+    }
+
     // The programme is resolved again from scratch, which is what puts it back
     // at the offset the clock says it has reached rather than at its beginning.
     QVariantMap m = tune(channelNumber);
@@ -922,6 +933,11 @@ void VirtualChannelsBackend::releaseHeldTranscode() {
 }
 
 void VirtualChannelsBackend::onPlexSubtitleStreamSet(const QString &partId) {
+    Q_UNUSED(partId);
+    releaseOneHold();
+}
+
+void VirtualChannelsBackend::onPlexAudioStreamSet(const QString &partId) {
     Q_UNUSED(partId);
     releaseOneHold();
 }

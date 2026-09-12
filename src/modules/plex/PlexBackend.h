@@ -165,6 +165,7 @@ signals:
     // The server has taken a subtitle selection for a part; a transcode asked
     // for before it lands burns what the part said before.
     void subtitleStreamSet(const QString &partId);
+    void audioStreamSet(const QString &partId);      // the same, for the audio selection
     // A transcode session is gone; one started before that carries its decision.
     void transcodeStopped(const QString &sessionId);
     void childrenLoaded(const QVariant &items);

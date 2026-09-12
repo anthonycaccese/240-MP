@@ -17,6 +17,7 @@ public:
     QStringList calls;
     QVariantMap detail;                       // what load_item_detail answers with
     QStringList transcodeSubtitleIds;         // subtitleId of each request_transcode
+    QStringList transcodeAudioIds;            // audioId of each
 
     Q_INVOKABLE QString video_quality() const { return QStringLiteral("2000"); }
     Q_INVOKABLE QString get_access_token() const { return QStringLiteral("tok"); }
@@ -30,13 +31,17 @@ public:
         later([this] { emit streamUrlReady(QStringLiteral("http://plex/file.mkv"), QStringLiteral("tok")); });
     }
     Q_INVOKABLE void request_transcode(const QString &, const QString &, const QString &,
-                                       const QString &, const QString &subtitleId, int) {
+                                       const QString &audioId, const QString &subtitleId, int) {
         calls << QStringLiteral("request_transcode");
         transcodeSubtitleIds << subtitleId;
+        transcodeAudioIds << audioId;
         later([this] { emit streamUrlReady(QStringLiteral("http://plex/session/index.m3u8"), QStringLiteral("tok")); });
     }
     Q_INVOKABLE void stop_transcode(const QString &sessionId) {
         calls << QStringLiteral("stop_transcode:") + sessionId;
+    }
+    Q_INVOKABLE void set_audio_stream(const QString &streamId, const QString &partId) {
+        calls << QStringLiteral("set_audio_stream:") + streamId + QLatin1Char('@') + partId;
     }
     Q_INVOKABLE void set_subtitle_stream(const QString &streamId, const QString &partId) {
         calls << QStringLiteral("set_subtitle_stream:") + streamId + QLatin1Char('@') + partId;
@@ -54,5 +59,6 @@ signals:
     void itemLoaded(const QVariant &detail);
     void streamUrlReady(const QString &url, const QString &plexToken);
     void subtitleStreamSet(const QString &partId);
+    void audioStreamSet(const QString &partId);
     void transcodeStopped(const QString &sessionId);
 };
