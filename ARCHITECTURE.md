@@ -303,6 +303,8 @@ An NFC card's tag file can point at content another module owns, rather than at 
 - It doesn't write player state back to the service (Plex's `set_audio_stream` / `set_subtitle_stream`) — a card tap must not mutate stored per-item preferences. Whatever the server already prefers is what plays.
 - Errors render in the NFC module's visual language, so a card tap looks the same whichever module ends up serving it.
 
+**A card can also name a *set*:** Plex's `CardPlay.qml` recognises `plex://collection/…` and `plex://playlist/…` and hands those off to `QueuePlay.qml` (with `replaceWith`) rather than resolving a stream itself. Note: line 3's `shuffle` means *shuffle this queue*. The set's contents are resolved at tap time, so a card follows the collection or playlist as it changes rather than freezing whatever it held when it was originally written.
+
 **Adding another module** (e.g. Jellyfin, Emby, …) means: a row in `kHandoffModules`, a `CardPlay.qml`, and a `cardRef` branch in that module's `Root.qml`. Nothing in the NFC module is service-specific.
 
 ### Plex specifics
@@ -311,6 +313,7 @@ An NFC card's tag file can point at content another module owns, rather than at 
 - Libraries on a legacy metadata agent report `com.plexapp.agents.*://…` guids. They resolve fine and are routed to Plex by prefix, but they're agent-scoped: re-agenting such a library breaks cards written against it.
 - **Cards never switch server or user.** `select_server` persists config (see the settings-write rule), and auto-switching a Plex Home profile would be a PIN bypass in physical form. Wrong server / no permission / signed out are all errors.
 - A **shuffle** card sets `trackProgress: false` on the Player, suppressing both `update_timeline` calls. Progress reporting is entirely client-side, so that is sufficient to leave watched state, Continue Watching and on-deck untouched.
+- **Collections and playlists are the exception to the guid rule.** They are server-local, user-created objects with no metadata-agent guid to be portable with, so their cards carry the ratingKey (`plex://collection/<ratingKey>`) and `resolve_card_queue` fetches `/library/collections/<key>/items` or `/playlists/<key>/items` in one request. Such a card breaks only if the set is deleted and recreated. The rows go through `formatItem` + `flattenSeasons` exactly as the in-app loaders do, so `expand_queue` fans shows out identically either way.
 - Shuffle keeps rolling via a **shuffle bag** in `PlexBackend` (`m_shuffleBag`): a shuffled permutation played to exhaustion then reshuffled, rather than independent random draws, which clump badly over the hours a jukebox card runs. `resolve_card` reports the show/season as `cardScope`; the Player's EOF branch calls `load_random_episode(scope)` instead of `load_next_episode(ratingKey)`. Both emit `nextEpisodeReady`, so the advance itself is shared. Continuation respects the module's `autoplay_next_episode` setting.
 
 ## Input (InputManager)
@@ -569,9 +572,10 @@ Full-screen takeover that writes an NFC card for the item a detail view is showi
 
 | Property | Type | Description |
 |---|---|---|
-| `cardRef` | `string` | Line 2 of the tag file — e.g. a Plex guid |
+| `cardRef` | `string` | Line 2 of the tag file — e.g. a Plex guid, or a set ref like `plex://collection/<ratingKey>` |
 | `cardTitle` | `string` | Filename **and** display title |
-| `offerShuffle` | `bool` | Show the shuffle option — only meaningful for a show or season |
+| `offerShuffle` | `bool` | Show the shuffle option — only meaningful for a set (show, season, collection, playlist) |
+| `orderedLabel` / `shuffleLabel` | `string` | What the two `offerShuffle` choices are called. Defaults (`"Sequential Episodes"` / `"Shuffle Episodes"`) suit a show or season; Plex's collection and playlist lists override them with `"In Order"` / `"Shuffled"`, since a set of movies has no episodes to sequence |
 | `available` | `bool` | Read-only. True when the NFC module is enabled and a reader is connected — bind the host's entry-point row's `visible` to this |
 
 Call `open()` to show it; it emits `closed()` when done. Two things worth preserving if you touch it:

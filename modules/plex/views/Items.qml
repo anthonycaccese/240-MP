@@ -54,10 +54,13 @@ FocusScope {
     property var queueItems: canQueue
         ? items.filter(function(i) { return i && i.ratingKey })
         : []
-    property var actionRows: queueRowsWarranted(queueItems) ? [
-            { __action: "play_all", title: "» PLAY ALL" },
-            { __action: "shuffle",  title: "~ SHUFFLE"  }
-        ] : []
+    // The write row rides on the same warrant as the play rows, so the three stay
+    // one block: a set worth playing as a queue is a set worth putting on a card.
+    property var actionRows: !queueRowsWarranted(queueItems) ? []
+        : [{ __action: "play_all", title: "» PLAY ALL" },
+           { __action: "shuffle",  title: "~ SHUFFLE"  }]
+          .concat(cardWriter.available
+                  ? [{ __action: "write_card", title: "@ WRITE NFC CARD" }] : [])
     property var rows: actionRows.concat(items)
 
     // One show is already a queue — all of its episodes — so it earns the rows on
@@ -73,7 +76,8 @@ FocusScope {
     function actionRowCountFor(loadedItems) {
         if (!canQueue) return 0
         var candidates = loadedItems.filter(function(i) { return i && i.ratingKey })
-        return queueRowsWarranted(candidates) ? 2 : 0
+        if (!queueRowsWarranted(candidates)) return 0
+        return cardWriter.available ? 3 : 2
     }
 
     // First character as a bucket label; everything non-alphabetic shares '#'.
@@ -280,7 +284,11 @@ FocusScope {
         var item = rows[itemList.currentIndex]
         if (!item) return
 
-        // Virtual queue rows — play the whole set instead of drilling into one item.
+        // Virtual rows — act on the whole set instead of drilling into one item.
+        if (item.__action === "write_card") {
+            cardWriter.open()
+            return
+        }
         if (item.__action) {
             itemListRoot.navigateTo("QueuePlay.qml", {
                 queueItems: queueItems,
@@ -669,5 +677,30 @@ FocusScope {
         anchors.bottomMargin: root.sh * 0.1041667 //50
         anchors.leftMargin: root.sw * 0.125 //80
         font.pixelSize: root.sh * 0.0333333 //16
+    }
+
+    // Writes a card for the whole set. The ref carries the collection's or
+    // playlist's ratingKey — these are server-local, user-created objects with no
+    // metadata-agent guid to be portable with — and the rows behind it are
+    // resolved when the card is tapped, so the card follows the set.
+    //
+    // The kind suffix keeps a card file readable on disk, the way the year does
+    // for a movie: "80s Action (Collection).txt" reads apart from the movie of
+    // the same name.
+    NfcCardWriter {
+        id: cardWriter
+        anchors.fill: parent
+        offerShuffle: true
+        // A set of movies has no episodes to sequence, so the show/season wording
+        // would read wrong here.
+        orderedLabel: "In Order"
+        shuffleLabel: "Shuffled"
+        cardRef: (itemListRoot.canQueue && itemListRoot.ratingKey !== "")
+                 ? "plex://" + (itemListRoot.listType === "collection_items" ? "collection" : "playlist")
+                   + "/" + itemListRoot.ratingKey
+                 : ""
+        cardTitle: itemListRoot.listTitle
+                   + (itemListRoot.listType === "collection_items" ? " (Collection)" : " (Playlist)")
+        onClosed: itemList.forceActiveFocus()
     }
 }

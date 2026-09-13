@@ -83,6 +83,12 @@ public:
     // and empty otherwise; it is ignored for movies and episodes. See the
     // implementation comment for why resolution is a single unscoped guid query.
     Q_INVOKABLE void resolve_card(const QString &guid, const QString &mode);
+    // Resolves an NFC card that names a *set* — "plex://collection/<ratingKey>" or
+    // "plex://playlist/<ratingKey>" — into the rows it holds, in the same shape the
+    // list view passes to expand_queue, and emits cardQueueReady. Errors report
+    // through cardError, like resolve_card. Resolution happens at tap time rather
+    // than being baked onto the card, so a card follows the set as it changes.
+    Q_INVOKABLE void resolve_card_queue(const QString &ref);
     // Next episode for a shuffle card, drawn from a shuffle bag over the card's
     // show/season. Emits nextEpisodeReady (the same signal autoplay already
     // consumes) or an empty map, so the Player advances identically either way.
@@ -158,6 +164,7 @@ signals:
     void nextEpisodeReady(const QVariant &detail);
     void queueReady(const QStringList &ratingKeys);
     void cardItemReady(const QVariant &detail);
+    void cardQueueReady(const QVariant &items);
     void cardError(const QString &message);
 
     void liveChannelsLoaded(const QVariant &channels);

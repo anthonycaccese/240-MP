@@ -2466,6 +2466,61 @@ void PlexBackend::resolve_card(const QString &guid, const QString &mode) {
     });
 }
 
+// An NFC card can also name a whole set. Its ref carries the ratingKey rather
+// than a guid: collections and playlists are server-local, user-created objects
+// with no metadata-agent guid to be portable with, so a server-local id costs
+// nothing and buys a one-request resolve.
+//
+// The rows come back in the same shape the list view hands to expand_queue —
+// formatItem plus flattenSeasons, exactly as load_collection_items and
+// load_playlist_items build them — so the card path and the in-app PLAY ALL /
+// SHUFFLE rows expand and order a set identically.
+void PlexBackend::resolve_card_queue(const QString &ref) {
+    static const QString kCollectionPrefix = QStringLiteral("plex://collection/");
+    static const QString kPlaylistPrefix   = QStringLiteral("plex://playlist/");
+
+    QString path;
+    if (ref.startsWith(kCollectionPrefix))
+        path = "/library/collections/" + ref.mid(kCollectionPrefix.size()) + "/items";
+    else if (ref.startsWith(kPlaylistPrefix))
+        path = "/playlists/" + ref.mid(kPlaylistPrefix.size()) + "/items";
+    else { emit cardError(QStringLiteral("UNSUPPORTED ITEM TYPE")); return; }
+
+    const QString uri = serverUrl(), token = serverToken();
+    if (uri.isEmpty() || token.isEmpty()) {
+        emit cardError(QStringLiteral("NOT SIGNED IN TO PLEX")); return;
+    }
+
+    auto *reply = plexGet(QUrl(uri + path), token);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, ref]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
+                handle498([this, ref]{ resolve_card_queue(ref); }); return;
+            }
+            // A deleted collection or playlist 404s here rather than answering
+            // empty, so it has to read as the same "gone" message.
+            if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 404) {
+                emit cardError(QStringLiteral("NOT FOUND ON THIS SERVER")); return;
+            }
+            emit cardError(QStringLiteral("PLEX SERVER UNREACHABLE")); return;
+        }
+        QJsonArray metadata = QJsonDocument::fromJson(reply->readAll())
+                              .object()["MediaContainer"].toObject()["Metadata"].toArray();
+        if (metadata.isEmpty()) {
+            // Also the "this user can't see it" case: Plex filters by the token's
+            // access rather than returning 403, so a permission miss looks the same.
+            emit cardError(QStringLiteral("NOT FOUND ON THIS SERVER")); return;
+        }
+        QVariantList items;
+        for (const auto &mv : metadata) items.append(formatItem(mv.toObject()));
+        flattenSeasons(items, [this](const QVariantList &flat) {
+            qDebug() << "[Plex] Card resolved — set of" << flat.size() << "rows";
+            emit cardQueueReady(flat);
+        });
+    });
+}
+
 void PlexBackend::request_transcode(const QString &ratingKey, const QString &partKey,
                                     const QString &sessionId,
                                     const QString &audioId, const QString &subtitleId,

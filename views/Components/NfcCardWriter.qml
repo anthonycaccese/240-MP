@@ -16,9 +16,14 @@ FocusScope {
     // What gets written.
     property string cardRef:   ""     // line 2, e.g. "plex://movie/…"
     property string cardTitle: ""     // filename + display title
-    // Shows the shuffle option. Only meaningful for a show or season: shuffling
-    // a movie has no meaning, and the card format ignores mode for one anyway.
+    // Shows the shuffle option. Only meaningful for a set — a show, season,
+    // collection or playlist: shuffling a movie has no meaning, and the card
+    // format ignores mode for one anyway.
     property bool   offerShuffle: false
+    // What the two ordered/shuffled choices are called. The defaults suit a show
+    // or season; a collection or playlist overrides them.
+    property string orderedLabel: "Sequential Episodes"
+    property string shuffleLabel: "Shuffle Episodes"
 
     // True when a card could actually be written right now. Hosts bind their
     // entry-point row's visibility to this.
@@ -64,9 +69,9 @@ FocusScope {
             return [{ label: "Change this card", action: "write" },
                     { label: "Cancel",           action: "cancel" }]
         if (offerShuffle)
-            return [{ label: "Write card (Sequential Episodes)", action: "write" },
-                    { label: "Write card (Shuffle Episodes)",    action: "shuffle" },
-                    { label: "Cancel",                           action: "cancel" }]
+            return [{ label: "Write card (" + orderedLabel + ")", action: "write" },
+                    { label: "Write card (" + shuffleLabel + ")", action: "shuffle" },
+                    { label: "Cancel",                            action: "cancel" }]
         return [{ label: "Write card", action: "write" },
                 { label: "Cancel",     action: "cancel" }]
     }

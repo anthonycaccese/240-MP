@@ -1,7 +1,9 @@
 import QtQuick
 
-// NFC card deep-link target. Resolves the card's Plex guid to a playable item,
-// builds its stream, then replaces itself with Player.qml.
+// NFC card deep-link target. Resolves the card's Plex ref, then replaces itself
+// with the view that plays it: a single item's guid is resolved and streamed
+// here, while a card naming a whole set (a collection or a playlist) hands off to
+// QueuePlay.qml, which already owns expanding and ordering a queue.
 //
 // replaceWith (not navigateTo) is the point: this view leaves no entry on the
 // module's nav stack, so backing out of the player unwinds straight to the NFC
@@ -23,6 +25,12 @@ FocusScope {
     property string cardTitle: navParams.cardTitle || ""
     property string authState: navParams.authState || ""
     property string pendingPin: navParams.pendingPin || ""
+
+    // A card that names a set rather than one item. Its ref carries the
+    // collection's or playlist's ratingKey; the rows behind it are resolved at tap
+    // time, so a card follows the set as its contents change.
+    readonly property bool isQueueRef: cardRef.indexOf("plex://collection/") === 0
+                                       || cardRef.indexOf("plex://playlist/") === 0
 
     property string errorMessage: ""
     property string sessionId:    ""
@@ -53,6 +61,10 @@ FocusScope {
         if (pendingPin !== "") { fail("THIS PLEX PROFILE NEEDS ITS PIN\n\nOPEN THE PLEX MODULE TO SIGN IN"); return }
         if (cardRef === "") { fail("THIS CARD HAS NO PLEX ITEM"); return }
         launching = true
+        if (isQueueRef) {
+            plexBackend.resolve_card_queue(cardRef)
+            return
+        }
         plexBackend.resolve_card(cardRef, cardMode)
     }
 
@@ -86,6 +98,23 @@ FocusScope {
             } else {
                 plexBackend.build_stream_url(detail.ratingKey, detail.partKey, cardRoot.sessionId)
             }
+        }
+
+        // A set card never streams anything here: QueuePlay expands the rows,
+        // settles their order and launches the Player, exactly as the in-app
+        // PLAY ALL / SHUFFLE rows do. replaceWith again, so the stack still
+        // unwinds straight back to the NFC tap screen.
+        //
+        // "shuffle" means shuffle this queue — not the endless jukebox a show or
+        // season card gets. A set is finite and reports its timeline normally.
+        function onCardQueueReady(items) {
+            if (!cardRoot.launching) return
+            cardRoot.launching = false
+            cardRoot.replaceWith("QueuePlay.qml", {
+                queueItems: items,
+                shuffle:    cardRoot.cardMode === "shuffle",
+                title:      cardRoot.cardTitle
+            })
         }
 
         function onCardError(message) {

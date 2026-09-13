@@ -379,7 +379,7 @@ FocusScope {
 
                     Text {
                         id: writeCardLabel
-                        text: "WRITE NFC TAG"
+                        text: "WRITE NFC CARD"
                         color: focusRow === 4 ? root.surfaceColor : root.primaryColor
                         font.family: root.globalFont
                         anchors.centerIn: parent
