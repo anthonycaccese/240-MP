@@ -105,6 +105,37 @@
       "description": "Keeps programs and adverts at a similar loudness. Costs a little processing on slower boards."
     },
     {
+      "key": "audio.language",
+      "label": "Audio Language",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_audio_language_options",
+      "default": "source",
+      "description": "The audio track a program starts in, when it has one in this language."
+    },
+    {
+      "key": "subtitles.mode",
+      "label": "Subtitles",
+      "type": "list_single",
+      "options": [
+        "As Set",
+        "Off",
+        "Always",
+        "With Foreign Audio"
+      ],
+      "default": "As Set",
+      "description": "Whether programs start with subtitles. As Set leaves each as its source has it; With Foreign Audio shows them only when the audio is not in your language. On Plex the choice is saved to the library, as picking it in a Plex app would."
+    },
+    {
+      "key": "subtitles.language",
+      "label": "Subtitle Language",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "get_subtitle_language_options",
+      "default": "eng",
+      "description": "The subtitles shown when Subtitles is Always or With Foreign Audio."
+    },
+    {
       "key": "schedule.days",
       "label": "Schedule Ahead",
       "type": "list_single",

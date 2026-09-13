@@ -5,6 +5,7 @@
 int runChannelScheduleTests();
 int runPathGuardTests();
 int runChannelTunerTests();
+int runTrackChoiceTests();
 int runScheduleGeneratorTests();
 int runDurationProbeTests();
 int runMediaServerSourceTests();
@@ -17,6 +18,7 @@ int main(int argc, char **argv) {
     runChannelScheduleTests();
     runPathGuardTests();
     runChannelTunerTests();
+    runTrackChoiceTests();
     runScheduleGeneratorTests();
     runDurationProbeTests();
     runMediaServerSourceTests();

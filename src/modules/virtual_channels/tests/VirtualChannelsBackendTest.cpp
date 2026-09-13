@@ -1,4 +1,5 @@
 #include "../VirtualChannelsBackend.h"
+#include "FakeJellyfinServer.h"
 #include "FakePlexServer.h"
 #include "TestHarness.h"
 
@@ -53,6 +54,31 @@ public:
         QFile f(data() + QStringLiteral("/channels/channels.json"));
         if (!f.open(QIODevice::WriteOnly)) return;
         f.write(QJsonDocument(root).toJson());
+    }
+
+    // A module setting as the settings screen would have saved it: under
+    // modules.<id>, a dotted key nested one level.
+    void setting(const QString &key, const QString &value) {
+        QFile f(data() + QStringLiteral("/config.json"));
+        QJsonObject cfg;
+        if (f.open(QIODevice::ReadOnly)) {
+            cfg = QJsonDocument::fromJson(f.readAll()).object();
+            f.close();
+        }
+        QJsonObject modules = cfg.value(QLatin1String("modules")).toObject();
+        QJsonObject mod     = modules.value(QLatin1String("com.240mp.virtual_channels")).toObject();
+        const QStringList parts = key.split(QLatin1Char('.'));
+        if (parts.size() == 2) {
+            QJsonObject group = mod.value(parts[0]).toObject();
+            group[parts[1]] = value;
+            mod[parts[0]]   = group;
+        } else {
+            mod[key] = value;
+        }
+        modules[QLatin1String("com.240mp.virtual_channels")] = mod;
+        cfg[QLatin1String("modules")] = modules;
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+        f.write(QJsonDocument(cfg).toJson());
     }
 
     QJsonObject read(int number) const {
@@ -1207,12 +1233,13 @@ QJsonObject plexChannel(int number) {
     return o;
 }
 
-void writeAiringNow(const Fixture &fx, int number, const QString &ref) {
+void writeAiringNow(const Fixture &fx, int number, const QString &ref,
+                    const QString &src = QStringLiteral("plex")) {
     QJsonObject slot;
     slot["start"] = double(QDateTime::currentMSecsSinceEpoch() - 60 * 1000);
     slot["dur"]   = double(60 * 60 * 1000);
     slot["kind"]  = QStringLiteral("programme");
-    slot["src"]   = QStringLiteral("plex");
+    slot["src"]   = src;
     slot["ref"]   = ref;
     slot["title"] = QStringLiteral("Bloodlines");
     QJsonArray entries; entries.append(slot);
@@ -1230,14 +1257,14 @@ void writeAiringNow(const Fixture &fx, int number, const QString &ref) {
 QVariantMap plexDetail(const QString &ref, int realSubtitleTracks, int audioTracks = 1) {
     QVariantList subs;
     subs << QVariantMap{{"id", "0"}, {"displayTitle", "OFF"}};
-    if (realSubtitleTracks > 0) subs << QVariantMap{{"id", "28932"}, {"displayTitle", "English"}};
-    if (realSubtitleTracks > 1) subs << QVariantMap{{"id", "28933"}, {"displayTitle", "English SDH"}};
+    if (realSubtitleTracks > 0) subs << QVariantMap{{"id", "28932"}, {"displayTitle", "English"}, {"language", "eng"}};
+    if (realSubtitleTracks > 1) subs << QVariantMap{{"id", "28933"}, {"displayTitle", "English SDH"}, {"language", "eng"}};
     QVariantMap d;
     d["ratingKey"]          = ref;
     d["partKey"]            = QStringLiteral("/library/parts/11234/1/file.mkv");
     d["partId"]             = QStringLiteral("11234");
-    QVariantList audio{QVariantMap{{"id", "7"}, {"displayTitle", "Portugues"}}};
-    if (audioTracks > 1) audio << QVariantMap{{"id", "8"}, {"displayTitle", "English"}};
+    QVariantList audio{QVariantMap{{"id", "7"}, {"displayTitle", "Portugues"}, {"language", "por"}}};
+    if (audioTracks > 1) audio << QVariantMap{{"id", "8"}, {"displayTitle", "English"}, {"language", "eng"}};
     d["audioStreams"]       = audio;
     d["selectedAudioId"]    = QStringLiteral("7");
     d["subtitleStreams"]    = subs;
@@ -1395,6 +1422,269 @@ void testDirectPlayLeavesNoHold() {
     checkEq(plex.count("request_transcode"), 2, "released once its own answers land");
 }
 
+void testSettingsBringThePartRound() {
+    section("Defaults: a tune writes the settings' tracks to a part that disagrees, once");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    fx.setting(QStringLiteral("audio.language"), QStringLiteral("eng"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("Always"));
+    fx.setting(QStringLiteral("subtitles.language"), QStringLiteral("eng"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 1, 2);   // part on Portuguese, subtitles off
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    QVariantMap played;
+    QObject::connect(&b, &VirtualChannelsBackend::playDescriptorReady,
+                     [&played](const QVariantMap &d) { if (d.value("play").toBool()) played = d; });
+    b.tune(5); spin(20);
+    checkEq(plex.count("set_audio_stream:8@11234"), 1, "the English track is written to the part");
+    checkEq(plex.count("set_subtitle_stream:28932@11234"), 1, "and the English subtitles");
+    checkEq(plex.count("request_transcode"), 0, "the stream waits for both writes");
+    emit plex.audioStreamSet(QStringLiteral("11234")); spin(20);
+    checkEq(plex.count("request_transcode"), 0, "one answer is not both");
+    emit plex.subtitleStreamSet(QStringLiteral("11234")); spin(20);
+    checkEq(plex.count("request_transcode"), 1, "sent once the part has taken both");
+    checkStr(plex.transcodeAudioIds.value(0), QStringLiteral("8"), "the request names the track");
+    checkStr(plex.transcodeSubtitleIds.value(0), QStringLiteral("28932"), "and the subtitles, so text ones burn");
+    check(played.value("transcoded").toBool(), "the player is told it is a transcode");
+    checkEq(played.value("audioTrack").toInt(), 0, "and mpv is told no audio track: the stream has only the one");
+    checkEq(played.value("subtitleTrack").toInt(), -1, "nor a subtitle track: it is burned in");
+    check(played.value("subtitleFiles").toStringList().isEmpty(), "and no sidecar, which would draw the line twice");
+
+    // The same programme again, with the part now agreeing: nothing to write.
+    plex.detail["selectedAudioId"]    = QStringLiteral("8");
+    plex.detail["selectedSubtitleId"] = QStringLiteral("28932");
+    b.release_tuner();
+    b.tune(5); spin(20);
+    checkEq(plex.count("set_audio_stream"), 1, "an agreeing part is not written");
+    checkEq(plex.count("set_subtitle_stream"), 1, "for either track");
+    checkEq(plex.count("request_transcode"), 2, "and the stream goes at once");
+}
+
+void testNoSettingsWriteNothing() {
+    section("Defaults: with nothing set, a tune leaves the viewer's library alone");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 2, 2);
+    plex.detail["selectedSubtitleId"] = QStringLiteral("28933");   // as the Plex apps left it
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    checkEq(plex.count("set_audio_stream"), 0, "no audio write");
+    checkEq(plex.count("set_subtitle_stream"), 0, "no subtitle write");
+    checkEq(plex.count("request_transcode"), 1, "the stream is asked for straight away");
+    checkStr(plex.transcodeSubtitleIds.value(0), QStringLiteral("28933"), "with the part's own subtitles");
+}
+
+void testOffTurnsAPartsSubtitlesOff() {
+    section("Defaults: Off writes off to a part the Plex apps left showing subtitles");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("Off"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 1);
+    plex.detail["selectedSubtitleId"] = QStringLiteral("28932");
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    checkEq(plex.count("set_subtitle_stream:0@11234"), 1, "off is written");
+    checkEq(plex.count("set_audio_stream"), 0, "audio was not asked about");
+    emit plex.subtitleStreamSet(QStringLiteral("11234")); spin(20);
+    checkStr(plex.transcodeSubtitleIds.value(0), QStringLiteral("0"), "and the request names none");
+}
+
+void testDirectPlayIsToldItsTracks() {
+    section("Defaults: a direct play writes nothing, and hands mpv the tracks a setting chose");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    fx.setting(QStringLiteral("audio.language"), QStringLiteral("eng"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("Always"));
+    FakePlexServer plex;
+    plex.quality = QStringLiteral("auto");
+    plex.detail  = plexDetail(QStringLiteral("8583"), 1, 2);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    QVariantMap played;
+    QObject::connect(&b, &VirtualChannelsBackend::playDescriptorReady,
+                     [&played](const QVariantMap &d) { if (d.value("play").toBool()) played = d; });
+    b.tune(5); spin(20);
+    checkEq(plex.count("set_audio_stream"), 0, "the part is Plex's to play, not mpv's");
+    checkEq(plex.count("set_subtitle_stream"), 0, "so nothing is written");
+    checkEq(plex.count("build_stream_url"), 1, "a direct stream is asked for");
+    checkEq(played.value("audioTrack").toInt(), 2, "mpv is told the second audio track");
+    checkEq(played.value("subtitleTrack").toInt(), 1, "and the first subtitle track");
+
+    // With nothing set mpv is left to choose, as it always was.
+    Fixture fx2;
+    fx2.write(plexChannel(5));
+    writeAiringNow(fx2, 5, QStringLiteral("8583"));
+    VirtualChannelsBackend b2(fx2.data(), fx2.data(), &plex);
+    played.clear();
+    QObject::connect(&b2, &VirtualChannelsBackend::playDescriptorReady,
+                     [&played](const QVariantMap &d) { if (d.value("play").toBool()) played = d; });
+    b2.tune(5); spin(20);
+    checkEq(played.value("audioTrack").toInt(), 0, "no audio track named");
+    checkEq(played.value("subtitleTrack").toInt(), -1, "no subtitle track named");
+}
+
+// A Jellyfin channel airing one programme now, and the detail the fake answers
+// with: Portuguese flagged default, English beside it, one English subtitle
+// the server would serve as a sidecar.
+QJsonObject jellyfinChannel(int number) {
+    QJsonObject o;
+    o["number"]   = number;
+    o["name"]     = QStringLiteral("Jellyfin Test");
+    o["jellyfin"] = QJsonObject();
+    return o;
+}
+
+QVariantMap jellyfinDetail(const QString &itemId) {
+    QVariantMap d;
+    d["itemId"]        = itemId;
+    d["mediaSourceId"] = itemId;
+    d["audioStreams"]  = QVariantList{
+        QVariantMap{{"id", "1"}, {"language", "por"}, {"selected", true}, {"displayTitle", "Portuguese"}},
+        QVariantMap{{"id", "2"}, {"language", "eng"}, {"selected", false}, {"displayTitle", "English"}}};
+    d["subtitleStreams"] = QVariantList{
+        QVariantMap{{"id", "3"}, {"language", "eng"}, {"selected", false}, {"displayTitle", "English"},
+                    {"subUrl", "http://jf/Videos/1/1/Subtitles/3/Stream.srt"}}};
+    return d;
+}
+
+void testServerTracksRideTheRequest() {
+    section("Jellyfin: the settings' tracks go on the playback request, and a press moves them");
+    Fixture fx;
+    fx.write(jellyfinChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("jf1"), QStringLiteral("jellyfin"));
+    fx.setting(QStringLiteral("audio.language"), QStringLiteral("eng"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("Always"));
+    FakeJellyfinServer jf;
+    jf.detail     = jellyfinDetail(QStringLiteral("jf1"));
+    jf.transcodes = true;
+    VirtualChannelsBackend b(fx.data(), fx.data(), nullptr, &jf);
+    QVariantMap played;
+    QObject::connect(&b, &VirtualChannelsBackend::playDescriptorReady,
+                     [&played](const QVariantMap &d) { if (d.value("play").toBool()) played = d; });
+    b.tune(5); spin(30);
+    checkEq(jf.count("load_item_detail"), 1, "the programme's detail is asked for first");
+    checkEq(jf.count("get_playback_url"), 1, "then its stream");
+    checkEq(jf.audioIndexes.value(0), 2, "with the English track");
+    checkEq(jf.subtitleIndexes.value(0), 3, "and the English subtitles");
+    check(played.value("transcoded").toBool(), "a transcode is known for one from its URL");
+    checkEq(played.value("audioTrack").toInt(), 0, "and mpv is told no track, the stream having only the one");
+    checkEq(played.value("audioTrackCount").toInt(), 2, "and the player knows how many tracks there are");
+    checkStr(played.value("audioTrackLabel").toString(), QStringLiteral("English"), "and which plays");
+
+    const QVariantMap r = b.cycle_audio(5); spin(30);
+    check(r.value("switched").toBool(), "the AUDIO press is taken");
+    checkEq(jf.count("load_item_detail"), 1, "the detail is not asked for again");
+    checkEq(jf.count("get_playback_url"), 2, "the stream is");
+    checkEq(jf.audioIndexes.value(1), 1, "with the other track");
+    checkEq(jf.subtitleIndexes.value(1), 3, "and the subtitles as they were");
+}
+
+void testServerDirectPlayTellsMpv() {
+    section("Jellyfin: on a direct play mpv is handed the chosen tracks, a sidecar as a file");
+    Fixture fx;
+    fx.write(jellyfinChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("jf1"), QStringLiteral("jellyfin"));
+    fx.setting(QStringLiteral("audio.language"), QStringLiteral("eng"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("Always"));
+    FakeJellyfinServer jf;
+    jf.detail = jellyfinDetail(QStringLiteral("jf1"));
+    VirtualChannelsBackend b(fx.data(), fx.data(), nullptr, &jf);
+    QVariantMap played;
+    QObject::connect(&b, &VirtualChannelsBackend::playDescriptorReady,
+                     [&played](const QVariantMap &d) { if (d.value("play").toBool()) played = d; });
+    b.tune(5); spin(30);
+    check(!played.value("transcoded").toBool(), "the file itself");
+    checkEq(played.value("audioTrack").toInt(), 2, "mpv's second audio track");
+    checkEq(played.value("subtitleTrack").toInt(), 0, "the first loaded subtitle file");
+    checkStr(played.value("subtitleFiles").toStringList().value(0),
+             QStringLiteral("http://jf/Videos/1/1/Subtitles/3/Stream.srt"), "which is the sidecar");
+}
+
+void testServerNothingSetAsksForTheDefault() {
+    section("Jellyfin: with nothing set no track is named, and the server chooses as it always did");
+    Fixture fx;
+    fx.write(jellyfinChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("jf1"), QStringLiteral("jellyfin"));
+    FakeJellyfinServer jf;
+    jf.detail = jellyfinDetail(QStringLiteral("jf1"));
+    VirtualChannelsBackend b(fx.data(), fx.data(), nullptr, &jf);
+    QVariantMap played;
+    QObject::connect(&b, &VirtualChannelsBackend::playDescriptorReady,
+                     [&played](const QVariantMap &d) { if (d.value("play").toBool()) played = d; });
+    b.tune(5); spin(30);
+    checkEq(jf.audioIndexes.value(0), -1, "no audio track named");
+    checkEq(jf.subtitleIndexes.value(0), -1, "no subtitle track named");
+    checkEq(played.value("audioTrack").toInt(), 0, "and mpv is left to choose");
+    checkStr(played.value("audioTrackLabel").toString(), QStringLiteral("Portuguese"),
+             "while the OSD reports the track the server flags");
+}
+
+void testLocalFileGetsMpvArgs() {
+    section("Local: a file mpv reads itself is described in mpv's own options");
+    Fixture fx;
+    fx.write(localChannel(3));
+    writeAiringNow(fx, 3, QStringLiteral("series/Batman Beyond (1999)/Season 1/Batman Beyond S01E01 - Rebirth.mkv"),
+                   QStringLiteral("local"));
+    VirtualChannelsBackend b(fx.data(), fx.data());
+    QVariantMap d = b.tune(3);
+    check(d.value("play").toBool(), "the file plays");
+    check(d.value("mpvArgs").toStringList().isEmpty(), "nothing set, nothing said");
+
+    fx.setting(QStringLiteral("audio.language"), QStringLiteral("eng"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("With Foreign Audio"));
+    d = b.tune(3);
+    const QStringList args = d.value("mpvArgs").toStringList();
+    check(args.contains("--alang=eng,en"), "the audio language");
+    check(args.contains("--subs-with-matching-audio=no"), "and the subtitle rule");
+}
+
+void testSurfLeavesTheLastProgrammesWritesBehind() {
+    section("Holds: surfing away while a part write is in flight does not hold the next channel");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    fx.write(plexChannel(6));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    writeAiringNow(fx, 6, QStringLiteral("8584"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("Always"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 1);        // subtitles off on the part: a write
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.tune(5); spin(20);
+    checkEq(plex.count("set_subtitle_stream"), 1, "the first programme's part is written");
+    checkEq(plex.count("request_transcode"), 0, "and its stream waits");
+
+    plex.detail = plexDetail(QStringLiteral("8584"), 1);
+    plex.detail["partId"] = QStringLiteral("11235");
+    b.tune(6); spin(20);                                        // before the first answer lands
+    checkEq(plex.count("set_subtitle_stream:28932@11235"), 1, "the second programme's part is written");
+    emit plex.subtitleStreamSet(QStringLiteral("11235")); spin(20);
+    checkEq(plex.count("request_transcode"), 1, "its stream goes on its own answer alone");
+    emit plex.subtitleStreamSet(QStringLiteral("11234")); spin(20);
+    checkEq(plex.count("request_transcode"), 1, "the first programme's late answer changes nothing");
+    checkStr(plex.transcodeSubtitleIds.value(0), QStringLiteral("28932"), "and the stream sent is the second's");
+}
+
+void testPreviewNeverWrites() {
+    section("Defaults: the guide's preview reads a programme's tracks but writes nothing");
+    Fixture fx;
+    fx.write(plexChannel(5));
+    writeAiringNow(fx, 5, QStringLiteral("8583"));
+    fx.setting(QStringLiteral("audio.language"), QStringLiteral("eng"));
+    fx.setting(QStringLiteral("subtitles.mode"), QStringLiteral("Always"));
+    FakePlexServer plex;
+    plex.detail = plexDetail(QStringLiteral("8583"), 1, 2);
+    VirtualChannelsBackend b(fx.data(), fx.data(), &plex);
+    b.preview_stream(5); spin(30);
+    checkEq(plex.count("set_audio_stream"), 0, "no audio write");
+    checkEq(plex.count("set_subtitle_stream"), 0, "no subtitle write");
+    checkEq(plex.count("build_stream_url"), 1, "the preview plays the file as it is");
+}
+
 }  // namespace
 
 int runVirtualChannelsBackendTests() {
@@ -1428,5 +1718,15 @@ int runVirtualChannelsBackendTests() {
     testAudioCycleWritesThePart();
     testOnlyTheAskedForAnswersRelease();
     testDirectPlayLeavesNoHold();
+    testSettingsBringThePartRound();
+    testNoSettingsWriteNothing();
+    testOffTurnsAPartsSubtitlesOff();
+    testDirectPlayIsToldItsTracks();
+    testServerTracksRideTheRequest();
+    testServerDirectPlayTellsMpv();
+    testServerNothingSetAsksForTheDefault();
+    testLocalFileGetsMpvArgs();
+    testSurfLeavesTheLastProgrammesWritesBehind();
+    testPreviewNeverWrites();
     return 0;
 }

@@ -646,12 +646,13 @@ FocusScope {
 
         volumeEchoSeen = false
         sawPicture = false
+        // Tracks a source did not name are mpv's own choice, as they always were.
         mpvController.loadAndPlay(
             descriptor.url,
             descriptor.startSeconds,
-            0,
-            -1,
-            [],
+            Number(descriptor.audioTrack) || 0,
+            descriptor.subtitleTrack !== undefined ? descriptor.subtitleTrack : -1,
+            descriptor.subtitleFiles || [],
             [],
             false,
             -1,
@@ -665,7 +666,8 @@ FocusScope {
             false,
             playerRoot.logoArgs(descriptor.startSeconds)
                       .concat(playerRoot.volumeArgs())
-                      .concat(playerRoot.audioArgs()),
+                      .concat(playerRoot.audioArgs())
+                      .concat(descriptor.mpvArgs || []),
             descriptor.jellyfinToken || "",
             playerRoot.extraUrlsFor(descriptor)
         )

@@ -16,6 +16,7 @@
 #include "DurationProbe.h"
 #include "MediaServerSource.h"
 #include "ScheduleGenerator.h"
+#include "TrackChoice.h"
 
 class QTimer;
 
@@ -73,6 +74,8 @@ public:
 
     Q_INVOKABLE void get_resume_options();
     Q_INVOKABLE void get_schedule_days_options();
+    Q_INVOKABLE void get_audio_language_options();
+    Q_INVOKABLE void get_subtitle_language_options();
     Q_INVOKABLE void rebuild_all();
 
     static constexpr int kMaxBookingsPerChannel = 48;
@@ -265,6 +268,7 @@ public slots:
 private slots:
     void onPlexStreamUrlReady(const QString &url, const QString &plexToken);
     void onServerStreamUrlReady(const QString &url);
+    void onServerItemLoaded(const QVariant &detail);
     void onPlexItemLoaded(const QVariant &detail);
     void onPlexLibrariesLoaded(const QVariant &libraries);
     void onPlexItemsLoaded(const QVariant &items);
@@ -478,7 +482,8 @@ private:
     int          m_audioIndex = -1;
     QString      m_audioForRef;
     // Asked for on the next stream request. Empty means "whatever the source
-    // would have chosen", which is what every channel gets until asked.
+    // would have chosen", which is what every channel gets until a press or a
+    // setting says otherwise.
     QString      m_preferredAudioId;
 
     // The subtitle tracks of the programme now tuned, and which is showing.
@@ -487,6 +492,10 @@ private:
     int          m_subtitleIndex = 0;
     QString      m_preferredSubtitleId;
     QString      m_plexPartId;    // where the selection is written
+    // Whether the settings, rather than the part, chose. A direct play is
+    // told its tracks only then; otherwise mpv picks as it always has.
+    bool         m_audioDecided    = false;
+    bool         m_subtitleDecided = false;
 
     // A stream request held until the server has taken the subtitle selection
     // and let go of the last session -- one hold per answer still owed.
@@ -497,24 +506,35 @@ private:
         qint64  offsetMs = 0;
     };
     int                          m_transcodeHolds = 0;
-    QString                      m_awaitPart;   // the part whose write is owed
-    QString                      m_awaitStop;   // the session whose stop is owed
+    QString                      m_awaitAudioPart;      // the part whose audio write is owed
+    QString                      m_awaitSubtitlePart;   // the part whose subtitle write is owed
+    QString                      m_awaitStop;           // the session whose stop is owed
     std::optional<HeldTranscode> m_heldTranscode;
     QTimer                      *m_holdCap = nullptr;
+    bool plexWillTranscode(bool transcodeAllowed) const;
+    bool writeTrackToPart(const char *slot, const QString &streamId, QString &owed);
     bool sendTranscodeRequest(const QString &ratingKey, const QString &partKey,
                               const QString &sessionId, qint64 offsetMs);
     void releaseOneHold();
     void releaseHeldTranscode();
+    vchan::TrackPreference trackPreference() const;
 
     qint64  m_plexPendingOffsetMs = 0;
     bool    m_plexPendingTranscodeOk = false;
-    bool    requestServerUrl(const vchan::Slot &s);
+    bool    requestServerUrl(const vchan::Slot &s, bool chooseTracks = false);
+    bool    askServerForStream(const vchan::Slot &s);
+    void    applyTrackChoice(const QString &ref, const QVariantList &audio,
+                             const QVariantList &subtitles, const QString &partAudio,
+                             const QString &partSubtitle);
+    void    describeTracks(QVariantMap &m, bool transcoded) const;
     bool    deliverPreviewUrl(const QString &url, const QString &token = QString());
     int     m_previewChannel  = -1;
     int     m_previewSlot     = -1;
     qint64  m_previewPosition = 0;
     QObject *serverBackend(vchan::SlotSource src) const;
     vchan::SlotSource m_serverPendingSrc = vchan::SlotSource::Local;
+    vchan::Slot       m_serverPendingSlot;        // asked for again once its detail is in
+    QString           m_serverAwaitingDetailFor;
     vchan::MediaServerSource *m_server = nullptr;
     void    onServerEnumerationFinished(const QVector<vchan::MediaItem> &items);
     void    onServerEnumerationFailed(const QString &reason);

@@ -72,6 +72,7 @@ add_executable(240mp
     src/modules/virtual_channels/VirtualChannelsBackend.cpp
     src/modules/virtual_channels/ChannelSchedule.cpp
     src/modules/virtual_channels/ChannelTuner.cpp
+    src/modules/virtual_channels/TrackChoice.cpp
     src/modules/virtual_channels/PathGuard.cpp
     src/modules/virtual_channels/ScheduleGenerator.cpp
     src/modules/virtual_channels/DurationProbe.cpp
@@ -219,6 +220,7 @@ if(BUILD_VCHAN_TESTS)
         src/modules/virtual_channels/tests/ChannelScheduleTest.cpp
         src/modules/virtual_channels/tests/PathGuardTest.cpp
         src/modules/virtual_channels/tests/ChannelTunerTest.cpp
+        src/modules/virtual_channels/tests/TrackChoiceTest.cpp
         src/modules/virtual_channels/tests/ScheduleGeneratorTest.cpp
         src/modules/virtual_channels/tests/DurationProbeTest.cpp
         src/modules/virtual_channels/tests/MediaServerSourceTest.cpp
@@ -228,9 +230,11 @@ if(BUILD_VCHAN_TESTS)
         # same-named source file for AUTOMOC to pair it with.
         src/modules/virtual_channels/tests/FakeMediaServer.h
         src/modules/virtual_channels/tests/FakePlexServer.h
+        src/modules/virtual_channels/tests/FakeJellyfinServer.h
         src/modules/virtual_channels/ChannelSchedule.cpp
         src/modules/virtual_channels/PathGuard.cpp
         src/modules/virtual_channels/ChannelTuner.cpp
+        src/modules/virtual_channels/TrackChoice.cpp
         src/modules/virtual_channels/ScheduleGenerator.cpp
         src/modules/virtual_channels/DurationProbe.cpp
         src/modules/virtual_channels/MediaServerSource.cpp

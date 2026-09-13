@@ -1956,7 +1956,7 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
             bool isImage = IMAGE_SUB_CODECS.contains(codec);
             QString subKey = s["key"].toString();
             QString subUrl = subKey.isEmpty() ? "" : uri + subKey;
-            subtitleStreams.append(QVariantMap{{"id",sid},{"displayTitle",title},{"language",lang},{"imageSubtitle",isImage},{"subUrl",subUrl}});
+            subtitleStreams.append(QVariantMap{{"id",sid},{"displayTitle",title},{"language",lang},{"imageSubtitle",isImage},{"subUrl",subUrl},{"forced",s["forced"].toBool()}});
             if (s["selected"].toBool() && selectedSubtitle == "0")
                 selectedSubtitle = sid;
         }

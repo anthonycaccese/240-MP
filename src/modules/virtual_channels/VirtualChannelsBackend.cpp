@@ -58,6 +58,16 @@ bool isSafeLogoName(const QString &file) {
 
 qint64 nowMs() { return QDateTime::currentMSecsSinceEpoch(); }
 
+QString streamIdAt(const QVariantList &streams, int index) {
+    return streams.value(index).toMap().value(QStringLiteral("id")).toString();
+}
+
+int indexOfStream(const QVariantList &streams, const QString &id) {
+    for (int i = 0; i < streams.size(); ++i)
+        if (streamIdAt(streams, i) == id) return i;
+    return -1;
+}
+
 // Episode exclusions are stored under the season they belong to, so that
 // switching a season on can clear its own and no one else's. An older file
 // holds a flat array instead; it is read as season-less rather than migrated on
@@ -158,6 +168,8 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
             connect(b, SIGNAL(streamUrlReady(QString)), this, SLOT(onServerStreamUrlReady(QString)));
         else
             qWarning("[VirtualChannels] a media server backend has no streamUrlReady — its slots will not play");
+        if (b->metaObject()->indexOfSignal("itemLoaded(QVariant)") >= 0)
+            connect(b, SIGNAL(itemLoaded(QVariant)), this, SLOT(onServerItemLoaded(QVariant)));
     }
 
     m_urlTimer = new QTimer(this);
@@ -550,7 +562,7 @@ QObject *VirtualChannelsBackend::serverBackend(SlotSource src) const {
     return nullptr;
 }
 
-bool VirtualChannelsBackend::requestServerUrl(const Slot &s) {
+bool VirtualChannelsBackend::requestServerUrl(const Slot &s, bool chooseTracks) {
     QObject *b = serverBackend(s.src);
     if (!b) return false;
     if (b->metaObject()->indexOfMethod("get_playback_url(QString,QString,int,int,bool)") < 0) {
@@ -559,15 +571,88 @@ bool VirtualChannelsBackend::requestServerUrl(const Slot &s) {
         return false;
     }
 
-    const QString mediaSourceId = s.partKey.isEmpty() ? s.ref : s.partKey;
+    m_serverPendingSrc  = s.src;
+    m_serverPendingSlot = s;
 
-    m_serverPendingSrc = s.src;
+    // A programme's tracks are chosen from its detail, as a Plex one's are. A
+    // preview has none to choose and goes straight for the stream; so does a
+    // programme already resolved, which is what a press re-requests.
+    if (chooseTracks && s.ref != m_audioForRef) {
+        if (b->metaObject()->indexOfMethod("load_item_detail(QString)") >= 0) {
+            m_serverAwaitingDetailFor = s.ref;
+            const bool asked = QMetaObject::invokeMethod(b, "load_item_detail", Q_ARG(QString, s.ref));
+            if (asked) m_urlTimer->start();
+            return asked;
+        }
+        // Nothing describes this programme, so nothing learned from the last one applies.
+        applyTrackChoice(QString(), {}, {}, QString(), QString());
+    }
+    return askServerForStream(s);
+}
+
+// Jellyfin and Emby take the track choice on the request itself: the stream
+// they answer with carries those tracks, whether it is the file or a transcode.
+bool VirtualChannelsBackend::askServerForStream(const Slot &s) {
+    QObject *b = serverBackend(s.src);
+    if (!b) return false;
+
+    // Only a track a setting or a press chose is named. Left unnamed, the
+    // server picks as it did before there were settings -- by the viewer's
+    // own preferences on it -- which is what "as set" means here.
+    int audio = -1, subtitle = -1;
+    if (s.ref == m_audioForRef) {
+        bool ok = false;
+        if (!m_preferredAudioId.isEmpty()) {
+            const int a = m_preferredAudioId.toInt(&ok);
+            if (ok) audio = a;
+        }
+        if (!m_preferredSubtitleId.isEmpty()) {
+            const int t = m_preferredSubtitleId.toInt(&ok);
+            if (ok) subtitle = t;
+        }
+    }
+
+    const QString mediaSourceId = s.partKey.isEmpty() ? s.ref : s.partKey;
     const bool ok = QMetaObject::invokeMethod(
         b, "get_playback_url",
         Q_ARG(QString, s.ref), Q_ARG(QString, mediaSourceId),
-        Q_ARG(int, -1), Q_ARG(int, -1), Q_ARG(bool, false));
-    if (ok) m_urlTimer->start();
+        Q_ARG(int, audio), Q_ARG(int, subtitle), Q_ARG(bool, false));
+    // The wait began with the detail, where one was asked for; it is not
+    // started over for the stream.
+    if (ok && !m_urlTimer->isActive()) m_urlTimer->start();
     return ok;
+}
+
+void VirtualChannelsBackend::onServerItemLoaded(const QVariant &detail) {
+    if (!m_urlPending || m_serverAwaitingDetailFor.isEmpty())
+        return;
+    const QVariantMap d = detail.toMap();
+    const QString ref = d.value(QStringLiteral("itemId")).toString();
+    if (ref != m_serverAwaitingDetailFor)
+        return;
+    m_serverAwaitingDetailFor.clear();
+
+    // These lists have no OFF at their head as Plex's do; given one, the one
+    // rule reads them all. The default the server flags is what plays unless
+    // a setting says otherwise.
+    const QVariantList audio = d.value(QStringLiteral("audioStreams")).toList();
+    QVariantList subtitles{QVariantMap{{"id", "0"}, {"displayTitle", "OFF"}, {"language", ""}}};
+    subtitles += d.value(QStringLiteral("subtitleStreams")).toList();
+    auto flagged = [](const QVariantList &streams) {
+        for (const QVariant &v : streams)
+            if (v.toMap().value(QStringLiteral("selected")).toBool())
+                return v.toMap().value(QStringLiteral("id")).toString();
+        return QString();
+    };
+    applyTrackChoice(ref, audio, subtitles, flagged(audio), flagged(subtitles));
+
+    if (!askServerForStream(m_serverPendingSlot)) {
+        m_urlPending = false;
+        m_urlTimer->stop();
+        emit playDescriptorReady(offAirDescriptor(
+            QStringLiteral("%1 item unavailable")
+                .arg(MediaServerSource::providerName(m_serverPendingSrc)), false));
+    }
 }
 
 void VirtualChannelsBackend::onServerStreamUrlReady(const QString &url) {
@@ -601,6 +686,12 @@ void VirtualChannelsBackend::onServerStreamUrlReady(const QString &url) {
     m["pending"]        = false;
     m["url"]            = url;
     m["jellyfinToken"]  = token;
+    // Whose the OSD buttons are turns on whether the file or a transcode of it
+    // is playing, as with Plex. These servers say which only by the shape of
+    // the URL they answer with.
+    const bool transcoded = url.contains(QLatin1String("master.m3u8"));
+    m["transcoded"]     = transcoded;
+    describeTracks(m, transcoded);
     emit playDescriptorReady(m);
 }
 
@@ -641,11 +732,9 @@ bool VirtualChannelsBackend::requestPlexUrl(const Slot &s, qint64 offsetMs,
     m_plexAwaitingDetailFor.clear();
     m_serverPendingSrc = SlotSource::Plex;
     // No item detail describes this programme, so nothing learned from the last
-    // one may be written to its part.
+    // one applies to it or may be written to its part.
     if (s.ref != m_audioForRef) {
-        m_subtitleStreams.clear();
-        m_subtitleIndex = 0;
-        m_preferredSubtitleId.clear();
+        applyTrackChoice(QString(), {}, {}, QString(), QString());
         m_plexPartId.clear();
     }
     const QString sessionId = QStringLiteral("vchan-%1").arg(nowMs());
@@ -661,10 +750,7 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
                                              qint64 offsetMs,
                                              bool transcodeAllowed) {
     const QString quality = plexVideoQuality();
-    const bool willTranscode =
-        transcodeAllowed && quality != QLatin1String("auto")
-        && m_plex->metaObject()->indexOfMethod(
-               "request_transcode(QString,QString,QString,QString,QString,int)") >= 0;
+    const bool willTranscode = plexWillTranscode(transcodeAllowed);
 
     // The last session is stopped either way. Only a transcode waits for the
     // stop to land: one started while the server still holds the last comes
@@ -694,23 +780,59 @@ bool VirtualChannelsBackend::askPlexForStream(const QString &ratingKey,
                                           : qPrintable(m_preferredSubtitleId));
 
     if (willTranscode) {
-        m_plexTranscodeSession = sessionId;
         // Plex burns what the part says it is showing, so the request waits for
         // the selection to land and the last session to go. Capped: late is a
         // programme without its subtitle, never is the technical difficulties card.
+        // A session counts as this channel's only once its request has gone:
+        // a held one that is replaced, by a second press or another channel,
+        // was never started, so there is nothing to stop.
         if (m_transcodeHolds > 0) {
-            // A second press inside the hold replaces the request; the session
-            // it replaces was never started, so there is nothing to stop.
             m_heldTranscode = HeldTranscode{ratingKey, partKey, sessionId, offsetMs};
             m_holdCap->start();
             return true;
         }
+        m_plexTranscodeSession = sessionId;
         return sendTranscodeRequest(ratingKey, partKey, sessionId, offsetMs);
     }
 
     return QMetaObject::invokeMethod(
         m_plex, "build_stream_url",
         Q_ARG(QString, ratingKey), Q_ARG(QString, partKey), Q_ARG(QString, sessionId));
+}
+
+// The tracks of the programme now resolving, as its source reported them, and
+// which of each will play: the settings have first say, and what the source
+// already shows stands where they say nothing. Subtitle index 0 is the OFF
+// every list here opens with.
+void VirtualChannelsBackend::applyTrackChoice(const QString &ref, const QVariantList &audio,
+                                              const QVariantList &subtitles,
+                                              const QString &partAudio,
+                                              const QString &partSubtitle) {
+    // Whatever the last programme was still waiting on is its own: writes to
+    // its part in flight answer for nothing here, and a request held for it
+    // must not go out under this one's name. The stop of its session is still
+    // owed, and stays.
+    if (!m_awaitAudioPart.isEmpty())    { m_awaitAudioPart.clear();    if (m_transcodeHolds > 0) --m_transcodeHolds; }
+    if (!m_awaitSubtitlePart.isEmpty()) { m_awaitSubtitlePart.clear(); if (m_transcodeHolds > 0) --m_transcodeHolds; }
+    m_heldTranscode.reset();
+
+    m_audioForRef     = ref;
+    m_audioStreams    = audio;
+    m_subtitleStreams = subtitles;
+
+    const TrackChoice pick = chooseTracks(
+        m_audioStreams, m_subtitleStreams,
+        qMax(0, indexOfStream(m_audioStreams, partAudio)),
+        qMax(0, indexOfStream(m_subtitleStreams, partSubtitle)),
+        trackPreference());
+    m_audioIndex       = pick.audioIndex;
+    m_subtitleIndex    = pick.subtitleIndex;
+    m_audioDecided     = pick.audioDecided;
+    m_subtitleDecided  = pick.subtitleDecided;
+    m_preferredAudioId = pick.audioDecided ? streamIdAt(m_audioStreams, m_audioIndex)
+                                           : QString();
+    m_preferredSubtitleId =
+        m_subtitleIndex > 0 ? streamIdAt(m_subtitleStreams, m_subtitleIndex) : QString();
 }
 
 void VirtualChannelsBackend::onPlexItemLoaded(const QVariant &detail) {
@@ -722,34 +844,18 @@ void VirtualChannelsBackend::onPlexItemLoaded(const QVariant &detail) {
         return;
 
     // The tracks came with the item, so the AUDIO button never has to ask for
-    // them. They belong to this programme: a different one resets the choice,
-    // because track 2 of one show is nothing to do with track 2 of the next.
+    // them, and they belong to this programme: track 2 of one show is nothing
+    // to do with track 2 of the next. What the part shows is the starting
+    // point -- the choice lives on the server and outlives the play, and the
+    // Plex module sets the same one. Subtitle index 0 is the OFF the list opens
+    // with, which an unset part reports.
     const QString ref = d.value(QStringLiteral("ratingKey")).toString();
-    if (ref != m_audioForRef) {
-        m_audioForRef      = ref;
-        m_audioStreams     = d.value(QStringLiteral("audioStreams")).toList();
-        m_preferredAudioId.clear();
-        m_audioIndex = 0;
-        const QString playing = d.value(QStringLiteral("selectedAudioId")).toString();
-        for (int i = 0; i < m_audioStreams.size(); ++i)
-            if (m_audioStreams[i].toMap().value(QStringLiteral("id")).toString() == playing) {
-                m_audioIndex = i;
-                break;
-            }
-
-        // Start from what the part already shows: the choice lives on the
-        // server and outlives the play, and the Plex module sets the same one.
-        // Index 0 is the OFF the list opens with, which an unset part reports.
-        m_subtitleStreams = d.value(QStringLiteral("subtitleStreams")).toList();
-        m_subtitleIndex   = 0;
-        const QString showingSub = d.value(QStringLiteral("selectedSubtitleId")).toString();
-        for (int i = 0; i < m_subtitleStreams.size(); ++i)
-            if (m_subtitleStreams[i].toMap().value(QStringLiteral("id")).toString() == showingSub) {
-                m_subtitleIndex = i;
-                break;
-            }
-        m_preferredSubtitleId = m_subtitleIndex > 0 ? showingSub : QString();
-    }
+    const QString partAudio    = d.value(QStringLiteral("selectedAudioId")).toString();
+    const QString partSubtitle = d.value(QStringLiteral("selectedSubtitleId")).toString();
+    if (ref != m_audioForRef)
+        applyTrackChoice(ref, d.value(QStringLiteral("audioStreams")).toList(),
+                         d.value(QStringLiteral("subtitleStreams")).toList(),
+                         partAudio, partSubtitle);
 
     m_plexPartId = d.value(QStringLiteral("partId")).toString();
 
@@ -760,6 +866,30 @@ void VirtualChannelsBackend::onPlexItemLoaded(const QVariant &detail) {
         m_urlTimer->stop();
         emit playDescriptorReady(offAirDescriptor(QStringLiteral("Plex item has no playable part"), false));
         return;
+    }
+
+    // Plex plays what the part says, so before a transcode is asked for the
+    // part is brought round to the tracks chosen here: by a setting, or by a
+    // press made while the guide was previewing this programme. A part that
+    // already agrees is left alone, which is every programme until a setting is
+    // set, and every programme after its first airing. A part that did not say
+    // what it shows is not second-guessed, and a write still in flight from a
+    // press is not repeated.
+    if (plexWillTranscode(m_plexPendingTranscodeOk)) {
+        const QString wantAudio = streamIdAt(m_audioStreams, m_audioIndex);
+        const QString wantSubtitle =
+            m_preferredSubtitleId.isEmpty() ? QStringLiteral("0") : m_preferredSubtitleId;
+        const bool audioWritten =
+            !partAudio.isEmpty() && !wantAudio.isEmpty() && wantAudio != partAudio
+            && m_awaitAudioPart != m_plexPartId
+            && writeTrackToPart("set_audio_stream", wantAudio, m_awaitAudioPart);
+        const bool subtitleWritten =
+            !partSubtitle.isEmpty() && wantSubtitle != partSubtitle
+            && m_awaitSubtitlePart != m_plexPartId
+            && writeTrackToPart("set_subtitle_stream", wantSubtitle, m_awaitSubtitlePart);
+        if (audioWritten || subtitleWritten)
+            qInfo("[VirtualChannels] the part for %s is told: audio %s, subtitles %s",
+                  qPrintable(ref), qPrintable(wantAudio), qPrintable(wantSubtitle));
     }
 
     const QString sessionId = QStringLiteral("vchan-%1").arg(nowMs());
@@ -849,16 +979,7 @@ QVariantMap VirtualChannelsBackend::cycle_audio(int channelNumber) {
           qPrintable(m_audioStreams[m_audioIndex].toMap()
                          .value(QStringLiteral("displayTitle")).toString()));
 
-    // Plex plays what the part says it is showing, not what the request names.
-    if (!m_plexPartId.isEmpty() && m_plex
-        && m_plex->metaObject()->indexOfMethod("set_audio_stream(QString,QString)") >= 0) {
-        if (QMetaObject::invokeMethod(m_plex, "set_audio_stream",
-                                      Q_ARG(QString, m_preferredAudioId),
-                                      Q_ARG(QString, m_plexPartId))) {
-            m_awaitPart = m_plexPartId;
-            ++m_transcodeHolds;
-        }
-    }
+    writeTrackToPart("set_audio_stream", m_preferredAudioId, m_awaitAudioPart);
 
     // The programme is resolved again from scratch, which is what puts it back
     // at the offset the clock says it has reached rather than at its beginning.
@@ -876,6 +997,38 @@ static QString subtitleLabel(const QVariantMap &track) {
                : track.value(QStringLiteral("displayTitle")).toString();
 }
 
+// What the player needs to know about the tracks: how many there are to move
+// between, what is playing, and -- for a file mpv reads itself -- which to
+// pick, told only where a setting decided. A source lists a file's streams in
+// its order, so an embedded subtitle's place in the list is its mpv track; one
+// the server serves as a sidecar is handed over as a file. A transcode carries
+// the chosen tracks already and has no others, so mpv is told nothing: an id
+// it cannot find is silence, and a sidecar over a burned-in track is the line
+// twice.
+void VirtualChannelsBackend::describeTracks(QVariantMap &m, bool transcoded) const {
+    m["audioTrackCount"] = int(m_audioStreams.size());
+    // Real tracks only; the OFF at the head of the list is not one.
+    m["subtitleTrackCount"] = int(qMax(0, m_subtitleStreams.size() - 1));
+    m["subtitleTrackLabel"] =
+        (m_subtitleIndex >= 0 && m_subtitleIndex < m_subtitleStreams.size())
+            ? subtitleLabel(m_subtitleStreams[m_subtitleIndex].toMap())
+            : QString();
+    m["audioTrackLabel"] =
+        (m_audioIndex >= 0 && m_audioIndex < m_audioStreams.size())
+            ? m_audioStreams[m_audioIndex].toMap()
+                  .value(QStringLiteral("displayTitle")).toString()
+            : QString();
+    m["audioTrack"] = (m_audioDecided && !transcoded) ? m_audioIndex + 1 : 0;
+    m["subtitleTrack"] = -1;
+    if (!transcoded && m_subtitleDecided && m_subtitleIndex > 0
+        && m_subtitleIndex < m_subtitleStreams.size()) {
+        const QString sidecar = m_subtitleStreams[m_subtitleIndex].toMap()
+                                    .value(QStringLiteral("subUrl")).toString();
+        m["subtitleTrack"] = sidecar.isEmpty() ? m_subtitleIndex : 0;
+        m["subtitleFiles"] = sidecar.isEmpty() ? QStringList{} : QStringList{sidecar};
+    }
+}
+
 QVariantMap VirtualChannelsBackend::cycle_subtitle(int channelNumber) {
     QVariantMap refused;
     refused["switched"] = false;
@@ -891,24 +1044,34 @@ QVariantMap VirtualChannelsBackend::cycle_subtitle(int channelNumber) {
     qInfo("[VirtualChannels] subtitles on channel %d: %s", channelNumber,
           qPrintable(track.value(QStringLiteral("displayTitle")).toString()));
 
-    // Plex burns what the part says it is showing, not what the request names.
-    // Written only on a press, so tuning leaves the viewer's library alone.
-    if (!m_plexPartId.isEmpty() && m_plex
-        && m_plex->metaObject()->indexOfMethod(
-               "set_subtitle_stream(QString,QString)") >= 0) {
-        if (QMetaObject::invokeMethod(m_plex, "set_subtitle_stream",
-                                      Q_ARG(QString, m_preferredSubtitleId),
-                                      Q_ARG(QString, m_plexPartId))) {
-            m_awaitPart = m_plexPartId;
-            ++m_transcodeHolds;
-        }
-    }
+    writeTrackToPart("set_subtitle_stream", m_preferredSubtitleId, m_awaitSubtitlePart);
 
     // Resolved again from the clock, so it comes back where the programme is.
     QVariantMap m = tune(channelNumber);
     m["switched"] = true;
     m["subtitleTrackLabel"] = subtitleLabel(track);
     return m;
+}
+
+bool VirtualChannelsBackend::plexWillTranscode(bool transcodeAllowed) const {
+    return transcodeAllowed && plexVideoQuality() != QLatin1String("auto")
+           && m_plex->metaObject()->indexOfMethod(
+                  "request_transcode(QString,QString,QString,QString,QString,int)") >= 0;
+}
+
+// Plex plays what the part says it is showing, not what the request names, so
+// a choice is written there and the next stream request waits for the write.
+bool VirtualChannelsBackend::writeTrackToPart(const char *slot, const QString &streamId,
+                                              QString &owed) {
+    if (m_plexPartId.isEmpty() || !m_plex) return false;
+    const QByteArray signature = QByteArray(slot) + "(QString,QString)";
+    if (m_plex->metaObject()->indexOfMethod(signature.constData()) < 0) return false;
+    if (!QMetaObject::invokeMethod(m_plex, slot, Q_ARG(QString, streamId),
+                                   Q_ARG(QString, m_plexPartId)))
+        return false;
+    owed = m_plexPartId;
+    ++m_transcodeHolds;
+    return true;
 }
 
 bool VirtualChannelsBackend::sendTranscodeRequest(const QString &ratingKey,
@@ -933,12 +1096,14 @@ void VirtualChannelsBackend::releaseOneHold() {
 
 void VirtualChannelsBackend::releaseHeldTranscode() {
     m_transcodeHolds = 0;
-    m_awaitPart.clear();
+    m_awaitAudioPart.clear();
+    m_awaitSubtitlePart.clear();
     m_awaitStop.clear();
     m_holdCap->stop();
     if (!m_heldTranscode.has_value()) return;
     const HeldTranscode held = *m_heldTranscode;
     m_heldTranscode.reset();
+    m_plexTranscodeSession = held.sessionId;
     sendTranscodeRequest(held.ratingKey, held.partKey, held.sessionId, held.offsetMs);
 }
 
@@ -946,14 +1111,14 @@ void VirtualChannelsBackend::releaseHeldTranscode() {
 // arrive for everything anybody asked. Only the one this hold is waiting on
 // may release it.
 void VirtualChannelsBackend::onPlexSubtitleStreamSet(const QString &partId) {
-    if (partId != m_awaitPart) return;
-    m_awaitPart.clear();
+    if (partId != m_awaitSubtitlePart) return;
+    m_awaitSubtitlePart.clear();
     releaseOneHold();
 }
 
 void VirtualChannelsBackend::onPlexAudioStreamSet(const QString &partId) {
-    if (partId != m_awaitPart) return;
-    m_awaitPart.clear();
+    if (partId != m_awaitAudioPart) return;
+    m_awaitAudioPart.clear();
     releaseOneHold();
 }
 
@@ -992,6 +1157,7 @@ QVariantMap VirtualChannelsBackend::buildPlayDescriptor(int channelNumber,
                                                         Decision start) {
     m_urlPending = false;
     m_plexAwaitingDetailFor.clear();
+    m_serverAwaitingDetailFor.clear();
     m_urlTimer->stop();
 
     Decision d = start;
@@ -1033,7 +1199,7 @@ QVariantMap VirtualChannelsBackend::buildPlayDescriptor(int channelNumber,
         if (isServerSource(s.src)) {
             if (s.src == SlotSource::Plex
                     ? requestPlexUrl(s, d.offsetMs, /*transcodeAllowed*/ true)
-                    : requestServerUrl(s)) {
+                    : requestServerUrl(s, /*chooseTracks*/ true)) {
                 m["play"]      = false;
                 m["pending"]   = true;
                 m["extraUrls"] = QStringList{};
@@ -1053,6 +1219,9 @@ QVariantMap VirtualChannelsBackend::buildPlayDescriptor(int channelNumber,
             continue;
         }
         m["url"] = url;
+        // mpv reads a file's tracks itself, so it is told the preference in
+        // its own terms and picks; the OSD buttons stay its own.
+        m["mpvArgs"] = mpvTrackArgs(trackPreference());
 
         QStringList extras;
         for (int i = 1; i < d.window.size(); ++i) {
@@ -1095,18 +1264,7 @@ void VirtualChannelsBackend::onPlexStreamUrlReady(const QString &url, const QStr
     // or mpv's. On a direct play mpv can move between the tracks itself, in
     // place, without anybody stopping anything.
     m["transcoded"]      = !m_plexTranscodeSession.isEmpty();
-    m["audioTrackCount"] = int(m_audioStreams.size());
-    // Real tracks only; the OFF at the head of the list is not one.
-    m["subtitleTrackCount"] = int(qMax(0, m_subtitleStreams.size() - 1));
-    m["subtitleTrackLabel"] =
-        (m_subtitleIndex >= 0 && m_subtitleIndex < m_subtitleStreams.size())
-            ? subtitleLabel(m_subtitleStreams[m_subtitleIndex].toMap())
-            : QString();
-    m["audioTrackLabel"] =
-        (m_audioIndex >= 0 && m_audioIndex < m_audioStreams.size())
-            ? m_audioStreams[m_audioIndex].toMap()
-                  .value(QStringLiteral("displayTitle")).toString()
-            : QString();
+    describeTracks(m, !m_plexTranscodeSession.isEmpty());
     // A transcode is started at the join offset, so the stream mpv is handed is
     // meant to begin there. Logged because that assumption is exactly what a
     // programme that never starts calls into question.
@@ -1129,9 +1287,13 @@ void VirtualChannelsBackend::release_tuner() {
     m_subtitleIndex = 0;
     m_preferredSubtitleId.clear();
     m_plexPartId.clear();
+    m_audioDecided    = false;
+    m_subtitleDecided = false;
+    m_serverAwaitingDetailFor.clear();
     m_transcodeHolds = 0;
     m_heldTranscode.reset();
-    m_awaitPart.clear();
+    m_awaitAudioPart.clear();
+    m_awaitSubtitlePart.clear();
     m_awaitStop.clear();
     m_holdCap->stop();
     if (!m_plexTranscodeSession.isEmpty() && m_plex
@@ -3057,6 +3219,35 @@ void VirtualChannelsBackend::get_schedule_days_options() {
                                 {"label", d == 1 ? QStringLiteral("1 DAY")
                                                  : QStringLiteral("%1 DAYS").arg(d)}});
     emit dynamicOptionsReady(QStringLiteral("schedule.days"), opts);
+}
+
+static QVariantList languageOptions() {
+    QVariantList opts;
+    for (const Language &l : languages())
+        opts.append(QVariantMap{{"id", QLatin1String(l.code)}, {"label", QLatin1String(l.label)}});
+    return opts;
+}
+
+void VirtualChannelsBackend::get_audio_language_options() {
+    QVariantList opts{QVariantMap{{"id", "source"}, {"label", "AS SET"}}};
+    opts += languageOptions();
+    emit dynamicOptionsReady(QStringLiteral("audio.language"), opts);
+}
+
+void VirtualChannelsBackend::get_subtitle_language_options() {
+    emit dynamicOptionsReady(QStringLiteral("subtitles.language"), languageOptions());
+}
+
+// Unset reads the same as the manifest's defaults, which the settings screen
+// shows but does not write until something is chosen.
+TrackPreference VirtualChannelsBackend::trackPreference() const {
+    TrackPreference p;
+    const QString audio = settingValue(QStringLiteral("audio.language")).toString();
+    if (audio != QLatin1String("source")) p.audioLanguage = audio;
+    p.subtitleMode = subtitleModeFromString(settingValue(QStringLiteral("subtitles.mode")).toString());
+    p.subtitleLanguage = settingValue(QStringLiteral("subtitles.language")).toString();
+    if (p.subtitleLanguage.isEmpty()) p.subtitleLanguage = QStringLiteral("eng");
+    return p;
 }
 
 // ---------------------------------------------------------------------------
