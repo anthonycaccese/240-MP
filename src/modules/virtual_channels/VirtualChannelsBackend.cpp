@@ -22,6 +22,7 @@
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <cmath>
 
 using namespace vchan;
 
@@ -4031,6 +4032,82 @@ bool VirtualChannelsBackend::set_channel_logo(int channelNumber, const QString &
         if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
         if (wanted.isEmpty()) o.remove(QLatin1String("logo"));
         else                  o["logo"] = wanted;
+        channels[i] = o;
+        return writeChannels(channels);
+    }
+    return false;
+}
+
+// What a logo style may say and how far: the one range the screen clamps to
+// and the file is held to, whichever side a value comes from.
+static const QHash<QString, QPair<double, double>> &logoStyleRanges() {
+    static const QHash<QString, QPair<double, double>> ranges = {
+        {QStringLiteral("size"),     {4, 33}},
+        {QStringLiteral("opacity"),  {10, 100}},
+        {QStringLiteral("offset_x"), {-20, 20}},
+        {QStringLiteral("offset_y"), {-20, 20}},
+    };
+    return ranges;
+}
+
+static bool logoStyleAllows(const QString &key, double value) {
+    const auto &ranges = logoStyleRanges();
+    return ranges.contains(key) && !std::isnan(value)
+           && value >= ranges[key].first && value <= ranges[key].second;
+}
+
+QVariantMap VirtualChannelsBackend::logo_style_range(const QString &key) const {
+    const auto &ranges = logoStyleRanges();
+    if (!ranges.contains(key)) return {};
+    return QVariantMap{{"min", ranges[key].first}, {"max", ranges[key].second}};
+}
+
+// Read as strictly as written: a hand-edited value the screen could not have
+// set is dropped here, with a word in the log, rather than drawn.
+QVariantMap VirtualChannelsBackend::channel_logo_style(int channelNumber) {
+    const QJsonObject o = QJsonObject::fromVariantMap(channelObject(channelNumber));
+    const QJsonObject style = o.value(QLatin1String("logo_style")).toObject();
+    QVariantMap out;
+    for (auto it = style.constBegin(); it != style.constEnd(); ++it) {
+        if (it.value().isDouble() && logoStyleAllows(it.key(), it.value().toDouble())) {
+            out.insert(it.key(), it.value().toDouble());
+        } else {
+            qWarning("[VirtualChannels] channel %d: ignoring logo style %s=%s",
+                     channelNumber, qPrintable(it.key()),
+                     qPrintable(QJsonDocument(QJsonObject{{"v", it.value()}}).toJson(QJsonDocument::Compact)));
+        }
+    }
+    return out;
+}
+
+bool VirtualChannelsBackend::set_channel_logo_style(int channelNumber, const QString &key,
+                                                    double value) {
+    if (!logoStyleAllows(key, value)) {
+        qWarning("[VirtualChannels] refused logo style %s=%g for channel %d",
+                 qPrintable(key), value, channelNumber);
+        return false;
+    }
+
+    QJsonArray channels = readChannels();
+    for (int i = 0; i < channels.size(); ++i) {
+        QJsonObject o = channels[i].toObject();
+        if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
+        QJsonObject style = o.value(QLatin1String("logo_style")).toObject();
+        style[key] = value;
+        o[QLatin1String("logo_style")] = style;
+        channels[i] = o;
+        return writeChannels(channels);
+    }
+    return false;
+}
+
+bool VirtualChannelsBackend::clear_channel_logo_style(int channelNumber) {
+    QJsonArray channels = readChannels();
+    for (int i = 0; i < channels.size(); ++i) {
+        QJsonObject o = channels[i].toObject();
+        if (o.value(QLatin1String("number")).toInt(-1) != channelNumber) continue;
+        if (!o.contains(QLatin1String("logo_style"))) return true;
+        o.remove(QLatin1String("logo_style"));
         channels[i] = o;
         return writeChannels(channels);
     }

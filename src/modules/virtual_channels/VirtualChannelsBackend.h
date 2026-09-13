@@ -184,6 +184,14 @@ public:
     Q_INVOKABLE QString logo_path(const QString &file) const;
     Q_INVOKABLE QString channel_logo(int channelNumber);
     Q_INVOKABLE bool    set_channel_logo(int channelNumber, const QString &file);
+    // How a channel's logo is drawn where it differs from the module's Channel
+    // Logo settings: any of size, opacity, offset_x, offset_y, each in the same
+    // units as the module setting. Only the keys a channel has set are present.
+    Q_INVOKABLE QVariantMap channel_logo_style(int channelNumber);
+    Q_INVOKABLE bool set_channel_logo_style(int channelNumber, const QString &key, double value);
+    Q_INVOKABLE bool clear_channel_logo_style(int channelNumber);
+    // {min, max} for a style key, so the screen and the file agree on one range.
+    Q_INVOKABLE QVariantMap logo_style_range(const QString &key) const;
 
     Q_INVOKABLE int create_channel(const QString &name);
 

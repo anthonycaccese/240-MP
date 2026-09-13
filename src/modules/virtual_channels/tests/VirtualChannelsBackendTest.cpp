@@ -1643,6 +1643,55 @@ void testLocalFileGetsMpvArgs() {
     check(args.contains("--subs-with-matching-audio=no"), "and the subtitle rule");
 }
 
+void testChannelLogoStyle() {
+    section("Backend: a channel's own logo style is written, bounded, and cleared");
+    Fixture fx;
+    fx.write(localChannel(3));
+    // A row some later version wrote, sitting in the same list.
+    {
+        QFile f(fx.data() + QStringLiteral("/channels/channels.json"));
+        f.open(QIODevice::ReadOnly); QJsonObject root = QJsonDocument::fromJson(f.readAll()).object(); f.close();
+        QJsonArray a = root["channels"].toArray(); a.append(QStringLiteral("not a channel")); root["channels"] = a;
+        f.open(QIODevice::WriteOnly | QIODevice::Truncate); f.write(QJsonDocument(root).toJson()); f.close();
+    }
+    VirtualChannelsBackend b(fx.data(), fx.data());
+    check(b.channel_logo_style(3).isEmpty(), "nothing set to begin with");
+    check(b.set_channel_logo_style(3, QStringLiteral("size"), 20), "size is written");
+    check(b.set_channel_logo_style(3, QStringLiteral("offset_y"), -5), "and an offset");
+    QVariantMap style = b.channel_logo_style(3);
+    checkEq(style.value("size").toInt(), 20, "size read back");
+    checkEq(style.value("offset_y").toInt(), -5, "offset read back");
+    check(!style.contains("opacity"), "what was not set is not there, so the module's value shows through");
+    check(!b.set_channel_logo_style(3, QStringLiteral("size"), 50), "a size the screen could not set is refused");
+    check(!b.set_channel_logo_style(3, QStringLiteral("colour"), 1), "and so is a key nobody draws with");
+    checkEq(b.channel_logo_style(3).value("size").toInt(), 20, "a refusal changes nothing");
+    check(!b.set_channel_logo_style(99, QStringLiteral("size"), 12), "a channel that is not there takes nothing");
+    checkEq(fx.read(3).value(QLatin1String("number")).toInt(), 3, "the good row survived the stray one");
+    check(b.clear_channel_logo_style(3), "cleared");
+    check(b.channel_logo_style(3).isEmpty(), "and gone");
+    check(b.clear_channel_logo_style(3), "clearing twice is fine");
+
+    // A hand-edited file: what the screen could not have set is not drawn.
+    {
+        QFile f(fx.data() + QStringLiteral("/channels/channels.json"));
+        f.open(QIODevice::ReadOnly); QJsonObject root = QJsonDocument::fromJson(f.readAll()).object(); f.close();
+        QJsonArray a = root["channels"].toArray();
+        for (int i = 0; i < a.size(); ++i) {
+            QJsonObject o = a[i].toObject();
+            if (o.value("number").toInt() != 3) continue;
+            o["logo_style"] = QJsonObject{{"opacity", 500}, {"size", "big"}, {"offset_x", -3}};
+            a[i] = o;
+        }
+        root["channels"] = a;
+        f.open(QIODevice::WriteOnly | QIODevice::Truncate); f.write(QJsonDocument(root).toJson()); f.close();
+    }
+    style = b.channel_logo_style(3);
+    checkEq(style.value("offset_x").toInt(), -3, "a value in range is read");
+    check(!style.contains("opacity"), "one out of range is not");
+    check(!style.contains("size"), "nor one that is not a number");
+    checkEq(b.logo_style_range("size").value("max").toInt(), 33, "the screen can ask how far a value may go");
+}
+
 void testSurfLeavesTheLastProgrammesWritesBehind() {
     section("Holds: surfing away while a part write is in flight does not hold the next channel");
     Fixture fx;
@@ -1728,5 +1777,6 @@ int runVirtualChannelsBackendTests() {
     testLocalFileGetsMpvArgs();
     testSurfLeavesTheLastProgrammesWritesBehind();
     testPreviewNeverWrites();
+    testChannelLogoStyle();
     return 0;
 }

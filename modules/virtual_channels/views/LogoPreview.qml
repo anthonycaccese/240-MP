@@ -21,14 +21,20 @@ FocusScope {
 
     focus: true
 
+    function styled(own, key) {
+        return own && own[key] !== undefined ? own[key] : appCore.get_setting(moduleId, "logo." + key)
+    }
+
     function reload() {
         file = channelNumber >= 0
                ? (virtualChannelsBackend.channel_logo(channelNumber) || "") : ""
         if (file === "") file = appCore.get_setting(moduleId, "logo.file") || ""
-        var sz     = parseFloat(appCore.get_setting(moduleId, "logo.size"))
-        var op     = parseFloat(appCore.get_setting(moduleId, "logo.opacity"))
-        var ox     = parseInt(appCore.get_setting(moduleId, "logo.offset_x"))
-        var oy     = parseInt(appCore.get_setting(moduleId, "logo.offset_y"))
+        // The channel's own style, where it has one, ahead of the module's.
+        var own = channelNumber >= 0 ? virtualChannelsBackend.channel_logo_style(channelNumber) : ({})
+        var sz     = parseFloat(styled(own, "size"))
+        var op     = parseFloat(styled(own, "opacity"))
+        var ox     = parseInt(styled(own, "offset_x"))
+        var oy     = parseInt(styled(own, "offset_y"))
         sizePct    = isNaN(sz) ? 12 : sz
         opacityPct = isNaN(op) ? 70 : op
         offsetX    = isNaN(ox) ? 0 : ox

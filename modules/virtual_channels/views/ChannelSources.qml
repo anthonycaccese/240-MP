@@ -315,7 +315,7 @@ FocusScope {
         case "films":       return "Films picked one at a time from " + server + "."
         case "genres":      return "Every film on " + server + " of these "
                                    + sourcesRoot.genreWord.toLowerCase() + ". Add one and the channel follows the library as it grows."
-        case "logo":        return "The mark this channel flies in the corner. Its size and position are under Channel Logo in Channels settings."
+        case "logo":        return "The mark this channel flies in the corner, and how it is drawn. Anything not set here follows Channel Logo in Channels settings."
         case "order":       return sourcesRoot.order === "shuffle"
                                    ? "Series take turns, and everything plays once before anything repeats."
                                  : sourcesRoot.order === "interleaved"
@@ -457,7 +457,7 @@ FocusScope {
         }
         if (row === "source") { cycleSource(1); return }
         if (row === "logo") {
-            navigateTo("modules/virtual_channels/views/LogoPicker.qml", {
+            navigateTo("modules/virtual_channels/views/LogoSettings.qml", {
                 moduleId:      sourcesRoot.moduleId,
                 channelNumber: sourcesRoot.channelNumber,
                 title: sourcesRoot.channelName

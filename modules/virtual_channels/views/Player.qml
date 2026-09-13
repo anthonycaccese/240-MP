@@ -362,8 +362,10 @@ FocusScope {
 
     function logoIsAnimated() { return logoFile().toLowerCase().endsWith(".gif") }
 
-    function logoPercent(key, fallback) {
-        var v = parseFloat(appCore.get_setting(moduleId, "logo." + key))
+    // A channel's own logo style, where it has one, ahead of the module's.
+    function logoPercent(own, key, fallback) {
+        var v = parseFloat(own && own[key] !== undefined ? own[key]
+                                                         : appCore.get_setting(moduleId, "logo." + key))
         return (isNaN(v) ? fallback : v) / 100.0
     }
 
@@ -406,10 +408,11 @@ FocusScope {
         var path = virtualChannelsBackend.logo_path(file)
         if (!path || path === "") return []
 
-        var size    = logoPercent("size", 12)
-        var opacity = logoPercent("opacity", 70)
-        var offsetX = logoPercent("offset_x", 0)
-        var offsetY = logoPercent("offset_y", 0)
+        var own     = virtualChannelsBackend.channel_logo_style(channelNumber)
+        var size    = logoPercent(own, "size", 12)
+        var opacity = logoPercent(own, "opacity", 70)
+        var offsetX = logoPercent(own, "offset_x", 0)
+        var offsetY = logoPercent(own, "offset_y", 0)
 
         if (!logoIsAnimated())
             return ["--lavfi-complex=" + sizedOverLogoGraph("movie=" + path, opacity, size,
