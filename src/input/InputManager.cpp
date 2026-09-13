@@ -381,6 +381,12 @@ void InputManager::loadKeyRemap() {
         { "select", Action::Select },
         { "back",   Action::Back },
     };
+#ifdef Q_OS_LINUX
+    // A remote's OK button sends KEY_SELECT, not KEY_ENTER. Seeded before the
+    // stored bindings so a viewer's own choice still wins.
+    m_keyRemap[kEvdevKeyBase + KEY_SELECT] = Action::Select;
+#endif
+
     for (const auto &entry : kRemapActions) {
         bool ok = false;
         const int qtKey = m_appCore->get_setting(QString(), QStringLiteral("remote_keymap.") + entry.name).toInt(&ok);
@@ -414,26 +420,100 @@ void InputManager::setRemapCapture(bool active) {
 // Scanned once at startup, no hotplug, this is a fixed USB dongle here, not
 // something swapped mid-session. Harmless no-op on a machine with no such
 // device (nothing matches the name, nothing is opened).
+// The codes a remote sends that Qt's keyboard path cannot hand on. A standard
+// keyboard layout has no keysym for them, so eglfs delivers a QKeyEvent whose
+// key() is 0 -- which is also what this app stores to mean "no binding", so
+// such a button cannot even be bound from the Controls screen. Reading them
+// from the device is the only way they can act or be remapped.
+//
+// Deliberately short. Every code here is taken off a device that is ALSO the
+// plain keyboard, so anything Qt can deliver must not be listed or it would
+// arrive twice and fire its action twice.
+static bool advertisesKey(int fd, int linuxCode) {
+    unsigned long bits[(KEY_MAX / (8 * sizeof(unsigned long))) + 1] = {0};
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) < 0)
+        return false;
+    const size_t wordBits = 8 * sizeof(unsigned long);
+    return (bits[linuxCode / wordBits] >> (linuxCode % wordBits)) & 1UL;
+}
+
+// A standard keyboard layout has no keysym for these, so EGLFS delivers a
+// QKeyEvent whose key() is 0 — which is also what this app stores to mean "no
+// binding", so the Controls screen cannot capture one either. Reading them off
+// the device is the only way they can act or be remapped.
+//
+// Keep this list to codes Qt genuinely cannot deliver: they are taken from a
+// device that is also the plain keyboard, so anything Qt does deliver would
+// arrive twice and fire its action twice.
+bool InputManager::isUnmappableRemoteCode(int linuxCode) {
+    switch (linuxCode) {
+    case KEY_CHANNELUP:
+    case KEY_CHANNELDOWN:
+    case KEY_SELECT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void InputManager::openConsumerControlDevice() {
     QDir dir(QStringLiteral("/dev/input"));
     const QStringList entries = dir.entryList(QStringList() << QStringLiteral("event*"), QDir::System);
+
+    int sharedFd = -1;
+    QString sharedName, sharedPath;
+
     for (const QString &entry : entries) {
         const QString path = dir.filePath(entry);
         const int fd = ::open(path.toUtf8().constData(), O_RDONLY | O_NONBLOCK);
         if (fd < 0)
             continue;
         char name[256] = {0};
-        const bool isConsumerControl = ioctl(fd, EVIOCGNAME(sizeof(name)), name) >= 0
-            && QString::fromUtf8(name).contains(QStringLiteral("Consumer Control"), Qt::CaseInsensitive);
-        if (isConsumerControl) {
+        if (ioctl(fd, EVIOCGNAME(sizeof(name)), name) < 0) {
+            ::close(fd);
+            continue;
+        }
+        const QString devName = QString::fromUtf8(name);
+
+        // A dedicated interface sends nothing else, so all of it is ours.
+        if (devName.contains(QStringLiteral("Consumer Control"), Qt::CaseInsensitive)) {
+            if (sharedFd >= 0)
+                ::close(sharedFd);
             m_consumerFd = fd;
+            m_consumerIsSharedKeyboard = false;
             m_consumerNotifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
             connect(m_consumerNotifier, &QSocketNotifier::activated, this, &InputManager::onConsumerControlReadable);
             qInfo("[input] Consumer Control device found: %s (%s)", name, qPrintable(path));
             return;
         }
+
+        // A receiver that presents as one keyboard — a Flirc, most IR
+        // receivers — puts these codes there instead, where the name above
+        // never finds them. Held as a fallback so a dedicated interface later
+        // in the scan still wins. Pads are SDL's, never read here.
+        const bool couldBeRemote = !advertisesKey(fd, BTN_GAMEPAD)
+                                   && (advertisesKey(fd, KEY_CHANNELUP)
+                                       || advertisesKey(fd, KEY_CHANNELDOWN)
+                                       || advertisesKey(fd, KEY_SELECT));
+        if (sharedFd < 0 && couldBeRemote) {
+            sharedFd = fd;
+            sharedName = devName;
+            sharedPath = path;
+            continue;
+        }
         ::close(fd);
     }
+
+    if (sharedFd >= 0) {
+        m_consumerFd = sharedFd;
+        m_consumerIsSharedKeyboard = true;
+        m_consumerNotifier = new QSocketNotifier(sharedFd, QSocketNotifier::Read, this);
+        connect(m_consumerNotifier, &QSocketNotifier::activated, this, &InputManager::onConsumerControlReadable);
+        qInfo("[input] remote keys read from %s (%s) — its channel/select codes are ones Qt cannot deliver",
+              qPrintable(sharedName), qPrintable(sharedPath));
+        return;
+    }
+
     qInfo("[input] no Consumer Control device found, remote's extra buttons (if any) won't be remappable");
 }
 
@@ -453,12 +533,17 @@ void InputManager::onConsumerControlReadable() {
             m_consumerNotifier->setEnabled(false);
             m_consumerNotifier->deleteLater();
             m_consumerNotifier = nullptr;
+            m_consumerIsSharedKeyboard = false;
             ::close(m_consumerFd);
             m_consumerFd = -1;
             return;
         }
         if (ev.type != EV_KEY || ev.value == 2)   // ignore autorepeat and non-key events
             continue;
+        // The rest of this device's keys are already arriving as QKeyEvents.
+        if (m_consumerIsSharedKeyboard && !isUnmappableRemoteCode(ev.code))
+            continue;
+
         const int extendedId = kEvdevKeyBase + ev.code;
 
         if (m_remapCapture) {
