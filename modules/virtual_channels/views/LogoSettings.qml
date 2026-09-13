@@ -12,7 +12,7 @@ FocusScope {
     property var navParams: ({})
     readonly property string moduleIcon:
         appCore ? (appCore.get_module_info(moduleId).icon || "") : ""
-    property var navListState: ({})
+    property var navListState: navParams.navListState || ({})
     property string moduleId: navParams.moduleId || ""
     property int channelNumber: navParams.channelNumber !== undefined
                                 ? navParams.channelNumber : -1
@@ -30,7 +30,7 @@ FocusScope {
     property string status: ""
 
     readonly property var rows: perChannel
-        ? ["logo", "size", "opacity", "offsetx", "offsety", "follow", "preview"]
+        ? ["logo", "size", "opacity", "offsetx", "offsety", "defaults", "preview"]
         : ["logo", "size", "opacity", "offsetx", "offsety", "preview"]
     readonly property int rowCount: rows.length
     property int current: 0
@@ -42,7 +42,7 @@ FocusScope {
     function isOwn(key) { return perChannel && own[key] !== undefined }
 
     function reload() {
-        own  = perChannel ? (virtualChannelsBackend.channel_logo_style(channelNumber) || ({})) : ({})
+        own  = perChannel ? virtualChannelsBackend.channel_logo_style(channelNumber) : ({})
         file = perChannel ? (virtualChannelsBackend.channel_logo(channelNumber) || "")
                           : (moduleValue("file") || "")
         var sz     = parseFloat(effective("size"))
@@ -55,19 +55,32 @@ FocusScope {
         offsetY    = isNaN(oy) ? 0 : oy
     }
 
+    // Held to the one range the backend holds the file to.
+    function clamped(key, value) {
+        var r = virtualChannelsBackend.logo_style_range(key)
+        return Math.max(r.min, Math.min(r.max, value))
+    }
+
     function save(key, value) {
-        if (perChannel) virtualChannelsBackend.set_channel_logo_style(channelNumber, key, value)
-        else            appCore.save_setting(moduleId, "logo." + key, String(value))
+        status = ""
+        if (perChannel) {
+            if (!virtualChannelsBackend.set_channel_logo_style(channelNumber, key, value))
+                status = "Could not save"
+        } else {
+            appCore.save_setting(moduleId, "logo." + key, String(value))
+        }
         reload()
     }
 
+    // Zero reads as DEFAULT for the module; a channel's row already says where
+    // its value came from, so there it is just the number.
     function offsetText(v) {
-        if (v === 0) return "DEFAULT"
+        if (v === 0 && !perChannel) return "DEFAULT"
         return (v > 0 ? "+" : "") + v + "%"
     }
 
-    // A channel's row says when the value is the module's rather than its own.
-    function marked(key, text) { return perChannel && !isOwn(key) ? text + " (CHANNELS)" : text }
+    // A channel's row says when the value is the global default rather than its own.
+    function marked(key, text) { return perChannel && !isOwn(key) ? text + " (GLOBAL)" : text }
 
     function labelFor(i) {
         switch (rows[i]) {
@@ -76,7 +89,7 @@ FocusScope {
         case "opacity": return "Opacity"
         case "offsetx": return "Horizontal"
         case "offsety": return "Vertical"
-        case "follow":  return "Follow Channels Settings"
+        case "defaults": return "Use Global Defaults"
         case "preview": return "Preview"
         }
         return ""
@@ -97,34 +110,26 @@ FocusScope {
     function helpFor(i) {
         switch (rows[i]) {
         case "logo":    return perChannel
-                            ? "The mark this channel flies. DEFAULT is the module's default logo."
+                            ? "The mark this channel flies. DEFAULT is the global default logo."
                             : "Used by channels that have not chosen one. Drawing one costs about a third of decode speed."
         case "size":    return "How much of the picture the logo covers, whatever its shape."
         case "opacity": return "Solid at 100%. A station bug is usually faint."
         case "offsetx": return "Nudge left or right. Increase if a CRT is cutting off the right edge."
         case "offsety": return "Nudge up or down. Increase if a CRT is cutting off the top."
-        case "follow":  return "Forget this channel's own size, opacity and position and use the module's."
+        case "defaults": return "Forget this channel's own size, opacity and position and use the global defaults."
         case "preview": return "See it drawn on a blank screen, exactly as it will air."
         }
         return ""
     }
 
-    function cycles(i) { return rows[i] !== "logo" && rows[i] !== "preview" && rows[i] !== "follow" }
+    function cycles(i) { return rows[i] !== "logo" && rows[i] !== "preview" && rows[i] !== "defaults" }
 
     function step(delta) {
         switch (rows[current]) {
-        case "size":
-            save("size", Math.max(4, Math.min(33, sizePct + delta)))
-            break
-        case "opacity":
-            save("opacity", Math.max(10, Math.min(100, opacityPct + delta * 5)))
-            break
-        case "offsetx":
-            save("offset_x", Math.max(-20, Math.min(20, offsetX + delta)))
-            break
-        case "offsety":
-            save("offset_y", Math.max(-20, Math.min(20, offsetY + delta)))
-            break
+        case "size":    save("size",     clamped("size",     sizePct + delta));       break
+        case "opacity": save("opacity",  clamped("opacity",  opacityPct + delta * 5)); break
+        case "offsetx": save("offset_x", clamped("offset_x", offsetX + delta));        break
+        case "offsety": save("offset_y", clamped("offset_y", offsetY + delta));        break
         }
     }
 
@@ -134,9 +139,9 @@ FocusScope {
             if (perChannel) { params.channelNumber = channelNumber; params.title = heading }
             navigateTo("modules/virtual_channels/views/LogoPicker.qml", params,
                        { currentIndex: logoRoot.current })
-        } else if (rows[i] === "follow") {
-            virtualChannelsBackend.clear_channel_logo_style(channelNumber)
-            status = "Following Channels settings"
+        } else if (rows[i] === "defaults") {
+            status = virtualChannelsBackend.clear_channel_logo_style(channelNumber)
+                     ? "Using the global defaults" : "Could not save"
             reload()
         } else if (rows[i] === "preview") {
             var p = { moduleId: logoRoot.moduleId }
@@ -156,7 +161,7 @@ FocusScope {
         anchors.fill: parent
         focus: true
         iconSource: logoRoot.moduleIcon
-        title: logoRoot.perChannel ? logoRoot.heading + " Logo" : "Channel Logo"
+        title: logoRoot.perChannel ? logoRoot.heading + " — Logo" : "Channel Logo"
         rows: logoRoot.rows
         current: logoRoot.current
         onCurrentChanged: logoRoot.current = current

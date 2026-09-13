@@ -45,8 +45,8 @@ FocusScope {
         if (logos.length === 0) return "Drop PNG or GIF files into " + logosDir
         if (current === 0 && perChannel)
             return defaultName === ""
-                   ? "Follows the module's logo setting, which is currently no logo."
-                   : "Follows the module's logo setting, currently "
+                   ? "Uses the global default logo, which is currently no logo."
+                   : "Uses the global default logo, currently "
                      + defaultName.toUpperCase() + "."
         if (current === 0) return "No logo. Nothing drawn over the picture, and nothing spent drawing it."
         var f = logos[current - 1]
@@ -136,7 +136,7 @@ FocusScope {
 
             Text {
                 text: parent.index === 0
-                      ? (pickerRoot.perChannel ? "Use The Default" : "No Logo")
+                      ? (pickerRoot.perChannel ? "Use Global Default" : "No Logo")
                       : pickerRoot.logos[parent.index - 1].name
                 color: parent.selected ? root.surfaceColor
                                        : (parent.on ? root.primaryColor : root.tertiaryColor)

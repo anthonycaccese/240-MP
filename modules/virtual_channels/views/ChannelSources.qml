@@ -112,7 +112,6 @@ FocusScope {
     property int slotCount: 0
     property var interstitials: []
     property bool armedToDelete: false
-    property string channelLogo: ""
     property int gridMinutes: 0
     property int adsPerBreak: 0
     property string order: "broadcast"
@@ -134,7 +133,6 @@ FocusScope {
         cfg = virtualChannelsBackend.channel_source_config(channelNumber)
         slotCount = virtualChannelsBackend.channel_bookings(channelNumber).length
         interstitials = virtualChannelsBackend.channel_interstitials(channelNumber)
-        channelLogo = virtualChannelsBackend.channel_logo(channelNumber) || ""
         // How many blocks the days hold between them, counted the way the slots
         // are, so the row says what is behind it without being opened.
         var plans = virtualChannelsBackend.channel_plans(channelNumber)
@@ -251,9 +249,7 @@ FocusScope {
             var n = sourcesRoot.slotCount
             return n === 0 ? "NONE" : (n === 1 ? "1 SLOT" : n + " SLOTS")
         }
-        case "logo":
-            return sourcesRoot.channelLogo === "" ? "DEFAULT"
-                 : sourcesRoot.channelLogo.replace(/\.[^.]+$/, "").toUpperCase()
+        case "logo":         return ""
         case "breaks": {
             var n = sourcesRoot.interstitialCount()
             if (n > 0) return n + " CLIPS"
@@ -315,7 +311,7 @@ FocusScope {
         case "films":       return "Films picked one at a time from " + server + "."
         case "genres":      return "Every film on " + server + " of these "
                                    + sourcesRoot.genreWord.toLowerCase() + ". Add one and the channel follows the library as it grows."
-        case "logo":        return "The mark this channel flies in the corner, and how it is drawn. Anything not set here follows Channel Logo in Channels settings."
+        case "logo":        return "The mark this channel flies in the corner, and how it is drawn. Anything not set here uses the global defaults under Channel Logo in Channels settings."
         case "order":       return sourcesRoot.order === "shuffle"
                                    ? "Series take turns, and everything plays once before anything repeats."
                                  : sourcesRoot.order === "interleaved"
