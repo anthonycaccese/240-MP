@@ -1094,6 +1094,57 @@ int runScheduleGeneratorTests() {
             checkEq(s[filmIdx].start, filmAt, "and still starts exactly on time");
     }
 
+    section("appointments: the film is the date's, not the build's");
+    {
+        // MYSTERY on the Pi: rebuilt every night at 04:00, and every night the
+        // 21:00 slot was 2001. The first draw of a seeded stream is the same
+        // draw every build.
+        Appointment film;
+        film.name = "Movie Slot";
+        film.minuteOfDay = 21 * 60;
+        film.pool = { item("a.mkv", 90 * 60000, "A"), item("b.mkv", 90 * 60000, "B"),
+                      item("c.mkv", 90 * 60000, "C") };
+
+        ChannelDef d = basicDef();
+        d.horizonHours = 72;
+        d.programmes = { item("ep1.mkv", 25 * 60000), item("ep2.mkv", 25 * 60000) };
+        d.appointments = { film };
+
+        auto filmOn = [&](const QVector<Slot> &s, const QDate &day) {
+            const qint64 at = QDateTime(day, QTime(21, 0)).toMSecsSinceEpoch();
+            for (const Slot &x : s) if (x.start == at) return x.ref;
+            return QString();
+        };
+        const QDate d1(2026, 9, 12);
+        const QVector<Slot> built1 = generateSlots(d, QDateTime(d1, QTime(4, 0)).toMSecsSinceEpoch());
+        const QVector<Slot> built2 = generateSlots(d, QDateTime(d1.addDays(1), QTime(4, 0)).toMSecsSinceEpoch());
+        const QString day2FromFirst  = filmOn(built1, d1.addDays(1));
+        const QString day2FromSecond = filmOn(built2, d1.addDays(1));
+        check(!day2FromFirst.isEmpty(), "the slot is scheduled");
+        checkStr(day2FromSecond, day2FromFirst, "a date keeps its film whichever night built it");
+        // With a seeded draw the second build's second day is the first build's
+        // third; that is the coincidence the line above cannot see and this one can.
+        checkStr(filmOn(built2, d1.addDays(2)), filmOn(built1, d1.addDays(2)), "and so does the day after");
+        check(filmOn(built2, d1.addDays(1)) != filmOn(built2, d1.addDays(2)), "and the next day gets another");
+        QSet<QString> seen{ filmOn(built1, d1), filmOn(built1, d1.addDays(1)), filmOn(built1, d1.addDays(2)) };
+        checkEq(seen.size(), 3, "three days, three films: none comes round before all have aired");
+
+        // A slot that airs one day a week walks the pool by airing, not by day:
+        // seven films on Saturdays would otherwise be the one film every week.
+        Appointment weekly = film;
+        weekly.days = { 6 };
+        weekly.pool.clear();
+        for (int k = 0; k < 7; ++k) weekly.pool.append(item(QStringLiteral("w%1.mkv").arg(k), 90 * 60000));
+        ChannelDef w = d;
+        w.horizonHours = 24 * 15;
+        w.appointments = { weekly };
+        const QDate sat(2026, 9, 12);                                 // a Saturday
+        const QVector<Slot> weeks = generateSlots(w, QDateTime(sat, QTime(4, 0)).toMSecsSinceEpoch());
+        QSet<QString> saturdays{ filmOn(weeks, sat), filmOn(weeks, sat.addDays(7)), filmOn(weeks, sat.addDays(14)) };
+        check(!saturdays.contains(QString()), "each Saturday has its film");
+        checkEq(saturdays.size(), 3, "and three Saturdays are three films");
+    }
+
     section("appointments: honoured exactly");
     {
         const QDateTime base(QDate(2026, 8, 24), QTime(6, 0));

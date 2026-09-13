@@ -512,8 +512,36 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
 
     for (const Appointment &appt : def.appointments) {
         if (!appt.isValid()) continue;
-        const QVector<MediaItem> pool = usableOnly(appt.pool);
+        QVector<MediaItem> pool = usableOnly(appt.pool);
         if (pool.isEmpty()) continue;
+
+        // A slot's film is chosen by the calendar, not drawn from the build's
+        // random stream: drawn, the first day of every build got the same film,
+        // and a channel rebuilt each night showed that film every night. The
+        // pool is shuffled once, from the seed and the slot's name, and walked
+        // one airing at a time -- airings, not days, or a Saturday slot would
+        // step seven days through a pool of seven and show the same film every
+        // Saturday. So long as the pool itself does not change, a date gets the
+        // same film whichever night built it, and every film airs before any
+        // comes round again.
+        QVector<QPair<quint64, int>> order;
+        order.reserve(pool.size());
+        for (int i = 0; i < pool.size(); ++i)
+            order.append({ shuffleKey(appt.name + QLatin1Char('\n') + pool[i].ref), i });
+        std::sort(order.begin(), order.end(), [&pool](const QPair<quint64, int> &a, const QPair<quint64, int> &b) {
+            return a.first != b.first ? a.first < b.first : pool[a.second].ref < pool[b.second].ref;
+        });
+        const auto airingsUpTo = [&appt](const QDate &day) {
+            static const qint64 kAMonday = 2415021;             // 1 January 1900
+            const qint64 n = qMax<qint64>(0, day.toJulianDay() - kAMonday);
+            qint64 perWeek = 0, thisWeek = 0;
+            for (int d = 1; d <= 7; ++d) {
+                if (!appt.airsOn(d)) continue;
+                ++perWeek;
+                if (d - 1 <= n % 7) ++thisWeek;
+            }
+            return (n / 7) * perWeek + thisWeek;
+        };
 
         QDate day = QDateTime::fromMSecsSinceEpoch(startMs).date();
         const QDate lastDay = QDateTime::fromMSecsSinceEpoch(horizonEnd).date();
@@ -522,7 +550,9 @@ QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
             const QDateTime when(day, QTime(appt.minuteOfDay / 60, appt.minuteOfDay % 60));
             const qint64 at = when.toMSecsSinceEpoch();
             if (at < startMs || at >= horizonEnd) continue;
-            anchors.push_back({ at, pool[pick(pool.size())], appt.name });
+            if (!day.isValid()) break;
+            const int which = int(airingsUpTo(day) % qint64(pool.size()));
+            anchors.push_back({ at, pool[order[which].second], appt.name });
         }
     }
 
