@@ -56,10 +56,13 @@ FocusScope {
             return
         }
         if (virtualChannelsBackend.move_channel(c.number, direction)) {
-            channelList.currentIndex = Math.max(0, Math.min(channels.length - 1,
-                                                channelList.currentIndex + direction))
+            var to = Math.max(0, Math.min(channels.length - 1, channelList.currentIndex + direction))
             status = ""
             refresh()
+            // A fresh list puts the view back at the top; the highlight
+            // follows the channel to where it went.
+            channelList.currentIndex = to
+            channelList.positionViewAtIndex(to, ListView.Contain)
         } else if (isFirst() && direction < 0) {
             status = "Already first"
         } else if (isLast() && direction > 0) {
