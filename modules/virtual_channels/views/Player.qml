@@ -133,7 +133,27 @@ FocusScope {
         if (at < 0) at = 0
         var next = dial[(at + direction + dial.length) % dial.length]
         if (next === from) return
+        switchTo(next)
+    }
 
+    // Digits typed on the remote, gathered into a number by channelEntry.
+    // Shown as they come, so the viewer sees what the set thinks they said,
+    // and kept up for as long as the number may still be added to.
+    ChannelEntry {
+        id: channelEntry
+        dial: playerRoot.dial
+        onTyped: function(digits) {
+            if (digits === "") { channelBanner.hideNow(); return }
+            channelBanner.seconds = Math.max(bannerSeconds(), settleMs / 1000 + 0.5)
+            channelBanner.show(digits, "")
+        }
+        onChosen: function(number) {
+            var from = pendingChannel >= 0 ? pendingChannel : channelNumber
+            if (number !== from) switchTo(number)
+        }
+    }
+
+    function switchTo(next) {
         var view = viewForChannel(next)
         if (view !== "") { leaveFor(view); return }
 
@@ -891,6 +911,8 @@ FocusScope {
         if (event.key === Qt.Key_ChannelDown || event.key === Qt.Key_PageDown) {
             changeChannel(-1); event.accepted = true; return
         }
+        if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9 && dial.length === 0) buildDial()
+        if (channelEntry.press(event.key, event.isAutoRepeat)) { event.accepted = true; return }
 
         if (offAir || tuning || filler) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {

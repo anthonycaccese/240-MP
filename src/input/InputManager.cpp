@@ -485,13 +485,26 @@ void InputManager::onConsumerControlReadable() {
         }
 
         const Action a = m_keyRemap.value(extendedId, Action::None);
-        if (a == Action::None)
+        if (a == Action::None) {
+            // A remote's number buttons are not actions to bind but the digits
+            // a keyboard would send, so they go to the window as those keys
+            // for the views that read them (the channel dial).
+            if (const int digit = qtDigitForEvdevCode(ev.code))
+                postKey(digit, ev.value == 1 ? QEvent::KeyPress : QEvent::KeyRelease, false);
             continue;
+        }
         if (ev.value == 1)
             beginPress(a);
         else
             releaseAction(a);
     }
+}
+
+int InputManager::qtDigitForEvdevCode(int code) {
+    if (code >= KEY_1 && code <= KEY_9) return Qt::Key_1 + (code - KEY_1);
+    if (code == KEY_0) return Qt::Key_0;
+    if (code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9) return Qt::Key_0 + (code - KEY_NUMERIC_0);
+    return 0;
 }
 #endif
 

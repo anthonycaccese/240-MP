@@ -30,7 +30,22 @@ FocusScope {
             if (dialRows[i].number === myNumber()) { at = i; break }
         if (at < 0) at = 0
 
-        var next = dialRows[(at + direction + dialRows.length) % dialRows.length]
+        goTo(dialRows[(at + direction + dialRows.length) % dialRows.length])
+    }
+
+    // Digits typed on the remote; a number that is a channel leaves for it.
+    // Enter and Back belong to the forecast underneath, so here the number
+    // goes by itself once the digits have settled.
+    ChannelEntry {
+        id: channelEntry
+        dial: wxRoot.dialRows.map(function(r) { return r.number })
+        onChosen: function(number) {
+            for (var i = 0; i < dialRows.length; i++)
+                if (dialRows[i].number === number) { goTo(dialRows[i]); return }
+        }
+    }
+
+    function goTo(next) {
         if (!next || next.number === myNumber()) return
 
         if (next.special === "guide") {
@@ -53,6 +68,10 @@ FocusScope {
             step(1); event.accepted = true
         } else if (event.key === Qt.Key_ChannelDown || event.key === Qt.Key_PageDown) {
             step(-1); event.accepted = true
+        } else if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) {
+            if (dialRows.length === 0) buildDial()
+            channelEntry.press(event.key, event.isAutoRepeat)
+            event.accepted = true
         } else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace
                    || event.key === Qt.Key_Back) {
             exitModule()
@@ -97,7 +116,11 @@ FocusScope {
         Connections {
             target: wxLoader.item
             ignoreUnknownSignals: true
-            function onGoBack() { wxRoot.exitModule() }
+            // Back while a number is being typed takes the number back, not the viewer out.
+            function onGoBack() {
+                if (channelEntry.digits !== "") channelEntry.clear()
+                else wxRoot.exitModule()
+            }
         }
     }
 }

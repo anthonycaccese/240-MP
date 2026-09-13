@@ -222,24 +222,29 @@ FocusScope {
         fromMs = Math.floor(nowMs / halfHourMs) * halfHourMs + windowOffset * halfHourMs
         var real = virtualChannelsBackend.guide_grid(fromMs, spanMs)
 
-        if (toggleOn("channels.weather", false)) {
-            var wx = { number: virtualChannelsBackend.weather_channel_number(),
+        // The built-in channels take their places on the dial like any other,
+        // so what channel up and down will land on is what the grid shows.
+        var all = []
+        for (var i = 0; i < real.length; i++) all.push(real[i])
+        all.push({ number: virtualChannelsBackend.guide_channel_number(),
+                   name: "Guide", isSpecial: true, viewPath: "",
+                   blocks: [{ startMs: fromMs, durMs: spanMs,
+                              title: "TV Guide", series: "",
+                              ep: "", onNow: true }] })
+        if (toggleOn("channels.weather", false))
+            all.push({ number: virtualChannelsBackend.weather_channel_number(),
                        name: "Weather", isSpecial: true,
                        viewPath: weatherView,
                        blocks: [{ startMs: fromMs, durMs: spanMs,
                                   title: "Local Forecast", series: "",
-                                  ep: "", onNow: true }] }
-            var withWx = []
-            for (var i = 0; i < real.length; i++) withWx.push(real[i])
-            withWx.push(wx)
-            withWx.sort(function(a, b) { return a.number - b.number })
-            rows = withWx
-        } else {
-            rows = real
-        }
+                                  ep: "", onNow: true }] })
+        all.sort(function(a, b) { return a.number - b.number })
+        rows = all
     }
 
+    // The guide's own row opens nothing: the viewer is already here.
     function openSpecial(row) {
+        if (row.viewPath === "") return
         navigateTo(row.viewPath, {}, { fromGuide: true })
     }
 
@@ -324,13 +329,15 @@ FocusScope {
         running: guideRoot.autoScrollEnabled && !guideRoot.autoScroll
                  && guideRoot.resumeSeconds > 0
         repeat: false
-        onTriggered: {
-            guideRoot.windowOffset = 0
-            guideRoot.refresh()
-            guideRoot.autoScroll = true
-            guideRoot.stopPreview()
-            guideRoot.refreshDetail()
-        }
+        onTriggered: guideRoot.resumeCrawl()
+    }
+
+    function resumeCrawl() {
+        windowOffset = 0
+        refresh()
+        autoScroll = true
+        stopPreview()
+        refreshDetail()
     }
 
     function takeControl() {
@@ -340,11 +347,58 @@ FocusScope {
         if (wasCrawling) refreshDetail()
     }
 
+    // Digits typed on the remote move the highlight to that channel as they
+    // come; Enter, or a moment's pause, leaves it there for Enter to watch. A
+    // number that turns out to be no channel puts things back as they were
+    // before the first digit: the row that was highlighted, or the crawl.
+    property bool entryOpen: false
+    property bool entryWasCrawling: false
+    property int  entryFrom: -1
+    ChannelEntry {
+        id: channelEntry
+        dial: guideRoot.rows.map(function(r) { return r.number })
+        onTyped: function(digits) {
+            if (digits === "") { restoreHighlight(); return }   // Back while typing
+            if (!guideRoot.entryOpen) {
+                guideRoot.entryOpen        = true
+                guideRoot.entryWasCrawling = guideRoot.autoScroll
+                guideRoot.entryFrom        = channelRows.currentIndex
+            }
+            highlightChannel(parseInt(digits, 10))
+        }
+        onChosen: function(number) { highlightChannel(number); guideRoot.entryOpen = false }
+        onDropped: restoreHighlight()
+    }
+
+    function restoreHighlight() {
+        if (!guideRoot.entryOpen) return
+        guideRoot.entryOpen = false
+        if (guideRoot.entryWasCrawling) {
+            resumeCrawl()
+        } else {
+            channelRows.currentIndex = guideRoot.entryFrom
+            refreshDetail()
+        }
+    }
+
+    function highlightChannel(number) {
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].number !== number) continue
+            takeControl()
+            channelRows.currentIndex = i
+            refreshDetail()
+            return
+        }
+    }
+
     function tuneFromGuide(direction) {
         stopPreview()
         if (rows.length === 0) return
         var i = direction > 0 ? 0 : rows.length - 1
         var row = rows[i]
+        // The guide's own row is nowhere to go; from either end, the first
+        // channel beyond it is.
+        if (row.isSpecial && row.viewPath === "" && rows.length > 1) row = rows[i + direction]
         if (row.isSpecial) { openSpecial(row); return }
         navigateTo("Player.qml", {
             moduleId:      guideRoot.moduleId,
@@ -360,6 +414,11 @@ FocusScope {
         if (event.key === Qt.Key_ChannelDown || event.key === Qt.Key_PageDown) {
             tuneFromGuide(-1); event.accepted = true; return
         }
+        // Enter on a typed number highlights it and then watches, below. A
+        // number no channel has is dropped, and the press with it.
+        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && channelEntry.digits !== "") {
+            if (!channelEntry.commit()) { event.accepted = true; return }
+        } else if (channelEntry.press(event.key, event.isAutoRepeat)) { event.accepted = true; return }
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
             goBack()
             event.accepted = true
