@@ -1,0 +1,199 @@
+#pragma once
+#include "ChannelSchedule.h"
+
+#include <QByteArray>
+#include <QHash>
+#include <QString>
+#include <QStringList>
+#include <QVariant>
+#include <QVector>
+
+namespace vchan {
+
+struct MediaItem {
+    QString    ref;
+    SlotSource src = SlotSource::Local;
+    QString    partKey;
+    qint64     durMs = 0;
+    QString    title;
+    QString    series;
+    QString    ep;
+    QString    desc;
+    QString    art;
+    int        pack = -1;
+    // Which block of a day plan this was gathered for, where a channel has
+    // plans. Tagged the same way `pack` tags break-pack membership, because the
+    // generator cannot tell by looking which collection an episode came from.
+    int        planBlock = -1;
+    // When this first aired, as epoch ms; 0 when nothing could be learned.
+    // Sources fall back from an episode's own date to its season's or show's
+    // year, so "unknown" means the library really has nothing.
+    qint64     airMs = 0;
+    // The numbers behind `ep`. Sorting on the string put episode 100 before
+    // episode 99, and a show numbered by year (Young Indiana Jones) not in any
+    // sensible place at all.
+    int        seasonNo  = -1;
+    int        episodeNo = -1;
+};
+
+struct BreakPack {
+    QString            name;
+    QVector<MediaItem> intros;
+    QVector<MediaItem> outros;
+};
+
+// How a channel lays its programmes out. Broadcast replaced an ordering that
+// sorted by series title, which put a 1978 show before a 1953 one. AsListed is
+// Broadcast without the sort: it airs the pool in the order the pool arrived,
+// which is what a playlist means. A film channel is given it by the backend
+// rather than the viewer -- the sources screen has no ordering row.
+enum class Ordering { Broadcast, Shuffle, Interleaved, AsListed };
+
+// One stretch of a day plan: what it draws on, and for how long.
+//
+// Called a PlanBlock rather than a Block because ChannelSchedule::Block already
+// means a programme with the breaks around it -- a different thing, on the same
+// screen, in the same module.
+struct PlanBlock {
+    // What the stretch draws on. The interface calls this the block's Type.
+    enum class Draws { Series, Collection, Genre, Movie, Anything };
+
+    // Set when the channel is read, and unique across its plans: it is how a
+    // programme gathered for this block finds its way back to it.
+    int     id = -1;
+    Draws   draws = Draws::Series;
+    // The series, collection or genre named. Empty for Movie and Anything,
+    // which draw on the channel's films and on everything respectively.
+    QString name;
+    QString ref;              // the source's own id for it, where the picker knew one
+    int     minutes = 30;
+
+    // The block's own bumpers, as local folders. A block that names none falls
+    // back to the channel's, which is what most blocks want; naming them here
+    // is how one show gets played in and out as itself.
+    QStringList intros;
+    QStringList outros;
+
+    // Whether the block takes each show's episodes in the order they aired or
+    // in a shuffled one. The shuffle is worked out from the channel's seed, so
+    // it is the same shuffle every build: a fresh one each time would move
+    // every episode out from under the mark that says where the show got to.
+    bool shuffled = false;
+
+    // Seasons and episodes this block does not air, in the shape the file keeps
+    // them: seasons as a list, episodes under the season they belong to. Held
+    // as it was read rather than flattened, because a screen that saves the
+    // block back saves what it was given -- and a flattened copy handed back
+    // would lose which season each episode belonged to.
+    //
+    // A block that narrows nothing draws on the whole series. The generator
+    // never reads this: what a block gathers is settled before it runs.
+    QVariantMap exclude;
+
+    bool isValid() const;
+};
+
+// A day, as an ordered stack of blocks. The blocks are contiguous by
+// construction -- each starts where the last ended -- so a plan cannot be
+// written with a gap or an overlap in it.
+struct DayPlan {
+    QString name;
+    QVector<int> days;        // Qt day numbers, 1 = Monday
+    int gridMinutes   = 30;
+    int startsAtMinute = 6 * 60;
+    QVector<PlanBlock> blocks;
+
+    bool isValid() const;
+    bool airsOn(int qtDayOfWeek) const;
+    int  totalMinutes() const;
+};
+
+// Where one block lands once a plan is laid against the clock.
+struct PlanSpan {
+    qint64 start = 0;
+    qint64 end   = 0;
+    PlanBlock block;
+};
+
+// Lay every plan a channel has against a stretch of clock, in order. A day the
+// plans do not cover yields nothing for that day, so a channel with a partial
+// week still airs its pool the rest of the time rather than going dark.
+QVector<PlanSpan> planSpans(const QVector<DayPlan> &plans, qint64 fromMs, qint64 toMs);
+
+struct Appointment {
+    QString name;
+    QVector<int> days;
+    int minuteOfDay = -1;
+    QVector<MediaItem> pool;
+
+    bool isValid() const;
+    bool airsOn(int qtDayOfWeek) const;
+};
+
+Ordering orderingFromString(const QString &s);
+QString  orderingToString(Ordering o);
+
+struct ChannelDef {
+    int     number = -1;
+    QString name;
+    quint32 seed = 1;
+    double  horizonHours = 24.0;
+    Ordering order = Ordering::Broadcast;
+
+    int gridMinutes = 0;
+
+    int adsPerBreak = 0;
+
+    qint64  rotation = 0;
+
+    // A channel with plans lays its day out from them instead of airing its
+    // pool loose. Empty means every channel that exists today, unchanged.
+    QVector<DayPlan> plans;
+
+    // Where each series had got to, as the ref of the last episode it aired,
+    // keyed by lowercased series name. Interleaved resumes every series from
+    // its own mark, so editing the pool cannot shuffle the others' places.
+    QHash<QString, QString> marks;
+
+    // The same, for the one timeline Broadcast runs: the ref of the last
+    // programme aired, whichever series it belonged to.
+    QString mark;
+
+    QVector<MediaItem> programmes;
+    QVector<Appointment> appointments;
+    QVector<MediaItem> intros;
+    QVector<MediaItem> outros;
+    QVector<MediaItem> commercials;
+    QVector<MediaItem> bumps;
+    QVector<BreakPack> packs;
+
+    bool isPlayable() const;
+};
+
+QVector<Slot> generateSlots(const ChannelDef &def, qint64 startMs,
+                            qint64 *endRotation = nullptr);
+
+int minuteOfDayFromString(const QString &hhmm);
+
+int dayOfWeekFromString(const QString &name);
+
+QByteArray serializeSchedule(const ChannelDef &def,
+                             qint64 generatedAt,
+                             const QVector<Slot> &placed);
+
+// The key an item with no series name of its own is grouped and marked under.
+// The generator groups on it and the backend writes marks against it, so it
+// lives here rather than in either: a silent disagreement would lose the place
+// of everything unnamed, which on a real channel means the films.
+inline QString unnamedSeriesKey() { return QStringLiteral("\x1f"); }
+
+// When something first aired, as epoch ms, from whatever a library knows: an
+// episode's own date where there is one, otherwise its season's or show's year,
+// which is enough to keep it among its contemporaries. Zero means the library
+// had nothing and the ordering falls back to alphabetical.
+qint64 airedAtMs(const QString &isoDate, const QVariant &yearValue);
+
+inline constexpr qint64 kMinFillerMs = 1000;
+
+inline constexpr int kMaxSlotsPerChannel = 20000;
+}

@@ -93,6 +93,10 @@ public:
     // would receive it is being torn down).
     void releaseNow(const QString &owner);
 
+signals:
+    //
+    void displayReturned();
+
 private:
     int  getActiveVt() const;
     // Never returns activeVt — switching to the VT we are already on is a silent
@@ -111,6 +115,7 @@ private:
 #ifdef Q_OS_LINUX
     void saveDrmCrtcState(int fd);
     void restoreDrmCrtcState(int fd);
+    bool ensureBlankFb(int fd, uint32_t width, uint32_t height);
 #endif
     void doRestore();
 
@@ -122,5 +127,10 @@ private:
     std::function<void()> m_onRestored;
 #ifdef Q_OS_LINUX
     DrmSavedState m_savedDrm = {};
+    //
+    uint32_t m_blankFbId   = 0;
+    uint32_t m_blankHandle = 0;
+    uint32_t m_blankWidth  = 0;
+    uint32_t m_blankHeight = 0;
 #endif
 };

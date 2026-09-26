@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <locale.h>
 #include <csignal>
+#include <QRegularExpression>
 
 #include "AppCore.h"
 #include "modules/local_files/LocalFilesBackend.h"
@@ -23,6 +24,7 @@
 #include "modules/youtube/YouTubeBackend.h"
 #include "modules/weather/WeatherBackend.h"
 #include "modules/scripts/ScriptsBackend.h"
+#include "modules/virtual_channels/VirtualChannelsBackend.h"
 #include "player/MpvController.h"
 #include "input/InputManager.h"
 #include "input/IdleTracker.h"
@@ -71,7 +73,37 @@ static QString resolveDataRoot() {
 static volatile std::sig_atomic_t g_termRequested = 0;
 extern "C" void mp240HandleTerm(int) { g_termRequested = 1; }
 
+
+// Anything a server token is carried in can end up in a log without anyone
+// meaning to put it there: Qt prints the URL of an image that fails to load,
+// and mpv prints the URL it could not open. Both carry the token that fetched
+// the artwork or the stream, and qWarning survives a release build. So every
+// message goes past here first, and the token never reaches the journal.
+//
+// The message is handed on to the handler that was installed before this one,
+// rather than logged again from in here: logging from inside a log handler
+// comes straight back to it.
+static QtMessageHandler g_priorMessageHandler = nullptr;
+
+static void redactingMessageHandler(QtMsgType type, const QMessageLogContext &ctx,
+                                    const QString &message) {
+    static const QRegularExpression tokenInUrl(
+        QStringLiteral("((?:X-Plex-Token|api_key|ApiKey|X-Emby-Token|X-MediaBrowser-Token|"
+                       "accessToken|X-Plex-Client-Identifier)=)[^&\\s\"'<>]+"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    if (!message.contains(QLatin1Char('='))) {
+        if (g_priorMessageHandler) g_priorMessageHandler(type, ctx, message);
+        return;
+    }
+
+    QString clean = message;
+    clean.replace(tokenInUrl, QStringLiteral("\\1<redacted>"));
+    if (g_priorMessageHandler) g_priorMessageHandler(type, ctx, clean);
+}
+
 int main(int argc, char *argv[]) {
+    g_priorMessageHandler = qInstallMessageHandler(redactingMessageHandler);
     QGuiApplication app(argc, argv);
     app.setApplicationName("240-MP");
     app.setApplicationVersion(QStringLiteral(APP_VERSION));
@@ -159,6 +191,8 @@ int main(int argc, char *argv[]) {
     WeatherBackend      weatherBackend(appRoot, dataRoot);
     DisplayHandoff      displayHandoff;
     ScriptsBackend      scriptsBackend(appRoot, dataRoot, &displayHandoff);
+    VirtualChannelsBackend virtualChannels(appRoot, dataRoot,
+                                          &plexBackend, &jellyfinBackend, &embyBackend);
     MpvController       mpvController(appRoot, dataRoot, &appCore, &displayHandoff);
     InputManager        inputManager(dataRoot, &appCore);
     IdleTracker         idleTracker(60);   // disabled until Main.qml applies the saved setting
@@ -186,6 +220,7 @@ int main(int argc, char *argv[]) {
     appCore.registerModule("com.240mp.youtube",      "youtubeBackend",     &youtubeBackend, ctx);
     appCore.registerModule("com.240mp.weather",      "weatherBackend",     &weatherBackend, ctx);
     appCore.registerModule("com.240mp.scripts",      "scriptsBackend",     &scriptsBackend, ctx);
+    appCore.registerModule("com.240mp.virtual_channels", "virtualChannelsBackend", &virtualChannels, ctx);
 
     ctx->setContextProperty("idleTracker",   &idleTracker);
     ctx->setContextProperty("appCore",       &appCore);
@@ -214,7 +249,14 @@ int main(int argc, char *argv[]) {
 
     // Gamepad key events are posted straight to the root window so they reach
     // the QML focus item even when another window (mpv) holds OS focus.
-    inputManager.setTargetWindow(qobject_cast<QQuickWindow *>(engine.rootObjects().first()));
+    auto *rootWindow = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    inputManager.setTargetWindow(rootWindow);
+
+    //
+    if (rootWindow) {
+        QObject::connect(&displayHandoff, &DisplayHandoff::displayReturned,
+                         rootWindow, [rootWindow] { rootWindow->requestUpdate(); });
+    }
 
 #ifdef Q_OS_MAC
     if (QWindow *win = qobject_cast<QWindow *>(engine.rootObjects().first())) {

@@ -29,6 +29,7 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
+          modules: qtmultimedia
           cache: true
 
       - name: Build SDL2 from source (pinned — Homebrew's sdl2 is now the sdl2-compat/SDL3 shim)
@@ -168,6 +169,8 @@ jobs:
             qml6-module-qtquick \
             qml6-module-qtquick-controls \
             qml6-module-qtquick-window \
+            qt6-multimedia-dev \
+            qml6-module-qtmultimedia \
             libdrm-dev \
             libssl-dev \
             libsdl2-dev \
@@ -224,6 +227,7 @@ jobs:
           host: linux
           target: desktop
           arch: linux_gcc_64
+          modules: qtmultimedia
           cache: true
 
       - name: Install build + bundling dependencies

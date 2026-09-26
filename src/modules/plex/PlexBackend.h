@@ -23,6 +23,8 @@ public:
     Q_INVOKABLE void     build_stream_url(const QString &ratingKey,
                                           const QString &partKey,
                                           const QString &sessionId);
+    Q_INVOKABLE QString  video_quality() const;
+    Q_INVOKABLE void     stop_transcode(const QString &sessionId);
 
     // Auth flow
     Q_INVOKABLE void start_pin_auth();
@@ -123,6 +125,8 @@ public:
     // server can release the tuner. Called on exit and before a channel change.
     Q_INVOKABLE void stop_live_session(const QString &sessionId);
 
+    Q_INVOKABLE QString image_url(const QString &thumb, int width, int height) const;
+
     // Settings dynamic options
     Q_INVOKABLE void getUsers();
     Q_INVOKABLE void getServers();
@@ -158,6 +162,12 @@ signals:
     void itemLoaded(const QVariant &detail);
     void showYearReady(const QString &showRatingKey, int year);
     void streamUrlReady(const QString &url, const QString &plexToken);
+    // The server has taken a subtitle selection for a part; a transcode asked
+    // for before it lands burns what the part said before.
+    void subtitleStreamSet(const QString &partId);
+    void audioStreamSet(const QString &partId);      // the same, for the audio selection
+    // A transcode session is gone; one started before that carries its decision.
+    void transcodeStopped(const QString &sessionId);
     void childrenLoaded(const QVariant &items);
     void extrasLoaded(const QVariant &items);
     void inProgressEpisodeLoaded(const QVariant &item);
@@ -174,6 +184,9 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
+    void startTranscode(const QString &ratingKey, const QString &partKey,
+                        const QString &sessionId, const QString &audioId,
+                        const QString &subtitleId, int offsetMs);
     // Auth file I/O
     QJsonObject loadAuth() const;
     void saveAuth(const QJsonObject &auth) const;

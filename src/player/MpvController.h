@@ -44,9 +44,19 @@ public:
                                   const QString &jellyfinToken = {},
                                   const QStringList &extraUrls = {});
     Q_INVOKABLE void stop();
+    // Ends mpv without asking it. stop() sends "quit" over the IPC socket,
+    // which a process that has stopped servicing that socket never reads.
+    Q_INVOKABLE void forceStop();
     Q_INVOKABLE void seekTo(int positionMs);
     Q_INVOKABLE void sendKey(const QString &key);
+    Q_INVOKABLE int  volume() const { return m_volume; }
+    Q_INVOKABLE void setVolume(int percent);
+    // Whether the next launch will crop the picture to fill the screen. A filter
+    // that draws into the video frame has to know: panscan crops that frame
+    // afterwards, and takes anything drawn near its edge with it.
+    Q_INVOKABLE bool cropActive() const { return autoCropEnabled() && !cropUnavailable(); }
     Q_INVOKABLE void showOsdSkipPrompt();
+    Q_INVOKABLE void showChannelOsd(const QVariantMap &options);
     Q_INVOKABLE void clearOsdPrompt();
 
     // True only on devices whose smooth-playback decode path can't crop/zoom (the
@@ -63,6 +73,9 @@ public:
 
 signals:
     void positionChanged(int ms);
+    // mpv has stopped reporting progress while unpaused and still connected.
+    void playbackStalled(int silentSeconds);
+    void volumeChanged(int percent);
     void durationChanged(int ms);
     void playlistPosChanged(int pos);
     // Emitted exactly once when mpv exits, with the reason it ended:
@@ -140,6 +153,7 @@ private:
     int           m_position     = 0;
     int           m_duration     = 0;
     int           m_playlistPos  = -1;
+    int           m_volume       = 100;
     bool          m_headlessMode = false;
     int           m_displayIndex = 0;   // see setTargetDisplay()
     QString       m_displayScreenName;
@@ -147,4 +161,6 @@ private:
     bool          m_hasMpvOscScript     = false;
     bool          m_hasAmbientOscScript = false;
     bool          m_hasMediaKeysScript  = false;
+    bool          m_hasChannelOsdScript = false;
+    QVariantMap   m_pendingOsd;
 };
