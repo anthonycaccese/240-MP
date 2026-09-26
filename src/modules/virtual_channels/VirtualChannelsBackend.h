@@ -427,7 +427,8 @@ private:
     QJsonArray readChannels() const;
     bool     writeChannels(const QJsonArray &channels);
     bool     moveScheduleFile(int fromNumber, int toNumber);
-    void     setSpecialNumber(const QString &which, int number);
+    bool     setSpecialNumber(const QString &which, int number);
+    void     repairSpecialNumbers();
     bool     renumberDial();
 
     QTimer *m_genTimer = nullptr;

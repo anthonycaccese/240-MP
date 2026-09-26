@@ -45,9 +45,11 @@ public:
     QString data()  const { return m_dir.path(); }
     QString media() const { return m_dir.path() + QStringLiteral("/media"); }
 
-    void write(const QJsonObject &channel) {
+    void write(const QJsonObject &channel) { writeMany({ channel }); }
+
+    void writeMany(std::initializer_list<QJsonObject> channels) {
         QJsonArray a;
-        a.append(channel);
+        for (const QJsonObject &c : channels) a.append(c);
         QJsonObject root;
         root["channels"] = a;
         QDir().mkpath(data() + QStringLiteral("/channels"));
@@ -1643,6 +1645,61 @@ void testLocalFileGetsMpvArgs() {
     check(args.contains("--subs-with-matching-audio=no"), "and the subtitle rule");
 }
 
+void testSpecialNumbersNeverCollide() {
+    section("Backend: the built-in channels are moved off numbers the dial has taken");
+    {
+        // Weather off, on its default number 1, guide on 0: a channel made now
+        // takes 1, and switching the weather on moves the weather, not the channel.
+        Fixture fx;
+        fx.write(localChannel(3));
+        VirtualChannelsBackend b(fx.data(), fx.data());
+        checkEq(b.create_channel(QStringLiteral("Made While Weather Was Off")), 4, "the next number past the dial");
+        fx.setting(QStringLiteral("channels.weather"), QStringLiteral("ON"));
+        b.onSettingChanged(QStringLiteral("com.240mp.virtual_channels"), QStringLiteral("channels.weather"), QStringLiteral("ON"));
+        checkEq(b.weather_channel_number(), 1, "no channel was on 1, so the weather stays");
+    }
+    {
+        // A dial where a channel already sits on the weather's number, weather on.
+        Fixture fy;
+        fy.write(localChannel(1));
+        fy.setting(QStringLiteral("channels.weather"), QStringLiteral("ON"));
+        VirtualChannelsBackend b(fy.data(), fy.data());
+        checkEq(b.weather_channel_number(), 2, "starting up moves the weather to the lowest free number");
+        checkEq(fy.read(1).value(QLatin1String("number")).toInt(), 1, "and the channel keeps its own");
+        checkEq(b.create_channel(QStringLiteral("Later")), 3, "a channel made afterwards lands beyond both built-ins");
+    }
+    {
+        // The same collision arriving live, as the weather is switched on.
+        Fixture fz;
+        fz.write(localChannel(1));
+        VirtualChannelsBackend b(fz.data(), fz.data());
+        checkEq(b.weather_channel_number(), 1, "off, the weather is left where it is");
+        fz.setting(QStringLiteral("channels.weather"), QStringLiteral("ON"));
+        b.onSettingChanged(QStringLiteral("com.240mp.virtual_channels"), QStringLiteral("channels.weather"), QStringLiteral("ON"));
+        checkEq(b.weather_channel_number(), 2, "switching it on moves it clear");
+        b.onSettingChanged(QStringLiteral("com.240mp.virtual_channels"), QStringLiteral("channels.weather"), QStringLiteral("ON"));
+        checkEq(b.weather_channel_number(), 2, "and a second look changes nothing");
+    }
+    {
+        // A channel on the guide's number: the guide moves, and not onto the weather.
+        Fixture fg;
+        fg.writeMany({ localChannel(0), localChannel(2) });
+        VirtualChannelsBackend b(fg.data(), fg.data());
+        checkEq(b.guide_channel_number(), 3, "the guide takes the lowest number nothing has");
+        checkEq(b.weather_channel_number(), 1, "and the weather, which shared nothing, is not touched");
+    }
+    {
+        // Guide and weather on the one number: the weather gives way.
+        Fixture fw;
+        fw.write(localChannel(5));
+        fw.setting(QStringLiteral("channels.weather"), QStringLiteral("ON"));
+        fw.setting(QStringLiteral("channels.weather_number"), QStringLiteral("0"));
+        VirtualChannelsBackend b(fw.data(), fw.data());
+        checkEq(b.guide_channel_number(), 0, "the guide keeps 0");
+        checkEq(b.weather_channel_number(), 1, "the weather moves off it");
+    }
+}
+
 void testChannelLogoStyle() {
     section("Backend: a channel's own logo style is written, bounded, and cleared");
     Fixture fx;
@@ -1778,5 +1835,6 @@ int runVirtualChannelsBackendTests() {
     testSurfLeavesTheLastProgrammesWritesBehind();
     testPreviewNeverWrites();
     testChannelLogoStyle();
+    testSpecialNumbersNeverCollide();
     return 0;
 }

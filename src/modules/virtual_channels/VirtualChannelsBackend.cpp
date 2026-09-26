@@ -187,6 +187,7 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
     m_genTimer->setInterval(0);
     connect(m_genTimer, &QTimer::timeout, this, &VirtualChannelsBackend::onGenerationTick);
 
+    repairSpecialNumbers();
     QTimer::singleShot(kStartupSweepDelayMs, this, [this] { top_up_schedules(); });
     armNightlySweep();
 
@@ -248,6 +249,8 @@ void VirtualChannelsBackend::onSettingChanged(const QString &moduleId,
     const bool local = (moduleId == QLatin1String("com.240mp.local_files"));
     if (!ours && !local)
         return;
+    if (ours && key == QLatin1String("channels.weather"))
+        repairSpecialNumbers();
     if (key == QLatin1String("media_directory")) {
         const QString resolved = resolveMediaRoot();
         m_mediaRoot = resolved.trimmed().isEmpty() ? m_dataRoot + "/media" : resolved;
@@ -3609,7 +3612,37 @@ bool VirtualChannelsBackend::weather_channel_enabled() const {
     return v.toBool();
 }
 
-void VirtualChannelsBackend::setSpecialNumber(const QString &which, int number) {
+// A built-in channel found on a number something else already has is moved
+// to the lowest number nothing has. A channel made while the weather was off
+// could take the weather's number, and switching the weather on then put two
+// things on one number the dial could not reorder; a hand-edited file can do
+// the same. Each built-in is placed against everything but itself, so mending
+// one never shoves the other.
+void VirtualChannelsBackend::repairSpecialNumbers() {
+    QSet<int> channels;
+    for (const QVariant &v : list_channels()) {
+        const QVariantMap row = v.toMap();
+        if (row.value(QStringLiteral("special")).toString().isEmpty())
+            channels.insert(row.value(QStringLiteral("number")).toInt());
+    }
+    // The guide is the anchor and only a channel can push it; the weather
+    // gives way to the guide as well. A weather that is off keeps its number
+    // until it is switched on, when this runs again.
+    const auto place = [&](const char *which, int mine, int other, bool yields) {
+        if (!channels.contains(mine) && !(yields && mine == other)) return;
+        int n = 0;
+        while (channels.contains(n) || n == other) ++n;
+        if (setSpecialNumber(QLatin1String(which), n))
+            qWarning("[VirtualChannels] the %s channel shared number %d; moved to %d", which, mine, n);
+        else
+            qWarning("[VirtualChannels] the %s channel shares number %d and could not be moved", which, mine);
+    };
+    place("guide", guide_channel_number(), weather_channel_number(), false);
+    if (weather_channel_enabled())
+        place("weather", weather_channel_number(), guide_channel_number(), true);
+}
+
+bool VirtualChannelsBackend::setSpecialNumber(const QString &which, int number) {
     QFile f(m_dataRoot + "/config.json");
     QJsonObject cfg;
     if (f.open(QIODevice::ReadOnly)) { cfg = QJsonDocument::fromJson(f.readAll()).object(); f.close(); }
@@ -3623,9 +3656,9 @@ void VirtualChannelsBackend::setSpecialNumber(const QString &which, int number) 
     cfg["modules"] = modules;
 
     QSaveFile out(m_dataRoot + "/config.json");
-    if (!out.open(QIODevice::WriteOnly)) return;
+    if (!out.open(QIODevice::WriteOnly)) return false;
     out.write(QJsonDocument(cfg).toJson(QJsonDocument::Indented));
-    out.commit();
+    return out.commit();
 }
 
 bool VirtualChannelsBackend::moveScheduleFile(int fromNumber, int toNumber) {
