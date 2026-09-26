@@ -31,6 +31,14 @@ FocusScope {
         internalLoader.setSource(resolved, { "navParams": withModuleId(params) })
     }
 
+    // A move along the dial swaps one channel view for another without
+    // leaving the old one beneath: Back from any channel is the guide, not a
+    // walk back through every channel the dial passed.
+    function replaceWith(viewPath, params) {
+        currentParams = params || {}
+        internalLoader.setSource(Qt.resolvedUrl(viewPath), { "navParams": withModuleId(params) })
+    }
+
     function navigateBack() {
         if (navStack.length === 0) {
             moduleRoot.goBack()
@@ -57,6 +65,7 @@ FocusScope {
             target: internalLoader.item
             ignoreUnknownSignals: true
             function onNavigateTo(path, params, listState) { moduleRoot.navigateTo(path, params, listState) }
+            function onReplaceWith(path, params) { moduleRoot.replaceWith(path, params) }
             function onGoBack() { moduleRoot.navigateBack() }
             function onExitModule() { moduleRoot.goBack() }
         }

@@ -8,6 +8,7 @@ FocusScope {
     property string moduleId: navParams.moduleId || ""
 
     signal navigateTo(string path, var params, var listState)
+    signal replaceWith(string path, var params)
     signal goBack()
     signal exitModule()
 
@@ -48,16 +49,18 @@ FocusScope {
     function goTo(next) {
         if (!next || next.number === myNumber()) return
 
+        // The guide is the view beneath, so its number is a step back; a
+        // channel takes this view's place rather than piling on it.
         if (next.special === "guide") {
-            navigateTo("Guide.qml", {}, { fromWeather: true })
+            goBack()
         } else if (next.special === "weather") {
             return
         } else {
-            navigateTo("Player.qml", {
+            replaceWith("Player.qml", {
                 moduleId:      wxRoot.moduleId,
                 channelNumber: next.number,
                 channelName:   next.name
-            }, { fromWeather: true })
+            })
         }
     }
 
@@ -74,7 +77,7 @@ FocusScope {
             event.accepted = true
         } else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace
                    || event.key === Qt.Key_Back) {
-            exitModule()
+            goBack()
             event.accepted = true
         }
     }
@@ -119,7 +122,7 @@ FocusScope {
             // Back while a number is being typed takes the number back, not the viewer out.
             function onGoBack() {
                 if (channelEntry.digits !== "") channelEntry.clear()
-                else wxRoot.exitModule()
+                else wxRoot.goBack()
             }
         }
     }

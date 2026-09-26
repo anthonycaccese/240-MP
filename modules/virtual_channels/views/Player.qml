@@ -13,6 +13,7 @@ FocusScope {
     property string channelName:   navParams.channelName   || ""
 
     signal navigateTo(string path, var params, var listState)
+    signal replaceWith(string path, var params)
     signal goBack()
     signal exitModule()
 
@@ -100,10 +101,17 @@ FocusScope {
         return row.special === "weather" ? weatherView : "Guide.qml"
     }
 
+    // The guide is always the view beneath a channel, so the dial reaching its
+    // number is a step back; any other channel takes this one's place.
+    function arriveAt(path) {
+        if (path === "Guide.qml") goBack()
+        else replaceWith(path, {})
+    }
+
     function leaveFor(path) {
         virtualChannelsBackend.release_tuner()
         if (offAir || tuning || filler) {
-            navigateTo(path, {}, { fromPlayer: true })
+            arriveAt(path)
         } else {
             leavingTo = path
             mpvController.stop()
@@ -842,7 +850,7 @@ FocusScope {
             if (playerRoot.leavingTo !== "") {
                 var dest = playerRoot.leavingTo
                 playerRoot.leavingTo = ""
-                navigateTo(dest, {}, { fromPlayer: true })
+                arriveAt(dest)
                 return
             }
             if (playerRoot.switchingTo) {
@@ -872,9 +880,11 @@ FocusScope {
                 return
             }
 
+            // Not one of ours: the viewer quit, or mpv went away. Back to
+            // choosing a channel, not out of the module.
             if (reason === "stopped") {
                 virtualChannelsBackend.release_tuner()
-                exitModule()
+                goBack()
                 return
             }
 
@@ -920,7 +930,7 @@ FocusScope {
         if (offAir || tuning || filler) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
                 virtualChannelsBackend.release_tuner()
-                exitModule()
+                goBack()
                 event.accepted = true
             }
             return
