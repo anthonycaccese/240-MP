@@ -27,6 +27,13 @@
       "default": "Ask"
     },
     {
+      "key": "next_playback",
+      "label": "Next Playback",
+      "type": "toggle",
+      "default": "OFF",
+      "description": "Automatically play the next item in the playlist when the current one ends."
+    },
+    {
       "key": "display_shorts",
       "label": "Display Shorts",
       "type": "toggle",

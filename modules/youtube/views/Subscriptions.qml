@@ -268,7 +268,12 @@ FocusScope {
             var selected = itemsRoot.items[itemList.currentIndex]
             if (!selected)
                 return
-            navigateTo("Player.qml", { item: selected }, { currentIndex: itemList.currentIndex })
+            var playerParams = { item: selected }
+            if (itemsRoot.mode === "playlist") {
+                playerParams.playlistItems = itemsRoot.items
+                playerParams.playlistIndex = itemList.currentIndex
+            }
+            navigateTo("Player.qml", playerParams, { currentIndex: itemList.currentIndex })
         }
         Keys.onUpPressed: {
             if (wlOverlayVisible) {

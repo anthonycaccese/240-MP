@@ -10,6 +10,8 @@ FocusScope {
     property var    item:     navParams.item || ({})
     property string videoUrl: item.url || ""
     property string videoId:  item.videoId || ""
+    property var    playlistItems: navParams.playlistItems || []
+    property int    playlistIndex: navParams.playlistIndex === undefined ? -1 : navParams.playlistIndex
 
     property bool   overlayVisible:   false
     property bool   playbackStarted:  false
@@ -46,6 +48,19 @@ FocusScope {
         startTimer.pendingStartMs = startMs
         startTimer.restart()
     }
+
+    function playNextPlaylistItem() {
+        if (playlistIndex < 0 || playlistIndex + 1 >= playlistItems.length)
+            return false
+        item = playlistItems[++playlistIndex]
+        playbackStarted = false
+        lastKnownPositionMs = 0
+        lastKnownDurationMs = 0
+        savedPositionMs = 0
+        play(0)
+        return true
+    }
+
 
     Keys.onPressed: function(event) {
         if (errorMessage !== "") {
@@ -129,6 +144,10 @@ FocusScope {
                 youtubeBackend.savePosition(videoId, 0, item.title || "", item.channelName || "")
             else if (pos > 5000)
                 youtubeBackend.savePosition(videoId, pos, item.title || "", item.channelName || "")
+            var nextItemEnabled = appCore.get_setting(moduleRoot.moduleId, "next_playback")
+            if (reason === "eof" && (nextItemEnabled === true || nextItemEnabled === "ON")
+                    && playerRoot.playNextPlaylistItem())
+                return
             goBack()
         }
     }
