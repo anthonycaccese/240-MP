@@ -27,8 +27,8 @@
       "default": "Ask"
     },
     {
-      "key": "next_playback",
-      "label": "Next Playback",
+      "key": "autoplay_playlist_items",
+      "label": "Autoplay Playlist Items",
       "type": "toggle",
       "default": "OFF",
       "description": "Automatically play the next item in the playlist when the current one ends."

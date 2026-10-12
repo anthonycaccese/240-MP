@@ -23,6 +23,13 @@ FocusScope {
         internalLoader.setSource(resolved, { "navParams": params || {} })
     }
 
+    // Repoint the list position BACK restores after playlist autoplay advances
+    // in place, so exiting the player lands on the last-played item.
+    function updateBackListState(state) {
+        if (navStack.length === 0) return
+        navStack[navStack.length - 1].listState = state
+    }
+
     function navigateBack() {
         if (navStack.length === 0) {
             moduleRoot.goBack()
@@ -50,6 +57,7 @@ FocusScope {
             ignoreUnknownSignals: true
             function onNavigateTo(path, params, listState) { moduleRoot.navigateTo(path, params, listState) }
             function onGoBack() { moduleRoot.navigateBack() }
+            function onUpdateBackListState(state) { moduleRoot.updateBackListState(state) }
         }
     }
 
