@@ -114,6 +114,20 @@ local btn_actions = {
     function() mp.command("playlist-next") end,
 }
 
+-- The AUDIO button is drawn only where there is a track to move to. A module
+-- that cycles for itself says how many it has; one that says nothing keeps
+-- the button, as before.
+local function has_audio_choice()
+    if audio_cycle then
+        return (tonumber(mp.get_opt("audio-tracks")) or 2) > 1
+    end
+    local n = 0
+    for _, t in ipairs(mp.get_property_native("track-list", {})) do
+        if t.type == "audio" then n = n + 1 end
+    end
+    return n > 1
+end
+
 local function has_subtitle_tracks()
     -- Burned-in transcode subs never appear in the track list.
     if sub_cycle then return true end
@@ -139,7 +153,9 @@ local function build_left_btns(has_sub, has_pl, bar_w)
             mp.commandv("script-message", "skip-segment")
         end}
     end
-    btns[#btns + 1] = {label="AUDIO", width=math.floor(bar_w * 0.109375), action=btn_actions[1]}
+    if has_audio_choice() then
+        btns[#btns + 1] = {label="AUDIO", width=math.floor(bar_w * 0.109375), action=btn_actions[1]}
+    end
     if has_sub then
         table.insert(btns, {label="SUBTITLE", width=math.floor(bar_w * 0.15625), action=btn_actions[2]})
     end

@@ -615,6 +615,8 @@ void WeatherBackend::startMusic() {
         m_musicIpc = new QLocalSocket(this);
         connect(m_musicIpc, &QLocalSocket::connected, this, [this]() {
             m_musicConnect->stop();
+            m_musicApplied = m_musicDucked ? 0.0 : double(m_musicVolume);
+            applyMusicVolume();
         });
     }
     if (!m_musicConnect) {
@@ -631,6 +633,57 @@ void WeatherBackend::startMusic() {
 
     qInfo("[Weather] music started — %lld track(s)", static_cast<long long>(tracks.size()));
     emit musicStateChanged();
+}
+
+void WeatherBackend::set_music_volume(int percent) {
+    m_musicVolume = qBound(0, percent, 100);
+    if (!m_musicDucked) startMusicFade(m_musicVolume, 0);
+}
+
+void WeatherBackend::duck_music(bool ducked, int ms) {
+    if (m_musicDucked == ducked) return;
+    m_musicDucked = ducked;
+    startMusicFade(ducked ? 0.0 : double(m_musicVolume), qMax(0, ms));
+}
+
+void WeatherBackend::startMusicFade(double target, int ms) {
+    m_musicFadeTo = qBound(0.0, target, 100.0);
+
+    if (!m_musicFade) {
+        m_musicFade = new QTimer(this);
+        m_musicFade->setInterval(40);       // smooth enough, cheap enough
+        connect(m_musicFade, &QTimer::timeout, this, [this]() {
+            const double gap = m_musicFadeTo - m_musicApplied;
+            if (qAbs(gap) <= qAbs(m_musicFadeStep) || qFuzzyIsNull(m_musicFadeStep)) {
+                m_musicApplied = m_musicFadeTo;
+                m_musicFade->stop();
+            } else {
+                m_musicApplied += m_musicFadeStep;
+            }
+            applyMusicVolume();
+        });
+    }
+
+    if (ms <= 0) {
+        m_musicFade->stop();
+        m_musicApplied = m_musicFadeTo;
+        applyMusicVolume();
+        return;
+    }
+    const int steps = qMax(1, ms / m_musicFade->interval());
+    m_musicFadeStep = (m_musicFadeTo - m_musicApplied) / steps;
+    m_musicFade->start();
+}
+
+void WeatherBackend::applyMusicVolume() {
+    if (!m_music || m_music->state() == QProcess::NotRunning) return;
+    if (!m_musicIpc || m_musicIpc->state() != QLocalSocket::ConnectedState) return;
+    const QJsonObject cmd{
+        { QStringLiteral("command"),
+          QJsonArray{ QStringLiteral("set_property"), QStringLiteral("volume"),
+                      qRound(m_musicApplied) } }
+    };
+    m_musicIpc->write(QJsonDocument(cmd).toJson(QJsonDocument::Compact) + "\n");
 }
 
 void WeatherBackend::stopMusic() {

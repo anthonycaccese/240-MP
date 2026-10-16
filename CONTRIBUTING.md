@@ -66,7 +66,18 @@ A pure-QML module needs **no C++ changes** — the shell discovers it from its m
 
 ### Testing your change
 
-Sorry I've not made time yet to work on automated tests so for now testing is manual:
+Sorry I've not made time yet to work on automated tests so for now testing is mostly manual.
+
+The Channels module is the exception — its scheduling, tuning and path handling
+have a test suite, because a timeline that is wrong is hard to see by watching
+it. It is off by default and needs no extra dependencies:
+
+```bash
+cmake -B build-tests -DBUILD_VCHAN_TESTS=ON . && cmake --build build-tests --target vchan-tests
+./build-tests/vchan-tests          # or: ctest --test-dir build-tests
+```
+
+If you change that module, please run it. For everything else:
 
 - **Build and run** on at least one target (macOS ARM or Raspberry Pi). See [BUILDING.md](BUILDING.md#run).
 - **Navigate with a remote/keyboard only** and confirm every screen in your change is reachable and exitable.

@@ -55,6 +55,8 @@ public:
 
     // URL helpers for QML
     Q_INVOKABLE QString get_access_token() const { return m_accessToken; }
+    Q_INVOKABLE QString image_url(const QString &itemId, const QString &tag,
+                                  int width, int height) const;
 
     // Settings
     Q_INVOKABLE QString get_auth_state();
