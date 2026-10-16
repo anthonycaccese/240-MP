@@ -211,7 +211,7 @@ ExecStartPre=+-/usr/bin/systemctl stop 240mp-terminal.service
 ExecStart=${LAUNCHER}
 Restart=on-failure
 RestartSec=5s
-RestartPreventExitStatus=10
+RestartPreventExitStatus=10 12
 ExecStopPost=+/usr/local/bin/240mp-stop
 StandardOutput=journal
 StandardError=journal
@@ -222,8 +222,10 @@ UNIT
 
     # ExecStopPost helper: normal quit (exit 0) or a crash powers the Pi off as
     # before; exit 10 means the user chose "Exit to Terminal", so instead spawn a
-    # login shell on tty1 (see views/Settings.qml). RestartPreventExitStatus=10
+    # login shell on tty1 (see views/Settings.qml). RestartPreventExitStatus=10 12
     # keeps Restart=on-failure from relaunching the app over that shell.
+    # Exit 12 is "Reboot" from the Quit dialog: reboot instead of powering off
+    # (also listed in RestartPreventExitStatus so the app isn't relaunched mid-reboot).
     # Exit 11 is "Apply & Restart" from the in-app updater (views/Update.qml):
     # do nothing here — it's a failure status, so Restart=on-failure relaunches
     # through the launcher, which applies the staged update before exec.
@@ -234,6 +236,8 @@ if [ "${EXIT_STATUS:-}" = "10" ]; then
     systemctl start 240mp-terminal.service
 elif [ "${EXIT_STATUS:-}" = "11" ]; then
     :   # in-app update restart — Restart=on-failure brings the app back up
+elif [ "${EXIT_STATUS:-}" = "12" ]; then
+    systemctl reboot
 else
     systemctl poweroff
 fi

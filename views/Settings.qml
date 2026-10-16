@@ -20,11 +20,13 @@ FocusScope {
     property int quitChoiceIndex: 0
 
     // Quit overlay choices. Under the autostart service (headless RPi) the quit menu has an
-    // "Exit to Terminal" option that drops to a tty1 login without powering off; that
-    // option is not needed on macOS/Desktop or when run by hand, so it's yes/no for that case.
+    // "Reboot" option and an "Exit to Terminal" option that drops to a tty1 login without
+    // powering off; those options are not needed on macOS/Desktop or when run by hand, so
+    // it's yes/no for that case.
     property bool autostartSession: false
     property var quitOptions: settingsRoot.autostartSession
         ? [{ label: "Power Off",        action: "quit"     },
+           { label: "Reboot",           action: "reboot"   },
            { label: "Exit to Terminal", action: "terminal" },
            { label: "Cancel",           action: "cancel"   }]
         : [{ label: "Yes", action: "quit" },
@@ -466,6 +468,7 @@ FocusScope {
         Keys.onReturnPressed: {
             var act = quitOptions[quitChoiceIndex].action
             if (act === "quit")          Qt.quit()
+            else if (act === "reboot")   Qt.exit(12)   // matches EXIT_STATUS check in 240mp-stop
             else if (act === "terminal") Qt.exit(10)   // matches EXIT_STATUS check in 240mp-stop
             else { quitOverlayVisible = false; settingsList.forceActiveFocus() }
         }

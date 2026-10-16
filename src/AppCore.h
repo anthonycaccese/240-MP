@@ -26,7 +26,7 @@ public:
     QString appVersion() const { return QCoreApplication::applicationVersion(); }
 
     // True when launched by the autostart systemd service (which injects MP240_AUTOSTART=1).
-    // Gates the quit overlay's "Exit to Terminal" option, which only makes sense on a
+    // Gates the quit overlay's "Reboot" / "Exit to Terminal" options, which only make sense on a
     // headless RPi running under the service. See scripts/install.sh and 240mp-stop.
     Q_INVOKABLE bool isAutostartSession() const {
         return qEnvironmentVariableIsSet("MP240_AUTOSTART");
