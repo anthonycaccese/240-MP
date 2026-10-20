@@ -577,6 +577,136 @@ void EmbyBackend::connect_select_server(const QString &serverUrl, const QString 
     });
 }
 
+// ---------------------------------------------------------------------------
+// Emby Connect PIN sign-in (replaces step 1 of the flow above)
+//
+// POST connect.emby.media/service/pin               {deviceId}      -> { Pin }
+// GET  connect.emby.media/service/pin?deviceId&pin                  -> { IsConfirmed, IsExpired }
+// POST connect.emby.media/service/pin/authenticate  {deviceId, pin} -> { AccessToken, UserId }
+//
+// The user confirms the PIN at emby.media/pin. Bodies are form-encoded, as in
+// Emby's own apiclient. The PIN is bound to the device id, so all three calls
+// must carry the same one.
+// ---------------------------------------------------------------------------
+
+QNetworkRequest EmbyBackend::connectPinRequest(const QUrl &url) const {
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    req.setRawHeader("Accept", "application/json");
+    req.setRawHeader("X-Application", connectAppHeader().toLatin1());
+    return req;
+}
+
+void EmbyBackend::connect_pin_create() {
+    m_connectPin.clear();
+    m_connectPinPollInFlight = false;
+
+    QUrlQuery form;
+    form.addQueryItem("deviceId", m_deviceId);
+
+    auto *reply = m_nam->post(connectPinRequest(QUrl(kConnectBaseUrl + "/pin")),
+                              form.toString(QUrl::FullyEncoded).toUtf8());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (status > 0)
+                emit connectFailed("PIN REQUEST FAILED (HTTP " + QString::number(status) + ")");
+            else
+                emit connectFailed("CONNECTION FAILED: " + reply->errorString());
+            return;
+        }
+
+        const QString pin = QJsonDocument::fromJson(reply->readAll()).object()["Pin"].toString();
+        if (pin.isEmpty()) {
+            emit connectFailed("INVALID PIN RESPONSE");
+            return;
+        }
+        m_connectPin = pin;
+        emit connectPinReady(pin);
+    });
+}
+
+void EmbyBackend::connect_pin_poll() {
+    // Skip a tick rather than stack requests if the service is slow to answer.
+    if (m_connectPin.isEmpty() || m_connectPinPollInFlight)
+        return;
+    m_connectPinPollInFlight = true;
+
+    QUrl url(kConnectBaseUrl + "/pin");
+    { QUrlQuery q; q.addQueryItem("deviceId", m_deviceId); q.addQueryItem("pin", m_connectPin); url.setQuery(q); }
+
+    const QString pin = m_connectPin;
+    auto *reply = m_nam->get(connectPinRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, pin]() {
+        reply->deleteLater();
+        m_connectPinPollInFlight = false;
+        // Cancelled, or superseded by a fresh PIN, while this was in flight.
+        if (pin != m_connectPin)
+            return;
+
+        if (reply->error() != QNetworkReply::NoError) {
+            // A transient network blip shouldn't kill a PIN the user may be
+            // typing in right now — the next tick retries. Only a definitive
+            // "this PIN is unknown" ends the attempt.
+            int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status == 404) {
+                m_connectPin.clear();
+                emit connectFailed("PIN EXPIRED");
+            }
+            return;
+        }
+
+        QJsonObject data = QJsonDocument::fromJson(reply->readAll()).object();
+        if (data["IsExpired"].toBool()) {
+            m_connectPin.clear();
+            emit connectFailed("PIN EXPIRED");
+            return;
+        }
+        if (data["IsConfirmed"].toBool()) {
+            m_connectPin.clear();
+            exchangeConnectPin(pin);
+        }
+    });
+}
+
+void EmbyBackend::connect_pin_cancel() {
+    m_connectPin.clear();
+}
+
+void EmbyBackend::exchangeConnectPin(const QString &pin) {
+    QUrlQuery form;
+    form.addQueryItem("deviceId", m_deviceId);
+    form.addQueryItem("pin", pin);
+
+    auto *reply = m_nam->post(connectPinRequest(QUrl(kConnectBaseUrl + "/pin/authenticate")),
+                              form.toString(QUrl::FullyEncoded).toUtf8());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (status > 0)
+                emit connectFailed("PIN SIGN IN FAILED (HTTP " + QString::number(status) + ")");
+            else
+                emit connectFailed("CONNECTION FAILED: " + reply->errorString());
+            return;
+        }
+
+        QJsonObject data = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString token         = data["AccessToken"].toString();
+        const QString connectUserId = data["UserId"].toString();
+        if (token.isEmpty() || connectUserId.isEmpty()) {
+            emit connectFailed("INVALID PIN SIGN IN RESPONSE");
+            return;
+        }
+
+        // From here on it is the ordinary Emby Connect flow.
+        m_connectAccessToken = token;
+        m_connectUserId      = connectUserId;
+        fetchConnectServers();
+    });
+}
+
 void EmbyBackend::persistConnectAuthAndFinish() {
     saveAuthState();
 
