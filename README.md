@@ -32,7 +32,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 
 ### Emby Module ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Emby))
 - Supported library types: `movies, tvshows, homevideos, boxsets`
-- Username / password authentication, or Emby Connect (emby.media cloud account, with server picker)
+- Username / password authentication, Emby Connect (emby.media cloud account, with server picker), or Emby Connect PIN sign-in (enter a code at emby.media/pin — no typing on the TV)
 - Select specific libraries to display
 - Continue Watching, Next Up and Resume Playback
 - Autoplay next episode in a season (optional, off by default)
