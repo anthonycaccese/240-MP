@@ -34,6 +34,14 @@
       "description": "Automatically play the next item in the playlist when the current one ends."
     },
     {
+      "key": "shuffle_playlists",
+      "label": "Shuffle Playlists",
+      "type": "list_single",
+      "options": ["Ask", "Always", "Never"],
+      "default": "Ask",
+      "description": "Play playlists in random order.\n[ASK] lets you choose each time a playlist opens."
+    },
+    {
       "key": "display_shorts",
       "label": "Display Shorts",
       "type": "toggle",

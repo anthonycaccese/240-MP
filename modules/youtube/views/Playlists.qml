@@ -16,6 +16,54 @@ FocusScope {
     property bool isLoading: false
     property string errorMessage: ""
 
+    // Play/Shuffle prompt, shown when "Shuffle Playlists" is [ASK]
+    property bool shuffleOverlayVisible: false
+    property int  shuffleChoiceIndex: 0   // 0 = play in order, 1 = shuffle
+
+    // Opens the video list, the same as before shuffle existed.
+    function openInOrder(pl) {
+        playlistsRoot.navigateTo("Subscriptions.qml", {
+            mode: "playlist",
+            playlistId: pl.playlistId,
+            playlistName: pl.title
+        }, { currentIndex: itemList.currentIndex })
+    }
+
+    // Straight to the player in shuffle mode — it loads the playlist itself, so
+    // Back lands here rather than on an item list.
+    function openShuffled(pl) {
+        playlistsRoot.navigateTo("Player.qml", {
+            playlistId: pl.playlistId,
+            playlistName: pl.title
+        }, { currentIndex: itemList.currentIndex })
+    }
+
+    function activateCurrent() {
+        var pl = items[itemList.currentIndex]
+        if (!pl)
+            return
+        var setting = appCore.get_setting(moduleRoot.moduleId, "shuffle_playlists") || "Ask"
+        if (setting === "Always")
+            openShuffled(pl)
+        else if (setting === "Never")
+            openInOrder(pl)
+        else {
+            shuffleChoiceIndex = 0
+            shuffleOverlayVisible = true
+        }
+    }
+
+    function applyShuffleChoice() {
+        var pl = items[itemList.currentIndex]
+        shuffleOverlayVisible = false
+        if (!pl)
+            return
+        if (shuffleChoiceIndex === 1)
+            openShuffled(pl)
+        else
+            openInOrder(pl)
+    }
+
     Component.onCompleted: {
         isLoading = true
         errorMessage = ""
@@ -96,6 +144,7 @@ FocusScope {
     ListView {
         id: itemList
         model: items
+        opacity: shuffleOverlayVisible ? 0.3 : 1
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.topMargin: root.sh * 0.25 //120
@@ -106,28 +155,35 @@ FocusScope {
         focus: true
 
         Keys.onUpPressed: {
+            if (shuffleOverlayVisible) {
+                shuffleChoiceIndex = (shuffleChoiceIndex === 0) ? 1 : 0
+                return
+            }
             if (count === 0) return
             if (currentIndex > 0) currentIndex--
             else currentIndex = count - 1
         }
         Keys.onDownPressed: {
+            if (shuffleOverlayVisible) {
+                shuffleChoiceIndex = (shuffleChoiceIndex === 0) ? 1 : 0
+                return
+            }
             if (count === 0) return
             if (currentIndex < count - 1) currentIndex++
             else currentIndex = 0
         }
         Keys.onReturnPressed: {
-            var item = items[itemList.currentIndex]
-            if (!item)
-                return
-            playlistsRoot.navigateTo("Subscriptions.qml", {
-                mode: "playlist",
-                playlistId: item.playlistId,
-                playlistName: item.title
-            }, { currentIndex: itemList.currentIndex })
+            if (shuffleOverlayVisible)
+                playlistsRoot.applyShuffleChoice()
+            else
+                playlistsRoot.activateCurrent()
         }
         Keys.onPressed: function(event) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
-                playlistsRoot.goBack()
+                if (shuffleOverlayVisible)
+                    shuffleOverlayVisible = false
+                else
+                    playlistsRoot.goBack()
                 event.accepted = true
             }
         }
@@ -181,9 +237,77 @@ FocusScope {
         }
     }
 
+    // Play/Shuffle overlay ([ASK] mode)
+    Rectangle {
+        anchors.fill: parent
+        color: root.surfaceColor
+        visible: shuffleOverlayVisible
+
+        Rectangle {
+            color: root.surfaceColor
+            anchors.centerIn: parent
+            width: root.sw * 0.76875
+            height: root.sh * 0.2833333
+
+            Column {
+                id: shuffleDialogColumn
+                anchors.fill: parent
+                spacing: root.sh * 0.05
+
+                Text {
+                    text: "START PLAYBACK?"
+                    color: root.secondaryColor
+                    font.family: root.globalFont
+                    font.pixelSize: root.sh * 0.0333333
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+
+                Column {
+                    Repeater {
+                        model: ["Play in order", "Shuffle"]
+                        delegate: Item {
+                            width: shuffleDialogColumn.width
+                            height: root.sh * 0.0583333
+
+                            Rectangle {
+                                anchors.fill: shuffleDelegateText
+                                color: root.accentColor
+                                visible: index === shuffleChoiceIndex
+                            }
+
+                            Text {
+                                id: shuffleDelegateText
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData
+                                color: index === shuffleChoiceIndex ? root.surfaceColor : root.primaryColor
+                                font.family: root.globalFont
+                                font.capitalization: Font.AllUppercase
+                                topPadding: root.sh * 0.0041667
+                                leftPadding: root.sw * 0.009375
+                                rightPadding: root.sw * 0.009375
+                                bottomPadding: root.sh * 0.00625
+                                font.pixelSize: root.sh * 0.0416667
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SELECT"
+                    color: root.tertiaryColor
+                    font.family: root.globalFont
+                    font.pixelSize: root.sh * 0.0333333
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+    }
+
     // Footer
     Text {
         id: footer
+        visible: !shuffleOverlayVisible
         text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SELECT"
         color: root.tertiaryColor
         font.family: root.globalFont

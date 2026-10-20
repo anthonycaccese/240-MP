@@ -16,6 +16,16 @@ FocusScope {
     property var    playlistItems: navParams.playlistItems || []
     property int    playlistIndex: navParams.playlistIndex === undefined ? -1 : navParams.playlistIndex
 
+    // Shuffle mode: entered with a playlistId instead of an item. The playlist's
+    // videos are fetched here, shuffled, and handed to mpv as one playlist so it
+    // advances on its own. `item` is re-pointed at each entry as mpv moves through
+    // the queue, which keeps the history/resume code below working unchanged.
+    property string playlistId:   navParams.playlistId || ""
+    property string playlistName: navParams.playlistName || ""
+    property bool   shuffleMode:  playlistId !== ""
+    property var    queue:        []
+    property int    queuePos:     0
+
     property bool   overlayVisible:   false
     property bool   playbackStarted:  false
     property int    savedPositionMs:  0
@@ -33,7 +43,38 @@ FocusScope {
     function doPlay(startMs) {
         overlayVisible = false
         lastStartMs = startMs
-        mpvController.loadAndPlay(videoUrl, startMs / 1000.0, 0, -2, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
+        // Bare URLs in extraArgs land after the first one on mpv's command line,
+        // which is how mpv builds a playlist. Deliberately NOT the playlist URL
+        // with --shuffle: mpv expands that through yt-dlp up front, which took
+        // over 3 minutes on the Pi. Per-video URLs are resolved lazily instead.
+        var extra = ytdlArgs
+        for (var i = 1; i < queue.length; i++)
+            extra = extra.concat([queue[i].url])
+        mpvController.loadAndPlay(videoUrl, startMs / 1000.0, 0, -2, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, extra)
+    }
+
+    function shuffled(list) {
+        var a = list.slice()
+        for (var i = a.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1))
+            var t = a[i]; a[i] = a[j]; a[j] = t
+        }
+        return a
+    }
+
+    // Same rule as the list views: unset/true/"ON" shows Shorts, explicit false hides.
+    function filterShorts(videos) {
+        var raw = appCore.get_setting(moduleRoot.moduleId, "display_shorts")
+        var showShorts = (raw === undefined || raw === null) ? true
+                         : (raw === true || raw === "ON")
+        if (showShorts)
+            return videos
+        return videos.filter(function(v) { return !v.isShort })
+    }
+
+    function startShuffle() {
+        errorMessage = ""
+        youtubeBackend.load_playlist_videos(playlistId)
     }
 
     // Starting mpv runs synchronously and, on the Pi, immediately switches VT
@@ -72,7 +113,11 @@ FocusScope {
                 event.accepted = true
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 errorMessage = ""
-                play(lastStartMs)
+                // Nothing to replay yet if the playlist fetch itself failed.
+                if (shuffleMode && queue.length === 0)
+                    startShuffle()
+                else
+                    play(lastStartMs)
                 event.accepted = true
             }
         } else if (overlayVisible) {
@@ -132,6 +177,23 @@ FocusScope {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
         }
 
+        // mpv advanced to the next shuffled entry. Its playlist is our queue in
+        // the same order, so pos indexes straight into it. Bank the finished
+        // video as watched and re-point `item` before the counters reset.
+        function onPlaylistPosChanged(pos) {
+            if (!playerRoot.shuffleMode || pos === playerRoot.queuePos)
+                return
+            var finished = playerRoot.queue[playerRoot.queuePos]
+            if (finished)
+                youtubeBackend.savePosition(finished.videoId, 0,
+                                            finished.title || "", finished.channelName || "")
+            playerRoot.queuePos = pos
+            if (playerRoot.queue[pos])
+                playerRoot.item = playerRoot.queue[pos]
+            playerRoot.lastKnownPositionMs = 0
+            playerRoot.lastKnownDurationMs = 0
+        }
+
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
             // yt-dlp missing/outdated or an unplayable stream surfaces as mpv exit
             // code 2 before any position event — show the error instead of leaving.
@@ -155,13 +217,43 @@ FocusScope {
         }
     }
 
+    Connections {
+        target: youtubeBackend
+        enabled: playerRoot.shuffleMode
+
+        function onPlaylistVideosLoaded(loadedPlaylistId, videos) {
+            if (loadedPlaylistId !== playerRoot.playlistId)
+                return
+            var vids = playerRoot.filterShorts(videos)
+            if (vids.length === 0) {
+                playerRoot.errorMessage = "NO VIDEOS IN THIS PLAYLIST"
+                return
+            }
+            playerRoot.queue    = playerRoot.shuffled(vids)
+            playerRoot.queuePos = 0
+            playerRoot.item     = playerRoot.queue[0]
+            // Shuffle always starts fresh — a saved position belongs to one video,
+            // which says nothing about where a randomized run should begin.
+            playerRoot.play(0)
+        }
+
+        function onErrorOccurred(msg) {
+            playerRoot.errorMessage = msg
+        }
+    }
+
     Component.onCompleted: {
+        var resolution = appCore.get_setting(moduleRoot.moduleId, "playback_resolution") || "480p"
+        ytdlArgs = ["--ytdl=yes", "--ytdl-format=" + youtubeBackend.ytdlFormatForResolution(resolution)]
+
+        if (shuffleMode) {
+            startShuffle()
+            return
+        }
         if (videoUrl === "") {
             goBack()
             return
         }
-        var resolution = appCore.get_setting(moduleRoot.moduleId, "playback_resolution") || "480p"
-        ytdlArgs = ["--ytdl=yes", "--ytdl-format=" + youtubeBackend.ytdlFormatForResolution(resolution)]
 
         var resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "Ask"
         var saved = youtubeBackend.getSavedPosition(videoId)
