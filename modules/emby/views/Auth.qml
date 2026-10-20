@@ -381,9 +381,11 @@ FocusScope {
         }
     }
 
-    // Footer
+    // Footer. The action label tracks the submit button above it, which reads
+    // "Get PIN" under PIN sign-in — nothing is signed in from this screen then.
     Text {
-        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SIGN IN"
+        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE "
+            + root.hints.select + (authRoot.method === 2 ? ":GET PIN" : ":SIGN IN")
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom
