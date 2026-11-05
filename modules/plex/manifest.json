@@ -68,6 +68,13 @@
       "requires_auth": true
     },
     {
+      "key": "watched_indicators",
+      "label": "Watched Indicators",
+      "type": "toggle",
+      "default": "OFF",
+      "requires_auth": true
+    },
+    {
       "key": "logout",
       "label": "Sign out",
       "type": "action",
