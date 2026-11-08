@@ -416,9 +416,19 @@ FocusScope {
 
                     Text {
                         id: rowText
-                        text: modelData.title || ""
+                        // With indicators on, a partly watched season shows its
+                        // unwatched episode count, e.g. "SEASON 2 [3]".
+                        text: {
+                            var title = modelData.title || ""
+                            var remaining = modelData.leafCount - modelData.viewedLeafCount
+                            return (moduleRoot.showWatchedIndicators && remaining > 0)
+                                   ? title + " [" + remaining + "]" : title
+                        }
                         color: (seasonList.currentIndex === index && focusRow === 2)
                                ? root.surfaceColor : root.primaryColor
+                        // Watched rows fade toward the background; the focused row stays solid.
+                        opacity: (!(seasonList.currentIndex === index && focusRow === 2) && moduleRoot.isWatched(modelData))
+                                 ? moduleRoot.watchedOpacity : 1.0
                         font.family: root.globalFont
                         font.capitalization: Font.AllUppercase
                         anchors.verticalCenter: parent.verticalCenter

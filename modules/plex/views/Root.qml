@@ -15,6 +15,27 @@ FocusScope {
     property string moduleName: _moduleInfo.name || ""
     property string moduleIcon: _moduleInfo.icon || ""
 
+    // Match ModuleSettings.qml's reading of a toggle: stored as a real bool
+    // once the user touches it, but accept the legacy "ON" string too.
+    readonly property bool showWatchedIndicators: {
+        var raw = appCore.get_setting(moduleId, "watched_indicators")
+        return raw === true || raw === "ON"
+    }
+
+    // Watched rows draw primaryColor at this opacity over the surface — an even
+    // primary/surface blend, so the dimming reads the same in every theme.
+    readonly property real watchedOpacity: 0.5
+
+    // Single definition of "watched" for every list in the module. Containers
+    // (shows, seasons) carry leafCount and are watched once every episode is;
+    // a show's own viewCount counts plays, not completion, so it isn't used.
+    // Leaves (movies, episodes) are watched once played through.
+    function isWatched(item) {
+        if (!showWatchedIndicators || !item) return false
+        if (item.leafCount > 0) return item.viewedLeafCount >= item.leafCount
+        return item.viewCount > 0
+    }
+
     // Internal navigation state
     property var navStack: []
     property var currentParams: ({})
