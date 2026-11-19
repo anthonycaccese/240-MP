@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Live TV module icon: a retro CRT set with antenna, white monochrome to
+     match the app's icon convention. Original artwork. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <g fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <!-- antenna -->
+    <line x1="256" y1="150" x2="176" y2="70"/>
+    <line x1="256" y1="150" x2="336" y2="70"/>
+    <!-- screen bezel -->
+    <rect x="60" y="160" width="300" height="240" rx="24"/>
+    <!-- speaker / controls panel -->
+    <rect x="380" y="160" width="72" height="240" rx="16"/>
+    <line x1="416" y1="210" x2="416" y2="210"/>
+    <line x1="416" y1="270" x2="416" y2="270"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="416" cy="215" r="12"/>
+    <circle cx="416" cy="265" r="12"/>
+    <!-- play triangle on the screen -->
+    <path d="M180 230 L180 330 L262 280 Z"/>
+  </g>
+</svg>
