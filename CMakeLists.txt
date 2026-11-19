@@ -62,6 +62,7 @@ add_executable(240mp
     src/modules/weather/WeatherBackend.cpp
     src/modules/scripts/ScriptsBackend.cpp
     src/modules/scripts/ScriptLauncher.cpp
+    src/modules/dlna/DlnaBackend.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
     src/util/MpvLocator.cpp

@@ -1,0 +1,60 @@
+{
+  "id": "com.240mp.dlna",
+  "name": "DLNA",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "audio_lang",
+      "label": "Audio Language",
+      "type": "list_single",
+      "options": [
+        "-",
+        "eng",
+        "spa",
+        "jpn",
+        "fra",
+        "deu",
+        "ita",
+        "por",
+        "rus",
+        "kor",
+        "zho"
+      ],
+      "default": "-",
+      "description": "Preferred audio track language, used when a file has several.\n[-] means no preference."
+    },
+    {
+      "key": "sub_lang",
+      "label": "Subtitle Language",
+      "type": "list_single",
+      "options": [
+        "-",
+        "eng",
+        "spa",
+        "jpn",
+        "fra",
+        "deu",
+        "ita",
+        "por",
+        "rus",
+        "kor",
+        "zho"
+      ],
+      "default": "-",
+      "description": "Preferred subtitle language. Choosing one also turns subtitles on.\n[-] means forced subtitles only."
+    },
+    {
+      "key": "clear_pins",
+      "label": "Remove All Pinned",
+      "type": "action",
+      "action_slot": "clearPins"
+    }
+  ]
+}
