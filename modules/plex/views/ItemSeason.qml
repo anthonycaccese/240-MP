@@ -364,6 +364,9 @@ FocusScope {
                         }
                         color: (episodeList.currentIndex === index && focusRow === 2)
                                ? root.surfaceColor : root.primaryColor
+                        // Watched rows fade toward the background; the focused row stays solid.
+                        opacity: (!(episodeList.currentIndex === index && focusRow === 2) && moduleRoot.isWatched(modelData))
+                                 ? moduleRoot.watchedOpacity : 1.0
                         font.family: root.globalFont
                         font.capitalization: Font.AllUppercase
                         anchors.verticalCenter: parent.verticalCenter
