@@ -15,6 +15,25 @@ FocusScope {
     property string videoId:  item.videoId || ""
     property var    playlistItems: navParams.playlistItems || []
     property int    playlistIndex: navParams.playlistIndex === undefined ? -1 : navParams.playlistIndex
+    // Rows the list prepends ahead of its items (PLAY ALL / SHUFFLE). playlistIndex
+    // indexes items; the BACK list state is a row index, so it needs the offset.
+    property int    backRowOffset: navParams.backRowOffset || 0
+
+    // Queue mode (PLAY ALL / SHUFFLE): entered with the list's already-loaded,
+    // already-filtered videos instead of a single item. The whole queue goes to
+    // mpv as one playlist so it advances on its own, and `item` is re-pointed at
+    // each entry as mpv moves through it, which keeps the history code below
+    // working unchanged.
+    property bool   queueMode: (navParams.queueItems || []).length > 0
+    property var    queue:     []
+    property int    queuePos:  0
+    // Queue index of mpv's playlist entry 0 for the current launch. A retry
+    // relaunches from queuePos, so mpv's playlist-pos is relative to this.
+    property int    queueBase: 0
+    // Set once mpv advances within a launch: MpvController's final position and
+    // duration are not reset per entry, so from then on they may describe the
+    // previous video and must not be banked against the current one.
+    property bool   finalsStale: false
 
     property bool   overlayVisible:   false
     property bool   playbackStarted:  false
@@ -33,7 +52,39 @@ FocusScope {
     function doPlay(startMs) {
         overlayVisible = false
         lastStartMs = startMs
-        mpvController.loadAndPlay(videoUrl, startMs / 1000.0, 0, -2, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs)
+        // The rest of the queue rides along as per-video URLs (extraUrls), from
+        // the current entry on — so a retry mid-queue resumes where it failed
+        // rather than replaying from the top. Deliberately NOT the playlist URL
+        // with --shuffle: mpv expands that through yt-dlp up front, which took
+        // over 3 minutes on the Pi. Per-video URLs are resolved lazily instead.
+        var rest = []
+        finalsStale = false
+        if (queueMode) {
+            queueBase = queuePos
+            rest = queue.slice(queuePos + 1).map(function(v) { return v.url })
+        }
+        mpvController.loadAndPlay(videoUrl, startMs / 1000.0, 0, -2, [], [], false, -1, 0.0, "", false, "", false, [], 0.0, false, ytdlArgs, "", rest)
+    }
+
+    function shuffled(list) {
+        var a = list.slice()
+        for (var i = a.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1))
+            var t = a[i]; a[i] = a[j]; a[j] = t
+        }
+        return a
+    }
+
+    // Record how far a video got. Watched to ~the end => kept in history at pos 0
+    // (listed under History, never prompts resume); past 5s => a resume point;
+    // anything shorter (a quick skip) leaves any earlier saved position alone.
+    function bankProgress(it, pos, dur) {
+        if (!it || !it.videoId)
+            return
+        if (dur > 0 && pos >= dur * 0.95)
+            youtubeBackend.savePosition(it.videoId, 0, it.title || "", it.channelName || "")
+        else if (pos > 5000)
+            youtubeBackend.savePosition(it.videoId, pos, it.title || "", it.channelName || "")
     }
 
     // Starting mpv runs synchronously and, on the Pi, immediately switches VT
@@ -60,7 +111,7 @@ FocusScope {
         lastKnownPositionMs = 0
         lastKnownDurationMs = 0
         savedPositionMs = 0
-        updateBackListState({ currentIndex: playlistIndex })
+        updateBackListState({ currentIndex: playlistIndex + backRowOffset })
         play(0)
         return true
     }
@@ -132,6 +183,27 @@ FocusScope {
             if (ms > 0) playerRoot.lastKnownDurationMs = ms
         }
 
+        // mpv moved to another queue entry — played through, or NEXT/PREV from
+        // the OSC. Its playlist is queue[queueBase..] in order. Bank the outgoing
+        // video by how far it actually got (a skip must not overwrite an earlier
+        // resume point) and re-point `item` before the counters reset.
+        // pos < 0 is mpv running off the end of its playlist; the last entry is
+        // banked by onPlaybackEnded instead.
+        function onPlaylistPosChanged(pos) {
+            if (!playerRoot.queueMode || pos < 0)
+                return
+            var idx = playerRoot.queueBase + pos
+            if (idx === playerRoot.queuePos || !playerRoot.queue[idx])
+                return
+            playerRoot.bankProgress(playerRoot.item, playerRoot.lastKnownPositionMs,
+                                    playerRoot.lastKnownDurationMs)
+            playerRoot.queuePos = idx
+            playerRoot.item = playerRoot.queue[idx]
+            playerRoot.lastKnownPositionMs = 0
+            playerRoot.lastKnownDurationMs = 0
+            playerRoot.finalsStale = true
+        }
+
         function onPlaybackEnded(finalPositionMs, finalDurationMs, reason) {
             // yt-dlp missing/outdated or an unplayable stream surfaces as mpv exit
             // code 2 before any position event — show the error instead of leaving.
@@ -139,14 +211,9 @@ FocusScope {
                 playerRoot.errorMessage = "PLAYBACK FAILED\n\nPLEASE CHECK THAT YT-DLP IS INSTALLED AND UP TO DATE"
                 return
             }
-            var pos = lastKnownPositionMs || finalPositionMs
-            var dur = lastKnownDurationMs || finalDurationMs
-            // Completed videos stay in history with pos 0: they list under
-            // History but never trigger the resume prompt.
-            if (dur > 0 && pos >= dur * 0.95)
-                youtubeBackend.savePosition(videoId, 0, item.title || "", item.channelName || "")
-            else if (pos > 5000)
-                youtubeBackend.savePosition(videoId, pos, item.title || "", item.channelName || "")
+            var pos = lastKnownPositionMs || (finalsStale ? 0 : finalPositionMs)
+            var dur = lastKnownDurationMs || (finalsStale ? 0 : finalDurationMs)
+            bankProgress(item, pos, dur)
             var nextItemEnabled = appCore.get_setting(moduleRoot.moduleId, "autoplay_playlist_items")
             if (reason === "eof" && (nextItemEnabled === true || nextItemEnabled === "ON")
                     && playerRoot.playNextPlaylistItem())
@@ -156,12 +223,22 @@ FocusScope {
     }
 
     Component.onCompleted: {
+        var resolution = appCore.get_setting(moduleRoot.moduleId, "playback_resolution") || "480p"
+        ytdlArgs = ["--ytdl=yes", "--ytdl-format=" + youtubeBackend.ytdlFormatForResolution(resolution)]
+
+        if (queueMode) {
+            queue    = navParams.shuffle ? shuffled(navParams.queueItems) : navParams.queueItems.slice()
+            queuePos = 0
+            item     = queue[0]
+            // A queue always starts fresh — a saved position belongs to one video,
+            // which says nothing about where a whole-playlist run should begin.
+            play(0)
+            return
+        }
         if (videoUrl === "") {
             goBack()
             return
         }
-        var resolution = appCore.get_setting(moduleRoot.moduleId, "playback_resolution") || "480p"
-        ytdlArgs = ["--ytdl=yes", "--ytdl-format=" + youtubeBackend.ytdlFormatForResolution(resolution)]
 
         var resumeSetting = appCore.get_setting(moduleRoot.moduleId, "resume_playback") || "Ask"
         var saved = youtubeBackend.getSavedPosition(videoId)

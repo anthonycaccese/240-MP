@@ -21,6 +21,29 @@ FocusScope {
     property string playlistName: navParams.playlistName || ""
 
     property var items: []
+
+    // PLAY ALL / SHUFFLE rows on a playlist, same pattern as Plex's Items.qml.
+    // They are prepended as virtual rows rather than mixed into `items`, so
+    // `items` stays exactly what the list loaded (Shorts already filtered — the
+    // Player plays the queue it is handed and never re-filters) and every index
+    // into it goes through actionRowCount. `rows` is what the ListView shows.
+    property var actionRows: actionRowCount(items) === 0 ? []
+        : [{ __action: "play_all", title: "» PLAY ALL" },
+           { __action: "shuffle",  title: "~ SHUFFLE"  }]
+    property var rows: actionRows.concat(items)
+
+    // Takes the list explicitly so the restore clamp can call it while `items`
+    // is mid-assignment, without depending on the actionRows binding.
+    function actionRowCount(list) {
+        return (mode === "playlist" && list.length > 1) ? 2 : 0
+    }
+
+    // The video under the cursor, or undefined on an action row.
+    function currentVideo() {
+        var i = itemList.currentIndex - actionRowCount(items)
+        return i >= 0 ? items[i] : undefined
+    }
+
     property bool isLoading: false
     property string errorMessage: ""
 
@@ -40,13 +63,15 @@ FocusScope {
     function restoreListIndex() {
         if (items.length === 0)
             return
+        // The saved index is a *row* index, so clamp against the action rows too.
+        var rowCount = items.length + actionRowCount(items)
         var restore = (navListState.currentIndex !== undefined) ? navListState.currentIndex : 0
-        itemList.currentIndex = Math.min(restore, items.length - 1)
+        itemList.currentIndex = Math.min(restore, rowCount - 1)
         itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
     }
 
     function openWatchLaterOverlay() {
-        var it = items[itemList.currentIndex]
+        var it = currentVideo()
         if (!it)
             return
         wlRemoveMode = (mode === "watchlater") || youtubeBackend.isInWatchLater(it.videoId)
@@ -56,7 +81,7 @@ FocusScope {
 
     function applyWatchLaterChoice() {
         if (wlChoiceIndex === 0) {
-            var it = items[itemList.currentIndex]
+            var it = currentVideo()
             if (it && wlRemoveMode) {
                 youtubeBackend.removeFromWatchLater(it.videoId)
                 if (mode === "watchlater") {
@@ -186,7 +211,7 @@ FocusScope {
     // List
     ListView {
         id: itemList
-        model: itemsRoot.items
+        model: itemsRoot.rows
         opacity: wlOverlayVisible ? 0.3 : 1
         anchors.top: parent.top
         anchors.left: parent.left
@@ -265,13 +290,23 @@ FocusScope {
                 applyWatchLaterChoice()
                 return
             }
-            var selected = itemsRoot.items[itemList.currentIndex]
-            if (!selected)
+            var row = itemsRoot.rows[itemList.currentIndex]
+            if (!row)
                 return
-            var playerParams = { item: selected }
+            // Virtual rows play the whole playlist as one mpv queue.
+            if (row.__action) {
+                navigateTo("Player.qml", {
+                    queueItems: itemsRoot.items,
+                    shuffle: row.__action === "shuffle"
+                }, { currentIndex: itemList.currentIndex })
+                return
+            }
+            var offset = itemsRoot.actionRowCount(itemsRoot.items)
+            var playerParams = { item: row }
             if (itemsRoot.mode === "playlist") {
                 playerParams.playlistItems = itemsRoot.items
-                playerParams.playlistIndex = itemList.currentIndex
+                playerParams.playlistIndex = itemList.currentIndex - offset
+                playerParams.backRowOffset = offset
             }
             navigateTo("Player.qml", playerParams, { currentIndex: itemList.currentIndex })
         }
