@@ -22,21 +22,25 @@ FocusScope {
     // server URL at all (connect_authenticate ignores it — the server is
     // resolved from the account). Asking for credentials before the method is
     // known meant the field could only be labelled for one of the two.
-    property int method: 0   // 0 = Direct to Server, 1 = Emby Connect
+    // PIN is Emby Connect without typing: the code is entered at emby.media/pin
+    // on another device, so it needs no fields at all.
+    property int method: 0   // 0 = Direct to Server, 1 = Emby Connect, 2 = PIN
 
-    // Focus order, which shifts because Connect drops the server URL row:
+    // Focus order, which shifts because Connect drops the server URL row and
+    // PIN drops every field:
     //   Direct : 0 method, 1 server URL, 2 username, 3 password, 4 Sign In
     //   Connect: 0 method,              1 email,     2 password, 3 Sign In
+    //   PIN    : 0 method,                                       1 Get PIN
     property int focusIndex: 0
     readonly property int idxMethod: 0
-    // -1 when Emby Connect is active: the server URL field is hidden but still
-    // exists, and if its index matched the email field's the hidden TextInput
-    // would win the focus binding and swallow every keystroke.
+    // -1 when a field is hidden: it still exists, and if its index matched a
+    // visible field's the hidden TextInput would win the focus binding and
+    // swallow every keystroke.
     readonly property int idxServer: method === 0 ? 1 : -1
-    readonly property int idxUser:   method === 0 ? 2 : 1
-    readonly property int idxPass:   method === 0 ? 3 : 2
-    readonly property int idxSubmit: method === 0 ? 4 : 3
-    readonly property int itemCount: method === 0 ? 5 : 4
+    readonly property int idxUser:   method === 0 ? 2 : (method === 1 ? 1 : -1)
+    readonly property int idxPass:   method === 0 ? 3 : (method === 1 ? 2 : -1)
+    readonly property int idxSubmit: method === 0 ? 4 : (method === 1 ? 3 : 1)
+    readonly property int itemCount: idxSubmit + 1
 
     // Switching method can strand focus past the end of the shorter Connect
     // sequence; a stale error from the other method is also no longer relevant.
@@ -99,13 +103,14 @@ FocusScope {
             event.accepted = true
             return
         }
-        // On the method row Left/Right pick between the two options (radio
-        // semantics — the pair sits side by side, so horizontal keys selecting
+        // On the method row Left/Right pick between the options (radio
+        // semantics — they sit side by side, so horizontal keys selecting
         // between them is what the layout implies). Everywhere else they step
         // like Tab, as on the rest of the form.
         if (focusIndex === idxMethod
             && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
-            authRoot.setMethod(event.key === Qt.Key_Right ? 1 : 0)
+            authRoot.setMethod(event.key === Qt.Key_Right ? Math.min(method + 1, 2)
+                                                          : Math.max(method - 1, 0))
             event.accepted = true
             return
         }
@@ -125,6 +130,7 @@ FocusScope {
             // Enter on the method row confirms the choice and moves into the
             // form rather than submitting an empty one.
             if (focusIndex === idxMethod) focusIndex = idxMethod + 1
+            else if (method === 2) authRoot.navigateTo("ConnectPin.qml", {}, {})
             else if (method === 1) authRoot.submitConnect()
             else authRoot.submit()
             event.accepted = true
@@ -245,7 +251,7 @@ FocusScope {
             readonly property bool selected: authRoot.method === value
             readonly property bool rowFocused: authRoot.focusIndex === authRoot.idxMethod
 
-            width: root.sw * 0.321875 //218
+            width: root.sw * 0.2229167 //142.67 — three across the Server URL width
             height: root.sh * 0.0583333 //28
             color: selected && rowFocused ? root.accentColor : root.surfaceColor
             border.color: selected ? root.accentColor : root.tertiaryColor
@@ -274,18 +280,13 @@ FocusScope {
                 Row {
                     spacing: root.sw * 0.025 //16
                     MethodOption { label: "Local Server"; value: 0 }
-                    Text {
-                        text: "OR"
-                        color: root.tertiaryColor
-                        font.family: root.globalFont
-                        font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.0291667 //14
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    MethodOption { label: "Emby Connect";   value: 1 }
+                    MethodOption { label: "Emby Connect"; value: 1 }
+                    MethodOption { label: "PIN";          value: 2 }
                 }
             }
             Column {
+                // PIN sign-in needs nothing typed here — see ConnectPin.qml.
+                visible: authRoot.method !== 2
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: root.sh * 0.033 //16
 
@@ -344,8 +345,9 @@ FocusScope {
                 text: waiting ? "CONNECTING..."
                     : (errorMsg !== "" ? errorMsg
                     : (focusIndex === idxMethod ? "CHOOSE HOW TO SIGN IN"
+                    : (method === 2 ? "ENTER A PIN AT EMBY.MEDIA/PIN"
                     : (method === 1 ? "EMBY CONNECT USES YOUR EMBY.MEDIA EMAIL"
-                    : "SIGN IN WITH YOUR SERVER ACCOUNT")))
+                    : "SIGN IN WITH YOUR SERVER ACCOUNT"))))
                 color: errorMsg !== "" && !waiting ? root.accentColor : root.tertiaryColor
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
@@ -369,7 +371,7 @@ FocusScope {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Sign In"
+                    text: authRoot.method === 2 ? "Get PIN" : "Sign In"
                     color: focusIndex === idxSubmit ? root.surfaceColor : root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase
@@ -379,9 +381,11 @@ FocusScope {
         }
     }
 
-    // Footer
+    // Footer. The action label tracks the submit button above it, which reads
+    // "Get PIN" under PIN sign-in — nothing is signed in from this screen then.
     Text {
-        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE " + root.hints.select + ":SIGN IN"
+        text: root.hints.back + ":BACK " + root.hints.navigate + ":NAVIGATE "
+            + root.hints.select + (authRoot.method === 2 ? ":GET PIN" : ":SIGN IN")
         color: root.tertiaryColor
         font.family: root.globalFont
         anchors.bottom: parent.bottom

@@ -31,6 +31,14 @@ public:
     Q_INVOKABLE void connect_authenticate(const QString &usernameOrEmail, const QString &password);
     Q_INVOKABLE void connect_select_server(const QString &serverUrl, const QString &accessKey);
 
+    // Emby Connect PIN sign-in — the TV-app flow: no typing on the device. A
+    // PIN is shown here, the user enters it at emby.media/pin while signed in
+    // to their Connect account, and the confirmed PIN is exchanged for the same
+    // Connect token step 1 above yields; the server list/exchange then follow.
+    Q_INVOKABLE void connect_pin_create();
+    Q_INVOKABLE void connect_pin_poll();
+    Q_INVOKABLE void connect_pin_cancel();
+
     // Browse
     Q_INVOKABLE void load_libraries();
     Q_INVOKABLE void load_items(const QString &parentId, const QString &includeTypes, const QString &sortBy);
@@ -102,6 +110,10 @@ signals:
     void connectServersReady(const QVariantList &servers);
     void connectFailed(const QString &message);
 
+    // Emby Connect PIN: a new PIN to display. Approval then surfaces as
+    // connectServersReady / authStateChanged, and expiry as connectFailed.
+    void connectPinReady(const QString &pin);
+
     // Emitted when server-side language preferences are loaded
     void serverLanguagePreferencesReady(const QString &audioLanguage, const QString &subtitleLanguage, const QString &subtitleMode);
 
@@ -126,6 +138,8 @@ private:
     QString m_serverName;
     QString m_connectUserId;      // Emby Connect account user id (cloud)
     QString m_connectAccessToken; // Emby Connect account token (cloud)
+    QString m_connectPin;         // PIN awaiting confirmation (empty when none)
+    bool m_connectPinPollInFlight = false;
     QString m_currentPlaySessionId;
     QString m_currentPlayMethod; // "DirectPlay" or "Transcode" — for /Sessions reporting
     // One-shot: set when re-requesting a Dolby Vision source as an SDR transcode
@@ -150,6 +164,8 @@ private:
 
     // Emby Connect helpers (step 2 of the flow, and post-exchange persistence).
     void fetchConnectServers();
+    void exchangeConnectPin(const QString &pin);
+    QNetworkRequest connectPinRequest(const QUrl &url) const;
     void persistConnectAuthAndFinish();
 
     QVariantMap formatItem(const QJsonObject &item) const;
