@@ -1,0 +1,748 @@
+import QtQuick
+import Components
+
+FocusScope {
+    id: browserRoot
+    property var navParams: ({})
+    // Declared, not assumed: reading an undeclared name throws a ReferenceError
+    // that kills the binding it sits in, which is how this view lost its header
+    // icon and would have taken any expression next to it down with it.
+    property string moduleId: navParams.moduleId || ""
+    readonly property string moduleIcon:
+        appCore ? (appCore.get_module_info(moduleId).icon || "") : ""
+    // Assigned directly by the app's router and nested in navParams by the
+    // module's; this view is reachable both ways, so it reads either.
+    property var navListState: navParams.navListState || ({})
+    // Where the viewer was before descending into a season list. The list
+    // arrives asynchronously, so it is put back when the items land rather
+    // than on completion, and only once.
+    property int restoreIndex: navListState.currentIndex !== undefined
+                               ? navListState.currentIndex : -1
+    property int    channelNumber: navParams.channelNumber !== undefined ? navParams.channelNumber : -1
+    property string kind:          navParams.kind      || "shows"
+    property string parentKey:     navParams.parentKey || ""
+    property string heading:       navParams.title     || "Choose"
+    // The series these seasons or episodes belong to, carried down so every level
+    // can answer the same question: does this channel draw from that series?
+    property string seriesLabel:   navParams.seriesLabel  || ""
+    property string seriesRef:     navParams.seriesRef    || ""
+    // The other seasons of that series, handed to the episode level because
+    // narrowing a series to one episode means switching the rest of them off and
+    // only the season list knows what they are.
+    property var    siblingSeasons: navParams.siblingSeasons || []
+    // Narrowing one block's series rather than the channel's pool. The block
+    // already names the show, so there is no pool row to add or take away:
+    // a tick here only says whether this block airs that season.
+    property int    planIndex:     navParams.planIndex  !== undefined ? navParams.planIndex  : -1
+    property int    blockIndex:    navParams.blockIndex !== undefined ? navParams.blockIndex : -1
+    readonly property bool blockMode: planIndex >= 0 && blockIndex >= 0
+    property string blockPick: ""
+    property var    blockOffSeasons:  []
+    property var    blockOffBySeason: ({})
+    property var    blockOffEpisodes: []
+
+    property int    bookingIndex:  navParams.bookingIndex !== undefined ? navParams.bookingIndex : -1
+    readonly property bool bookingMode: bookingIndex >= 0
+    readonly property string bookingField: kind === "moviegenres"      ? "genres"
+                                         : kind === "moviecollections" ? "collections"
+                                         : kind === "movieplaylists"   ? "playlists"
+                                                                       : "titles"
+
+    signal navigateTo(string path, var params, var listState)
+    signal goBack()
+
+    property var items: []
+    property bool loading: true
+    property string status: ""
+
+    property var cfg: ({})
+
+    readonly property bool isExclusionLevel: kind === "seasons" || kind === "episodes"
+    // A season only airs if the channel draws from the series it belongs to, so
+    // that is half of what its tick means. The other half is the exclusion list.
+    readonly property string seriesName: seriesLabel !== "" ? seriesLabel
+                                        : (kind === "seasons" ? heading : "")
+    // A block draws on the one thing it names, so that is what its tick means
+    // and what "is this series on" asks about below it.
+    readonly property bool seriesSelected: blockMode
+        ? (seriesName !== "" && seriesName === blockPick)
+        : (seriesName !== "" && (cfg.match || []).indexOf(seriesName) >= 0)
+    readonly property string listField: kind === "collections"  ? "collections"
+                                      : kind === "playlists"    ? "playlists"
+                                      : kind === "movies"       ? "films"
+                                      : kind === "moviegenres"  ? "genres"
+                                      : "match"
+    readonly property bool canDescend: kind === "shows" || kind === "seasons"
+
+    focus: true
+
+    property var bookingTitles: []
+
+    function reloadBlockExclusions() {
+        if (!blockMode) return
+        var plans = virtualChannelsBackend.channel_plans(channelNumber)
+        var blocks = planIndex < plans.length ? (plans[planIndex].blocks || []) : []
+        var blk = blockIndex < blocks.length ? blocks[blockIndex] : null
+        blockPick = blk ? String(blk.name || "") : ""
+        var excl = (blk && blk.exclude) ? blk.exclude : ({})
+        blockOffSeasons  = excl.seasons  || []
+        blockOffBySeason = excl.episodes || ({})
+        // Kept under the season each belongs to; flattened here because a tick
+        // only asks whether this episode airs, not which season it sits in.
+        var flat = []
+        var bySeason = excl.episodes || ({})
+        for (var k in bySeason) flat = flat.concat(bySeason[k] || [])
+        blockOffEpisodes = flat
+    }
+
+    function reload() {
+        cfg = virtualChannelsBackend.channel_source_config(channelNumber)
+        reloadBlockExclusions()
+        if (bookingMode)
+            bookingTitles = virtualChannelsBackend.booking_list(channelNumber, bookingIndex,
+                                                                bookingField)
+        loading = true
+        items = []
+        status = "Loading…"
+        virtualChannelsBackend.browse_source(channelNumber, kind, parentKey)
+    }
+
+    // What is switched off here -- the channel's pool row, or one block of a
+    // day. The question is the same; only the pocket differs.
+    readonly property var offSeasons:  blockMode ? blockOffSeasons
+                                                 : (cfg.excludedSeasons || [])
+    readonly property var offEpisodes: blockMode ? blockOffEpisodes
+                                                 : (cfg.excludedEpisodes || [])
+
+    function isOn(item) {
+        if (bookingMode) return bookingTitles.indexOf(item.label) >= 0
+        if (isExclusionLevel) {
+            if (!seriesSelected) return false
+            // An episode of a season that is off is off with it, whatever the
+            // episode's own list says.
+            if (kind === "episodes" && offSeasons.indexOf(parentKey) >= 0) return false
+            return (kind === "seasons" ? offSeasons : offEpisodes).indexOf(item.id) < 0
+        }
+        if (blockMode) return item.label === blockPick
+        var list = cfg[listField] || []
+        return list.indexOf(item.label) >= 0
+    }
+
+    // On, but with some of what is under it switched off. A season keeps its
+    // own excluded episodes under its key, so it is the one level that can say
+    // so without walking the library again.
+    // A thing that is on with some of what is under it switched off. A season
+    // knows its own episodes; a series at the top of the list is partial when
+    // anything inside it has been left out.
+    function isPartial(item) {
+        if (!isOn(item)) return false
+        if (kind === "shows")
+            return blockMode ? (offSeasons.length > 0 || offEpisodes.length > 0)
+                             : ((cfg.excludedSeasons || []).length > 0
+                                || (cfg.excludedEpisodes || []).length > 0)
+        if (kind !== "seasons") return false
+        var by = blockMode ? blockOffBySeason : (cfg.excludedBySeason || ({}))
+        var refs = by[item.id]
+        return refs !== undefined && refs !== null && refs.length > 0
+    }
+
+    // The count for the row under the cursor, so a half-filled box says how
+    // many rather than only that some are off.
+    function partialHint() {
+        var item = items[itemList.currentIndex]
+        if (item === undefined || !isPartial(item)) return ""
+        var total = item.count
+        if (total === undefined || total === null || total <= 0) return "SOME EPISODES ARE SWITCHED OFF"
+        return (total - partialCount(item)) + " OF " + total + " EPISODES AIR"
+    }
+
+    function partialCount(item) {
+        var by = blockMode ? blockOffBySeason : (cfg.excludedBySeason || ({}))
+        var refs = by[item.id]
+        return (refs === undefined || refs === null) ? 0 : refs.length
+    }
+
+    function toggle(item) {
+        if (channelNumber < 0) return
+
+        if (bookingMode) {
+            var picked = bookingTitles.slice()
+            var where = picked.indexOf(item.label)
+            if (where >= 0) picked.splice(where, 1)
+            else            picked.push(item.label)
+            if (!virtualChannelsBackend.set_booking_list(channelNumber, bookingIndex,
+                                                        bookingField, picked)) {
+                status = "Could not save"
+                return
+            }
+            bookingTitles = virtualChannelsBackend.booking_list(channelNumber, bookingIndex,
+                                                               bookingField)
+            status = ""
+            return
+        }
+
+        if (blockMode) {
+            if (!toggleBlockExclusion(item)) {
+                status = "Could not save"
+                return
+            }
+            reloadBlockExclusions()
+            status = ""
+            return
+        }
+
+        if (kind === "seasons") {
+            if (!toggleSeason(item)) return
+        } else if (kind === "episodes") {
+            if (!toggleEpisode(item)) return
+        } else if (isExclusionLevel) {
+            var nowOn = isOn(item)
+            if (!virtualChannelsBackend.set_channel_excluded(
+                    channelNumber, kind, item.id, /*excluded*/ nowOn)) {
+                status = "Could not save"
+                return
+            }
+        } else {
+            var list = (cfg[listField] || []).slice()
+            var at = list.indexOf(item.label)
+            if (at >= 0) list.splice(at, 1)
+            else         list.push(item.label)
+            if (!virtualChannelsBackend.set_channel_list(channelNumber, listField, list,
+                                                         refsFor(list, item))) {
+                status = "Could not save"
+                return
+            }
+        }
+        cfg = virtualChannelsBackend.channel_source_config(channelNumber)
+        status = ""
+    }
+
+    // The id of every name being saved, so far as this screen knows them: the
+    // show under the cursor, plus anything else on the listing. A name we have
+    // no id for is sent blank and keeps whatever id is already stored.
+    function refsFor(list, picked) {
+        var refs = []
+        for (var i = 0; i < list.length; ++i) {
+            var ref = ""
+            if (picked && list[i] === picked.label) ref = String(picked.id || "")
+            else {
+                for (var j = 0; j < items.length; ++j)
+                    if (items[j].label === list[i]) { ref = String(items[j].id || ""); break }
+            }
+            refs.push(ref)
+        }
+        return refs
+    }
+
+    // A tick anywhere means the same thing -- this airs -- so a tick low down
+    // carries upward until that is true. Ticking a show puts the whole show on;
+    // ticking a season puts that season on and the show with it; ticking one
+    // episode, when nothing above it is on, puts that episode on and narrows the
+    // show to it. Turning off the last thing airing at a level turns that level
+    // off too, rather than leaving a show in the list with nothing to play.
+    function selectSeries(list) {
+        if (list.indexOf(seriesName) < 0) list.push(seriesName)
+        if (virtualChannelsBackend.set_channel_list(channelNumber, "match", list,
+                                                    refsFor(list, null))) return true
+        status = "Could not save"
+        return false
+    }
+
+    function dropSeries(list) {
+        var at = list.indexOf(seriesName)
+        if (at >= 0) list.splice(at, 1)
+        virtualChannelsBackend.set_channel_list(channelNumber, "match", list,
+                                                refsFor(list, null))
+    }
+
+    function toggleSeason(item) {
+        var wasAiring = isOn(item)
+        var seriesList = (cfg.match || []).slice()
+
+        if (!wasAiring) {
+            // Starting from nothing narrows the series to this season. If the
+            // series is already on, the other seasons are somebody's choice and
+            // stay as they are.
+            var narrowing = !seriesSelected
+            if (narrowing && !selectSeries(seriesList)) return false
+            if (narrowing) {
+                for (var i = 0; i < items.length; i++)
+                    virtualChannelsBackend.set_channel_excluded(
+                        channelNumber, "seasons", items[i].id, items[i].id !== item.id)
+            } else {
+                virtualChannelsBackend.set_channel_excluded(
+                    channelNumber, "seasons", item.id, false)
+            }
+            // every episode of it airs again, whatever was picked out before
+            virtualChannelsBackend.clear_episode_exclusions(channelNumber, item.id)
+            return true
+        }
+
+        if (!virtualChannelsBackend.set_channel_excluded(
+                channelNumber, "seasons", item.id, /*excluded*/ true)) {
+            status = "Could not save"
+            return false
+        }
+        virtualChannelsBackend.clear_episode_exclusions(channelNumber, item.id)
+
+        var excl = (virtualChannelsBackend.channel_source_config(channelNumber).excludedSeasons
+                      || [])
+        for (var j = 0; j < items.length; j++)
+            if (excl.indexOf(items[j].id) < 0) return true      // something still airs
+
+        dropSeries(seriesList)
+        for (var k = 0; k < items.length; k++)
+            virtualChannelsBackend.set_channel_excluded(channelNumber, "seasons", items[k].id, false)
+        return true
+    }
+
+    // The same moves a pool row makes, with the block standing in for the pool:
+    // choosing the series is set_block_source rather than adding it to a list,
+    // and everything below that is the same shape.
+    //
+    // The point of it is that you can start anywhere. Ticking one episode of a
+    // series the block has never named picks the series, switches off its other
+    // seasons and the rest of this one, and leaves the block airing that
+    // episode -- which is what the season and the series then read as: on, with
+    // something inside them off.
+    function toggleBlockExclusion(item) {
+        const set = function (kindName, id, excluded, under) {
+            return virtualChannelsBackend.set_block_excluded(
+                       channelNumber, planIndex, blockIndex, kindName, id, excluded, under || "")
+        }
+        const clearEpisodes = function (seasonKey) {
+            return virtualChannelsBackend.clear_block_episode_exclusions(
+                       channelNumber, planIndex, blockIndex, seasonKey)
+        }
+        const pickSeries = function () {
+            return virtualChannelsBackend.set_block_source(
+                       channelNumber, planIndex, blockIndex, seriesName, seriesRef)
+        }
+        const dropSeries = function () {
+            return virtualChannelsBackend.set_block_source(
+                       channelNumber, planIndex, blockIndex, "", "")
+        }
+
+        var wasAiring = isOn(item)
+
+        // A block holds one thing, so this replaces whatever it held.
+        if (!isExclusionLevel) {
+            return virtualChannelsBackend.set_block_source(
+                       channelNumber, planIndex, blockIndex,
+                       wasAiring ? "" : item.label,
+                       wasAiring ? "" : String(item.id || ""))
+        }
+
+        var narrowing = !seriesSelected
+
+        if (kind === "seasons") {
+            if (!wasAiring) {
+                // From nothing, this narrows the series to this season. If the
+                // series is already the block's, the other seasons are somebody's
+                // choice and stay as they are.
+                if (narrowing) {
+                    if (!pickSeries()) return false
+                    for (var i = 0; i < items.length; i++)
+                        set("seasons", items[i].id, items[i].id !== item.id)
+                } else {
+                    set("seasons", item.id, false)
+                }
+                clearEpisodes(item.id)
+                return true
+            }
+
+            if (!set("seasons", item.id, true)) return false
+            clearEpisodes(item.id)
+            reloadBlockExclusions()
+            for (var j = 0; j < items.length; j++)
+                if (blockOffSeasons.indexOf(items[j].id) < 0) return true
+
+            // The last season went off, so the block is playing nothing.
+            dropSeries()
+            return true
+        }
+
+        // Episodes.
+        var seasonOff = offSeasons.indexOf(parentKey) >= 0
+
+        if (!wasAiring) {
+            // Off only because it was picked out of a season that is otherwise
+            // airing: put it back and leave everything else alone.
+            if (!narrowing && !seasonOff) return set("episodes", item.id, false, parentKey)
+
+            // Otherwise nothing above it is on. From nothing this narrows the
+            // series to this episode; where only the season was off, that season
+            // comes back narrowed to it and the rest of the series is left alone.
+            if (narrowing) {
+                if (!pickSeries()) return false
+                for (var k = 0; k < siblingSeasons.length; k++)
+                    set("seasons", siblingSeasons[k], siblingSeasons[k] !== parentKey)
+            } else {
+                set("seasons", parentKey, false)
+            }
+            clearEpisodes(parentKey)
+            for (var m = 0; m < items.length; m++)
+                if (items[m].id !== item.id) set("episodes", items[m].id, true, parentKey)
+            return true
+        }
+
+        if (!set("episodes", item.id, true, parentKey)) return false
+        reloadBlockExclusions()
+        for (var n = 0; n < items.length; n++)
+            if (blockOffEpisodes.indexOf(items[n].id) < 0) return true
+
+        // The last episode of the season went off, so the season did too.
+        clearEpisodes(parentKey)
+        set("seasons", parentKey, true)
+        reloadBlockExclusions()
+        for (var q = 0; q < siblingSeasons.length; q++)
+            if (blockOffSeasons.indexOf(siblingSeasons[q]) < 0) return true
+        dropSeries()
+        return true
+    }
+
+    function toggleEpisode(item) {
+        var wasAiring = isOn(item)
+        var seriesList = (cfg.match || []).slice()
+        var seasonOff = offSeasons.indexOf(parentKey) >= 0
+
+        if (!wasAiring) {
+            // Off only because it was picked out of a season that is otherwise
+            // airing: put it back and leave everything else alone.
+            if (seriesSelected && !seasonOff)
+                return virtualChannelsBackend.set_channel_excluded(
+                           channelNumber, "episodes", item.id, false, parentKey)
+
+            // Otherwise nothing above it is on. Starting from nothing narrows the
+            // series to this episode; if the series is already on and only this
+            // season was off, that season comes back on narrowed to it and the
+            // rest of the series is left alone.
+            var narrowing = !seriesSelected
+            if (narrowing && !selectSeries(seriesList)) return false
+            if (narrowing) {
+                for (var i = 0; i < siblingSeasons.length; i++)
+                    virtualChannelsBackend.set_channel_excluded(
+                        channelNumber, "seasons", siblingSeasons[i],
+                        siblingSeasons[i] !== parentKey)
+            } else {
+                virtualChannelsBackend.set_channel_excluded(
+                    channelNumber, "seasons", parentKey, false)
+            }
+            virtualChannelsBackend.clear_episode_exclusions(channelNumber, parentKey)
+            for (var j = 0; j < items.length; j++)
+                if (items[j].id !== item.id)
+                    virtualChannelsBackend.set_channel_excluded(
+                        channelNumber, "episodes", items[j].id, true, parentKey)
+            return true
+        }
+
+        if (!virtualChannelsBackend.set_channel_excluded(
+                channelNumber, "episodes", item.id, true, parentKey)) {
+            status = "Could not save"
+            return false
+        }
+
+        var epExcl = (virtualChannelsBackend.channel_source_config(channelNumber).excludedEpisodes
+                        || [])
+        for (var k = 0; k < items.length; k++)
+            if (epExcl.indexOf(items[k].id) < 0) return true    // something still airs
+
+        // The last episode of the season went off, so the season did too.
+        virtualChannelsBackend.clear_episode_exclusions(channelNumber, parentKey)
+        virtualChannelsBackend.set_channel_excluded(channelNumber, "seasons", parentKey, true)
+
+        var seasonExcl = (virtualChannelsBackend.channel_source_config(channelNumber)
+                            .excludedSeasons || [])
+        for (var m = 0; m < siblingSeasons.length; m++)
+            if (seasonExcl.indexOf(siblingSeasons[m]) < 0) return true
+
+        dropSeries(seriesList)
+        for (var n = 0; n < siblingSeasons.length; n++)
+            virtualChannelsBackend.set_channel_excluded(channelNumber, "seasons",
+                                                        siblingSeasons[n], false)
+        return true
+    }
+
+    function initialOf(label) {
+        var t = (label || "").toUpperCase()
+        t = t.replace(/^(THE |A |AN )/, "")
+        return t.charAt(0)
+    }
+
+    function jumpPage(direction) {
+        if (items.length === 0) return
+        var next = itemList.currentIndex + direction * 10
+        itemList.currentIndex = Math.max(0, Math.min(items.length - 1, next))
+    }
+
+    // Pressing a letter again moves to the next title under it, and round to
+    // the first again at the end. A library with thirty shows under one letter
+    // is otherwise only reachable by arrowing through all of them, which is the
+    // work the jump exists to save.
+    function jumpTo(letter) {
+        if (items.length === 0) return false
+        var at = itemList.currentIndex
+        var from = (at >= 0 && at < items.length
+                    && initialOf(items[at].label) === letter) ? at + 1 : 0
+        for (var n = 0; n < items.length; n++) {
+            var i = (from + n) % items.length
+            if (initialOf(items[i].label) === letter) {
+                itemList.currentIndex = i
+                return true
+            }
+        }
+        return false
+    }
+
+    function jumpLetter(direction) {
+        if (items.length === 0) return
+        var i = itemList.currentIndex
+        var here = initialOf(items[i].label)
+
+        if (direction > 0) {
+            while (i < items.length - 1) {
+                i++
+                if (initialOf(items[i].label) !== here) break
+            }
+        } else {
+            while (i > 0 && initialOf(items[i - 1].label) === here) i--
+            if (i > 0) {
+                i--
+                var prev = initialOf(items[i].label)
+                while (i > 0 && initialOf(items[i - 1].label) === prev) i--
+            }
+        }
+        itemList.currentIndex = i
+    }
+
+    function descend(item) {
+        if (!canDescend) return
+        navigateTo("modules/virtual_channels/views/SourceBrowser.qml", {
+            moduleId:      browserRoot.moduleId,
+            channelNumber: browserRoot.channelNumber,
+            kind: browserRoot.kind === "shows" ? "seasons" : "episodes",
+            parentKey: item.id,
+            title: item.label,
+            seriesLabel: browserRoot.kind === "shows" ? item.label : browserRoot.seriesName,
+            seriesRef:   browserRoot.kind === "shows" ? String(item.id || "")
+                                                     : browserRoot.seriesRef,
+            // Only the season list holds seasons; from the show list these are
+            // shows, and passing them as seasons is how 246 of them once ended
+            // up in a channel's excluded-seasons list.
+            siblingSeasons: browserRoot.kind === "seasons"
+                            ? browserRoot.items.map(function (s) { return s.id })
+                            : [],
+            // Without this the level below reads the channel's exclusions
+            // instead of the block's, and writes to the wrong one.
+            planIndex:  browserRoot.planIndex,
+            blockIndex: browserRoot.blockIndex
+        }, { currentIndex: itemList.currentIndex })
+    }
+
+    Component.onCompleted: reload()
+
+    Connections {
+        target: virtualChannelsBackend
+        function onSourceBrowseReady(kind, list) {
+            if (kind !== browserRoot.kind) return
+            browserRoot.loading = false
+            browserRoot.items = list || []
+            browserRoot.status = browserRoot.items.length === 0 ? "Nothing here" : ""
+            if (browserRoot.restoreIndex >= 0 && browserRoot.items.length > 0) {
+                itemList.currentIndex = Math.min(browserRoot.restoreIndex,
+                                                 browserRoot.items.length - 1)
+                itemList.positionViewAtIndex(itemList.currentIndex, ListView.Contain)
+                browserRoot.restoreIndex = -1
+            }
+        }
+        function onSourceBrowseFailed(kind, reason) {
+            if (kind !== browserRoot.kind) return
+            browserRoot.loading = false
+            browserRoot.status = reason
+        }
+    }
+
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
+            goBack()
+            event.accepted = true
+            return
+        }
+        if (loading || items.length === 0) { event.accepted = true; return }
+
+        if (event.key === Qt.Key_Up) {
+            itemList.currentIndex = (itemList.currentIndex - 1 + items.length) % items.length
+        } else if (event.key === Qt.Key_Down) {
+            itemList.currentIndex = (itemList.currentIndex + 1) % items.length
+        } else if (event.key === Qt.Key_PageUp || event.key === Qt.Key_ChannelUp) {
+            jumpPage(-1)
+        } else if (event.key === Qt.Key_PageDown || event.key === Qt.Key_ChannelDown) {
+            jumpPage(1)
+        } else if (event.key === Qt.Key_Left) {
+            if (!canDescend) jumpLetter(-1)
+        } else if (event.key === Qt.Key_Right) {
+            if (canDescend) descend(items[itemList.currentIndex])
+            else            jumpLetter(1)
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            toggle(items[itemList.currentIndex])
+        } else if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
+                   || (event.key >= Qt.Key_0 && event.key <= Qt.Key_9)) {
+            var letter = String.fromCharCode(event.key)
+            status = jumpTo(letter) ? "" : "Nothing under " + letter
+        }
+        event.accepted = true
+    }
+
+    Rectangle { anchors.fill: parent; color: root.surfaceColor }
+
+    AppBar {
+        id: appBar
+        iconSource: browserRoot.moduleIcon
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.topMargin: root.sh * 0.075
+        anchors.leftMargin: root.sw * 0.125
+        // Three levels in, "Season 1" on its own does not say whose. The show
+        // is already carried down here for the tick logic, so the title can say
+        // it too.
+        title: (browserRoot.kind === "episodes" && browserRoot.seriesName !== "")
+               ? browserRoot.seriesName + " — " + browserRoot.heading
+               : browserRoot.heading
+    }
+
+    Text {
+        anchors.centerIn: parent
+        visible: browserRoot.loading || browserRoot.items.length === 0
+        text: browserRoot.loading ? "Loading…" : browserRoot.status
+        color: root.tertiaryColor
+        font.family: root.globalFont
+        font.capitalization: Font.AllUppercase
+        font.pixelSize: root.sh * 0.0333333
+    }
+
+    ListView {
+        id: itemList
+        visible: !browserRoot.loading && browserRoot.items.length > 0
+        anchors.top: appBar.bottom
+        anchors.topMargin: root.sh * 0.025
+        anchors.bottom: hint.top
+        anchors.bottomMargin: root.sh * 0.02
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: root.sw * 0.75
+        clip: true
+        model: browserRoot.items
+        currentIndex: 0
+        highlightMoveDuration: 0
+        interactive: false
+
+        delegate: Item {
+            width: itemList.width
+            height: root.sh * 0.065
+
+            required property int index
+            required property var modelData
+            readonly property bool selected: index === itemList.currentIndex
+            readonly property bool on: browserRoot.isOn(modelData)
+            readonly property bool partial: browserRoot.isPartial(modelData)
+
+            Rectangle {
+                anchors.fill: parent
+                color: parent.selected ? root.accentColor : "transparent"
+            }
+
+            Rectangle {
+                id: box
+                // Whole, even pixels: at this size the nominal 0.030 lands on
+                // 14.4, and a box with fractional edges cannot hold a centred
+                // square -- the halves round apart and it sits a pixel high.
+                readonly property int side: 2 * Math.max(4, Math.round(root.sh * 0.015))
+                width: side
+                height: side
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: root.sw * 0.0125
+                color: (parent.on && !parent.partial)
+                       ? (parent.selected ? root.surfaceColor : root.primaryColor)
+                       : "transparent"
+                border.color: parent.selected ? root.surfaceColor : root.tertiaryColor
+                border.width: 2
+
+                Rectangle {
+                    visible: parent.parent.partial
+                    anchors.centerIn: parent
+                    width: 2 * Math.round(box.side * 0.45 / 2)
+                    height: width
+                    color: parent.parent.selected ? root.surfaceColor : root.primaryColor
+                }
+            }
+
+            Text {
+                text: modelData.label
+                color: parent.selected ? root.surfaceColor
+                                       : (parent.on ? root.primaryColor : root.tertiaryColor)
+                font.family: root.globalFont
+                font.capitalization: Font.AllUppercase
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: box.right
+                anchors.leftMargin: root.sw * 0.0187
+                anchors.right: subText.left
+                anchors.rightMargin: root.sw * 0.0125
+                elide: Text.ElideRight
+                font.pixelSize: root.sh * 0.0354
+            }
+
+            Text {
+                id: subText
+                text: modelData.sub || (browserRoot.canDescend ? "►" : "")
+                color: parent.selected ? root.surfaceColor : root.tertiaryColor
+                font.family: root.globalFont
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: root.sw * 0.0125
+                font.pixelSize: root.sh * 0.0292
+            }
+        }
+    }
+
+    Text {
+        id: hint
+        anchors.bottom: footer.top
+        anchors.bottomMargin: root.sh * 0.0208
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: root.sw * 0.75
+        horizontalAlignment: Text.AlignHCenter
+        text: browserRoot.bookingMode
+              ? (browserRoot.bookingTitles.length === 0
+                 ? "NOTHING TICKED HERE"
+                 : "TICKED CAN AIR IN THIS SLOT")
+              : browserRoot.partialHint() !== ""
+                ? browserRoot.partialHint()
+                : browserRoot.blockMode
+                  ? (browserRoot.isExclusionLevel
+                     ? "TICKED MEANS IT AIRS IN THIS BLOCK"
+                     : "TICKED IS WHAT THIS BLOCK PLAYS — ONE AT A TIME")
+                  : browserRoot.isExclusionLevel
+                      ? "TICKED MEANS IT AIRS ON THIS CHANNEL"
+                      : "TICKED MEANS THIS CHANNEL DRAWS FROM IT"
+        color: root.tertiaryColor
+        font.family: root.globalFont
+        font.pixelSize: root.sh * 0.0271
+    }
+
+    Text {
+        id: footer
+        text: root.hints.back + ":BACK " + root.hints.navigate + ":MOVE "
+              // A-Z jumping works on every list, and the show list is the one
+              // that can run to hundreds of rows, so it says so here too.
+              + (browserRoot.canDescend ? root.hints.change + ":OPEN  A-Z:JUMP "
+                                        : root.hints.change + ":LETTER  A-Z:JUMP ")
+              + root.hints.select + ":TOGGLE"
+        color: root.tertiaryColor
+        font.family: root.globalFont
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.bottomMargin: root.sh * 0.0833
+        anchors.leftMargin: root.sw * 0.125
+        font.pixelSize: root.sh * 0.0292
+    }
+}

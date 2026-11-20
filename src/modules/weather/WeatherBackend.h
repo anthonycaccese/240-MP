@@ -85,6 +85,11 @@ public:
     // the toggle. Session-only: it deliberately does not write the setting.
     Q_INVOKABLE void toggleMusic();
 
+    //
+    Q_INVOKABLE int  music_volume() const { return m_musicVolume; }
+    Q_INVOKABLE void set_music_volume(int percent);
+    Q_INVOKABLE void duck_music(bool ducked, int ms = 400);
+
     // options_slot for the "displays" multiselect. Ids match Weather.qml's
     // allScreens list.
     Q_INVOKABLE void getDisplays();
@@ -210,6 +215,14 @@ private:
     QTimer       *m_musicConnect = nullptr;
     QString       m_musicSocketPath;
     bool          m_musicPaused = false;
+    int           m_musicVolume  = 100;
+    double        m_musicApplied = 100.0;
+    bool          m_musicDucked  = false;
+    double        m_musicFadeTo  = 100.0;
+    double        m_musicFadeStep = 0.0;
+    QTimer       *m_musicFade    = nullptr;
+    void          applyMusicVolume();
+    void          startMusicFade(double target, int ms);
 
     QVariantMap  m_current;
     QVariantList m_forecast;

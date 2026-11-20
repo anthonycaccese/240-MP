@@ -1,4 +1,6 @@
 #include "DisplayHandoff.h"
+
+#include <cstring>
 #include <QDir>
 #include <QFile>
 #include <QTimer>
@@ -6,6 +8,7 @@
 
 #ifdef Q_OS_LINUX
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -36,6 +39,7 @@ DisplayHandoff::DisplayHandoff(QObject *parent)
 }
 
 DisplayHandoff::~DisplayHandoff() {
+    //
     // Restore unconditionally: leaving a Pi on a blank free VT with DRM master
     // dropped means a black screen and a text console the user never asked for.
     if (!m_owner.isEmpty()) {
@@ -176,6 +180,8 @@ void DisplayHandoff::doRestore() {
     m_previousVt = -1;
     m_switchedVt = false;
     m_owner.clear();
+
+    emit displayReturned();
 }
 
 int DisplayHandoff::getActiveVt() const {
@@ -353,21 +359,84 @@ void DisplayHandoff::saveDrmCrtcState(int fd) {
         qWarning("[DisplayHandoff] Could not save CRTC state");
 }
 
+bool DisplayHandoff::ensureBlankFb(int fd, uint32_t width, uint32_t height) {
+    if (fd < 0 || width == 0 || height == 0) return false;
+
+    if (m_blankFbId) {
+        if (m_blankWidth == width && m_blankHeight == height) return true;
+        drmModeRmFB(fd, m_blankFbId);
+        drmModeDestroyDumbBuffer(fd, m_blankHandle);
+        m_blankFbId = m_blankHandle = 0;
+        m_blankWidth = m_blankHeight = 0;
+    }
+
+    uint32_t handle = 0, pitch = 0;
+    uint64_t size = 0;
+    if (drmModeCreateDumbBuffer(fd, width, height, 32, 0, &handle, &pitch, &size) != 0) {
+        qWarning("[DisplayHandoff] could not allocate a blank framebuffer: %s", strerror(errno));
+        return false;
+    }
+
+    uint64_t offset = 0;
+    if (drmModeMapDumbBuffer(fd, handle, &offset) != 0) {
+        qWarning("[DisplayHandoff] could not map the blank framebuffer: %s", strerror(errno));
+        drmModeDestroyDumbBuffer(fd, handle);
+        return false;
+    }
+    void *map = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+                     static_cast<off_t>(offset));
+    if (map == MAP_FAILED) {
+        qWarning("[DisplayHandoff] could not mmap the blank framebuffer: %s", strerror(errno));
+        drmModeDestroyDumbBuffer(fd, handle);
+        return false;
+    }
+    std::memset(map, 0, static_cast<size_t>(size));
+    munmap(map, static_cast<size_t>(size));
+
+    uint32_t fbId = 0;
+    if (drmModeAddFB(fd, width, height, 24, 32, pitch, handle, &fbId) != 0) {
+        qWarning("[DisplayHandoff] could not register the blank framebuffer: %s", strerror(errno));
+        drmModeDestroyDumbBuffer(fd, handle);
+        return false;
+    }
+
+    m_blankFbId   = fbId;
+    m_blankHandle = handle;
+    m_blankWidth  = width;
+    m_blankHeight = height;
+    qDebug("[DisplayHandoff] blank framebuffer ready (%ux%u, fb %u)", width, height, fbId);
+    return true;
+}
+
 void DisplayHandoff::restoreDrmCrtcState(int fd) {
     if (!m_savedDrm.valid) return;
 
+    //
+    const bool haveBlank = ensureBlankFb(fd, m_savedDrm.mode.hdisplay,
+                                             m_savedDrm.mode.vdisplay);
+    const uint32_t fbId = haveBlank ? m_blankFbId : m_savedDrm.fbId;
+
     int ret = drmModeSetCrtc(fd,
                               m_savedDrm.crtcId,
-                              m_savedDrm.fbId,
+                              fbId,
                               m_savedDrm.x, m_savedDrm.y,
                               &m_savedDrm.connectorId, 1,
                               &m_savedDrm.mode);
-    if (ret < 0)
+    if (ret < 0) {
         qWarning("[DisplayHandoff] drmModeSetCrtc restore failed: %s", strerror(errno));
-    else
-        qDebug("[DisplayHandoff] CRTC restored (mode %dx%d@%d)",
+        if (haveBlank) {
+            ret = drmModeSetCrtc(fd, m_savedDrm.crtcId, m_savedDrm.fbId,
+                                 m_savedDrm.x, m_savedDrm.y,
+                                 &m_savedDrm.connectorId, 1, &m_savedDrm.mode);
+            if (ret == 0)
+                qDebug("[DisplayHandoff] CRTC restored with Qt's framebuffer instead");
+        }
+    } else {
+        qDebug("[DisplayHandoff] CRTC restored %s (mode %dx%d@%d)",
+               haveBlank ? "blank" : "with Qt's framebuffer",
                m_savedDrm.mode.hdisplay, m_savedDrm.mode.vdisplay,
                m_savedDrm.mode.vrefresh);
+    }
 
     m_savedDrm.valid = false;
 }
